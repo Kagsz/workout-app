@@ -108,10 +108,6 @@ type ChartPoint = GraphPoint & {
   xLabel: string;
 };
 
-const formatFullDateLabel = (value: string) => {
-  const time = getSafeDateTime(value);
-  if (!time) return value;
-
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
