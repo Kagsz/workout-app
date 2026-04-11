@@ -202,7 +202,7 @@ const createBlock = (type: BlockType): Block => ({
 
 const createRoutine = (index: number): Routine => ({
   id: uid(),
-  label: `Day ${index + 1}`,
+  label: `Day ${String.fromCharCode(65 + index)}`,
   blocks: [createBlock("paired")],
 });
 
@@ -233,392 +233,80 @@ const createSessionDraft = (programId: string, routine: Routine, memberId: strin
   })),
 });
 
-const STORAGE_KEYS = {
-  members: "workout-app-members-v1",
-  programs: "workout-app-programs-v1",
-  savedSessions: "workout-app-saved-sessions-v1",
-  seeded: "workout-app-seeded-program1-v1",
-};
-
-const ROUTINE_IDS = {
-  day1: "routine-day-1",
-  day2: "routine-day-2",
-};
-
-const BLOCK_IDS = {
-  day1A: "block-day1-a",
-  day1Single1: "block-day1-single-1",
-  day1B: "block-day1-b",
-  day1Single2: "block-day1-single-2",
-  day1C: "block-day1-c",
-  day2A: "block-day2-a",
-  day2Single1: "block-day2-single-1",
-  day2B: "block-day2-b",
-  day2Single2: "block-day2-single-2",
-  day2C: "block-day2-c",
-};
-
-const EXERCISE_IDS = {
-  skydivers: "exercise-skydivers",
-  gobletSquat: "exercise-goblet-squat",
-  bike: "exercise-bike",
-  oneArmRow: "exercise-one-arm-db-row",
-  benchShoulderTaps: "exercise-bench-shoulder-taps",
-  runWalk: "exercise-run-walk",
-  oneLegRdl: "exercise-one-leg-rdl",
-  farmersCarry: "exercise-farmers-carry",
-  dbRdl: "exercise-db-rdl",
-  plankMarch: "exercise-plank-march",
-  rower1: "exercise-rower-1",
-  reverseLunge: "exercise-goblet-reverse-lunge",
-  dbBench: "exercise-db-bench-press",
-  rower2: "exercise-rower-2",
-  bentOverRow: "exercise-db-bent-over-row",
-  bearToPushup: "exercise-bear-to-pushup",
-};
-
-const PROGRAM_1_IMPORT_TEMPLATE = "Program 1 \nDay 1: July 25, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - BW \nExercise 2: Goblet Squat - 20 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 4 sets completed of each exercise \n\nSingle block \nExercise: \nBike Time: 3m \nTarget: Calories \nSession Data: 18 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 20 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW\nTarget reps exercise 1: 5 \nTarget reps exercise 2: 5 \nSession Data: 4 sets completed of each \n\nSingle block \nExercise: Run/walk \nTime: 3m \nTarget: Laps \nSession Data: 3 \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 25 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 3 sets completed of each\n\nProgram 1 \nDay 2: July 28th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 20 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 8 \nSession data: \nExercise 1: 4 sets completed\nExercise 2: 3 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 30  \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - BW \nExercise 2: DB Bench Press - 15 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 5 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes\nTarget: Calories \nSession Data: 34 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 15 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10\nTarget reps exercise 2: 5 \nSession Data: 3 sets of each completed\n\nProgram 1 \nDay 3: July 30th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 3 lbs \nExercise 2: Goblet Squat - 22 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 4 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 \nTarget: Calories \nSession Data: 26 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 22 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 \nTarget: Laps \nSession Data: 3 \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 30 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 5 sets of each completed\n\nProgram 1 \nDay 4: July 31st, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 20 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 4 sets complete \nExercise 2: 3 sets complete \n\nSingle block \nExercise: Rower \nTime: 3 \nTarget: Calories \nSession Data: 38 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - BW \nExercise 2: DB Bench Press - 17 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: \nExercise 1: 5 sets completed \nExercise 2: 4 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 \nTarget: Calories \nSession Data: 36  \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 15 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 5 sets of each completed\n\nProgram 1\nDay 5: August 1st, 2025\n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 3 lbs \nExercise 2: Goblet Squat - 25 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data:\nExercise 1: 5 sets completed\nExercise 2: 4 sets completed \n\nSingle block \nExercise: Bike \nTime: 3 \nTarget: Calories \nSession Data: 28\n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 25 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: \nExercise 1: 6 sets completed \nExercise 2: 5 sets completed \n\nSingle block \nExercise: Run/walk \nTime: 3 \nTarget: Laps \nSession Data: 4 \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 35 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: \nExercise 1: 4 sets completed\nExercise 2: 2 sets completed\n\n\nProgram 1 \nDay 6: August 2nd, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 17 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 7 sets completed \nExercise 2: 6 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 41 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 15 lbs \nExercise 2: DB Bench Press - 20 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 34 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 17 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: \nExercise 1: 6 sets completed \nExercise 2: 5 sets completed\n\nProgram 1 \nDay 7: August 4th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 3 lbs \nExercise 2: Goblet Squat - 25 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 6 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 28.9 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 25 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 6 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 35 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 5 sets of each completed\n\n\nProgram 1 \nDay 8: August 5th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 17 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 7 sets \nExercise 2: 6 sets \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 45 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 15 lbs \nExercise 2: DB Bench Press - 27 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 44 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 17 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 5 sets of each completed\n\nProgram 1 \nDay 9: August 7th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 27 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: \nExercise 1: 4 sets completed \nExercise 2: 3 sets completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 31 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 27 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 5 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 35 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 4 sets completed of each\n\n\nProgram 1 \nDay 10: August 8th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 17 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 7 sets completed \nExercise 2: 6 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 50 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 17 lbs \nExercise 2: DB Bench Press - 30 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 45 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 17 lbs \nExercise 2: Bear to Pushup - bw \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 6 sets of each completed\n\nProgram 1 \nDay 11: August 11th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 27 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 5 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 31 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 27 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 5 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 40 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: \nExercise 1: 4 sets completed \nExercise 2: 3 sets completed\n\n\nProgram 1 \nDay 12: August 12th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 20 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: 6 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 51 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 20 lbs \nExercise 2: DB Bench Press - 30 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 44 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 20 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 5 sets of each completed\n\nProgram 1 \nDay 13: August 13th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 30 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 5 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 32 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 30 lbs \nExercise 2: PAUSE Bench Shoulder Taps \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: \nExercise 1: 5 sets completed \nExercise 2: 4 sets completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 40 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 3 sets of each completed\n\nProgram 1\nDay 14: August 14th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 25 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 8 sets completed\nExercise 2: 7 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 51 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 20 lbs \nExercise 2: DB Bench Press - 30 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: \nExercise 1: 5 sets completed \nExercise 2: 4 sets completed\n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 45 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 20 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: \nExercise 1: 6 sets completed\nExercise 2: 5 sets completed\n\nProgram 1 \nDay 15: August 15th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 30 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 5 sets completed for each \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 34 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 30 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 5 sets completed of each \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4.5  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 40 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: \nExercise 1: 4 sets completed \nExercise 2: 3 sets completed\n\n\nProgram 1 \nDay 16: August 16th, 2025 \nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 27 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: 6 sets completed of each \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 52 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 20 lbs \nExercise 2: DB Bench Press - 35 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 47 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 20 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 6 sets of each complete";
-
-const RELAY_TEMPLATE_TEXT = `Program:
-
-Session #:
-Date:
-Routine: Day 1 / Day 2
-
-Paired Block A
-Time (minutes):
-
-Exercise 1:
-Weight:
-Target:
-Sets Complete:
-
-Exercise 2:
-Weight:
-Target:
-Sets Complete:
-
-Single Block
-Exercise:
-Time:
-Target:
-Performance:
-
-Paired Block B
-Time (minutes):
-
-Exercise 1:
-Weight:
-Target:
-Sets Complete:
-
-Exercise 2:
-Weight:
-Target:
-Sets Complete:
-
-Single Block
-Exercise:
-Time:
-Target:
-Performance:
-
-Paired Block C
-Time (minutes):
-
-Exercise 1:
-Weight:
-Target:
-Sets Complete:
-
-Exercise 2:
-Weight:
-Target:
-Sets Complete:
-`;
-
-const normalizeWeightLabel = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (/^bw$/i.test(trimmed)) return "BW";
-  if (/^body\s*weight$/i.test(trimmed)) return "BW";
-  return trimmed.replace(/\s+/g, " ");
-};
-
-const extractFirstNumber = (value: string) => {
-  const match = value.match(/\d+(?:\.\d+)?/);
-  return match ? match[0] : "";
-};
-
-const parsePairSessionData = (value: string) => {
-  const exercise1 = value.match(/Exercise 1:\s*(\d+(?:\.\d+)?)/i);
-  const exercise2 = value.match(/Exercise 2:\s*(\d+(?:\.\d+)?)/i);
-
-  if (exercise1 || exercise2) {
-    return {
-      exercise1: exercise1?.[1] || "",
-      exercise2: exercise2?.[1] || "",
-    };
-  }
-
-  const shared = value.match(/(\d+(?:\.\d+)?)/);
-  return {
-    exercise1: shared?.[1] || "",
-    exercise2: shared?.[1] || "",
-  };
-};
-
-const parseSingleBlocks = (chunk: string) => {
-  const regex = /Single block\s+Exercise:\s*(.*?)\s+Time:\s*(.*?)\s+Target:\s*(.*?)\s+Session Data:\s*(.*?)(?=\n\n(?:Paired Block [A-Z]|Program \d+\s*\nDay \d+:|Day \d+:|$))/gis;
-  return Array.from(chunk.matchAll(regex)).map((match) => ({
-    exerciseName: match[1].trim(),
-    time: match[2].trim(),
-    target: match[3].trim(),
-    performance: extractFirstNumber(match[4].trim()),
-  }));
-};
-
-const parsePairedBlocks = (chunk: string) => {
-  const regex = /Paired Block ([A-Z])\s*-\s*time\s*(.*?)\s+Exercise 1:\s*(.*?)\s*-\s*(.*?)\s+Exercise 2:\s*(.*?)\s*-\s*(.*?)\s+Target reps exercise 1:\s*(.*?)\s+Target reps exercise 2:\s*(.*?)\s+Session Data:\s*(.*?)(?=\n\n(?:Single block|Paired Block [A-Z]|Program \d+\s*\nDay \d+:|Day \d+:|$))/gis;
-  return Array.from(chunk.matchAll(regex)).map((match) => ({
-    blockKey: match[1].trim(),
-    time: extractFirstNumber(match[2].trim()) || match[2].trim(),
-    exercise1Name: match[3].trim(),
-    exercise1Weight: normalizeWeightLabel(match[4]),
-    exercise2Name: match[5].trim(),
-    exercise2Weight: normalizeWeightLabel(match[6]),
-    target1: match[7].trim(),
-    target2: match[8].trim(),
-    sessionData: parsePairSessionData(match[9].trim()),
-  }));
-};
-
-const createProgramOne = (): Program => ({
-  id: "program-1",
-  name: "Program 1",
-  startedAt: "2025-07-25",
-  status: "active",
-  routines: [
-    {
-      id: ROUTINE_IDS.day1,
-      label: "Day 1",
-      blocks: [
-        {
-          id: BLOCK_IDS.day1A,
-          type: "paired",
-          title: "Paired Block A",
-          duration: "10",
-          notes: "",
-          exercises: [
-            { id: EXERCISE_IDS.skydivers, name: "PAUSE CS Skydivers", target: "10", metric: "reps" },
-            { id: EXERCISE_IDS.gobletSquat, name: "Goblet Squat", target: "10", metric: "reps" },
-          ],
-        },
-        {
-          id: BLOCK_IDS.day1Single1,
-          type: "single",
-          title: "Single Block",
-          duration: "3",
-          notes: "",
-          exercises: [{ id: EXERCISE_IDS.bike, name: "Bike", target: "Calories", metric: "calories" }],
-        },
-        {
-          id: BLOCK_IDS.day1B,
-          type: "paired",
-          title: "Paired Block B",
-          duration: "10",
-          notes: "",
-          exercises: [
-            { id: EXERCISE_IDS.oneArmRow, name: "PAUSE 1 Arm DB Row", target: "5", metric: "reps" },
-            { id: EXERCISE_IDS.benchShoulderTaps, name: "PAUSE Bench Shoulder Taps", target: "5", metric: "reps" },
-          ],
-        },
-        {
-          id: BLOCK_IDS.day1Single2,
-          type: "single",
-          title: "Single Block",
-          duration: "3",
-          notes: "",
-          exercises: [{ id: EXERCISE_IDS.runWalk, name: "Run/walk", target: "Laps", metric: "laps" }],
-        },
-        {
-          id: BLOCK_IDS.day1C,
-          type: "paired",
-          title: "Paired Block C",
-          duration: "10",
-          notes: "",
-          exercises: [
-            { id: EXERCISE_IDS.oneLegRdl, name: "TEMPO BW 1 Leg RDL", target: "5", metric: "reps" },
-            { id: EXERCISE_IDS.farmersCarry, name: "Farmer's Carry", target: "50", metric: "yards" },
-          ],
-        },
-      ],
-    },
-    {
-      id: ROUTINE_IDS.day2,
-      label: "Day 2",
-      blocks: [
-        {
-          id: BLOCK_IDS.day2A,
-          type: "paired",
-          title: "Paired Block A",
-          duration: "10",
-          notes: "",
-          exercises: [
-            { id: EXERCISE_IDS.dbRdl, name: "DB RDL", target: "8", metric: "reps" },
-            { id: EXERCISE_IDS.plankMarch, name: "Plank March", target: "4", metric: "reps" },
-          ],
-        },
-        {
-          id: BLOCK_IDS.day2Single1,
-          type: "single",
-          title: "Single Block",
-          duration: "3",
-          notes: "",
-          exercises: [{ id: EXERCISE_IDS.rower1, name: "Rower", target: "Calories", metric: "calories" }],
-        },
-        {
-          id: BLOCK_IDS.day2B,
-          type: "paired",
-          title: "Paired Block B",
-          duration: "10",
-          notes: "",
-          exercises: [
-            { id: EXERCISE_IDS.reverseLunge, name: "Goblet Reverse Lunge", target: "8", metric: "reps" },
-            { id: EXERCISE_IDS.dbBench, name: "DB Bench Press", target: "8", metric: "reps" },
-          ],
-        },
-        {
-          id: BLOCK_IDS.day2Single2,
-          type: "single",
-          title: "Single Block",
-          duration: "3",
-          notes: "",
-          exercises: [{ id: EXERCISE_IDS.rower2, name: "Rower", target: "Calories", metric: "calories" }],
-        },
-        {
-          id: BLOCK_IDS.day2C,
-          type: "paired",
-          title: "Paired Block C",
-          duration: "10",
-          notes: "",
-          exercises: [
-            { id: EXERCISE_IDS.bentOverRow, name: "DB Bent Over Row", target: "10", metric: "reps" },
-            { id: EXERCISE_IDS.bearToPushup, name: "Bear to Pushup", target: "5", metric: "reps" },
-          ],
-        },
-      ],
-    },
-  ],
-});
-
 function buildInitialPrograms(): Program[] {
-  return [createProgramOne()];
-}
-
-const getRoutineIdForSessionNumber = (sessionNumber: number) =>
-  sessionNumber % 2 === 1 ? ROUTINE_IDS.day1 : ROUTINE_IDS.day2;
-
-const getRoutineTemplateById = (program: Program, routineId: string) =>
-  program.routines.find((routine) => routine.id === routineId) || program.routines[0];
-
-const buildImportedSession = (program: Program, memberId: string, sessionNumber: number, date: string, chunk: string): SavedSession | null => {
-  const routineId = getRoutineIdForSessionNumber(sessionNumber);
-  const routine = getRoutineTemplateById(program, routineId);
-  const pairedBlocks = parsePairedBlocks(chunk);
-  const singleBlocks = parseSingleBlocks(chunk);
-
-  if (!routine) return null;
-
-  let singleIndex = 0;
-
-  const blocks: SessionBlockInput[] = routine.blocks.map((block) => {
-    if (block.type === "paired") {
-      const pairData = pairedBlocks.find((item) => `Paired Block ${item.blockKey}` === block.title);
-      return {
-        blockId: block.id,
-        blockTitle: block.title,
-        entries: block.exercises.map((exercise, exerciseIndex) => ({
-          exerciseId: exercise.id,
-          exerciseName: exercise.name,
-          weight: pairData ? (exerciseIndex === 0 ? pairData.exercise1Weight : pairData.exercise2Weight) : "",
-          performance: "",
-          setsCompleted: pairData ? (exerciseIndex === 0 ? pairData.sessionData.exercise1 : pairData.sessionData.exercise2) : "",
-        })),
-      };
-    }
-
-    const singleData = singleBlocks[singleIndex++];
-    return {
-      blockId: block.id,
-      blockTitle: block.title,
-      entries: block.exercises.map((exercise) => ({
-        exerciseId: exercise.id,
-        exerciseName: exercise.name,
-        weight: "",
-        performance: singleData?.performance || "",
-        setsCompleted: "",
-      })),
-    };
-  });
-
-  return {
+  const dayA = createRoutine(0);
+  const dayB: Routine = {
     id: uid(),
-    programId: program.id,
-    routineId,
-    memberId,
-    date,
-    sessionNumber: String(sessionNumber),
-    blocks,
-    createdAt: new Date(date).toISOString(),
+    label: "Day B",
+    blocks: [
+      {
+        id: uid(),
+        type: "paired",
+        title: "Paired Block A",
+        duration: "10",
+        notes: "",
+        exercises: [
+          { id: uid(), name: "DB RDL", target: "8", metric: "reps" },
+          { id: uid(), name: "Plank March", target: "4", metric: "reps" },
+        ],
+      },
+      {
+        id: uid(),
+        type: "single",
+        title: "Single Block",
+        duration: "3",
+        notes: "",
+        exercises: [{ id: uid(), name: "Rower", target: "Calories", metric: "calories" }],
+      },
+      {
+        id: uid(),
+        type: "paired",
+        title: "Paired Block B",
+        duration: "10",
+        notes: "",
+        exercises: [
+          { id: uid(), name: "Goblet Reverse Lunge", target: "8", metric: "reps" },
+          { id: uid(), name: "DB Bench Press", target: "8", metric: "reps" },
+        ],
+      },
+      {
+        id: uid(),
+        type: "single",
+        title: "Single Block",
+        duration: "3",
+        notes: "",
+        exercises: [{ id: uid(), name: "Rower", target: "Calories", metric: "calories" }],
+      },
+      {
+        id: uid(),
+        type: "paired",
+        title: "Paired Block C",
+        duration: "10",
+        notes: "",
+        exercises: [
+          { id: uid(), name: "DB Bent Over Row", target: "10", metric: "reps" },
+          { id: uid(), name: "Bear to Pushup", target: "5", metric: "reps" },
+        ],
+      },
+    ],
   };
-};
 
-const parseImportedSessions = (raw: string, program: Program, memberId: string) => {
-  const sessionRegex = /Program\s+\d+\s*\nDay\s+(\d+):\s*([^\n]+)\s*\n([\s\S]*?)(?=(?:\nProgram\s+\d+\s*\nDay\s+\d+:)|$)/g;
-  const sessions: SavedSession[] = [];
+  const olderDayA = createRoutine(0);
+  olderDayA.blocks[0].title = "Paired Block A";
 
-  for (const match of raw.matchAll(sessionRegex)) {
-    const sessionNumber = Number(match[1]);
-    const date = match[2].trim();
-    const chunk = match[3].trim();
-    const session = buildImportedSession(program, memberId, sessionNumber, date, chunk);
-    if (session) sessions.push(session);
-  }
-
-  return sessions;
-};
-
+  return [
+    createProgram("Program 2", "2025-08-01", [dayA, dayB], "active"),
+    createProgram("Program 1", "2025-05-01", [olderDayA, createRoutine(1)], "closed"),
+  ];
+}
 
 // ===== SMALL UI PARTS =====
 
-function SectionCard({
-  title,
-  children,
-  collapsible = false,
-  defaultOpen = true,
-}: {
-  title: string;
-  children: React.ReactNode;
-  collapsible?: boolean;
-  defaultOpen?: boolean;
-}) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-lg font-semibold text-zinc-900">{title}</div>
-        {collapsible ? (
-          <button
-            onClick={() => setIsOpen((prev) => !prev)}
-            className="rounded-lg border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
-          >
-            {isOpen ? "Collapse" : "Expand"}
-          </button>
-        ) : null}
-      </div>
-      {(!collapsible || isOpen) && children}
+      <div className="mb-3 text-lg font-semibold text-zinc-900">{title}</div>
+      {children}
     </div>
   );
 }
@@ -686,31 +374,21 @@ function PathBar({ items }: { items: { label: string; onClick?: () => void }[] }
 }
 
 export default function App() {
-  const [members, setMembers] = useState<Member[]>(() => {
-    if (typeof window === "undefined") return [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.members);
-    return stored ? JSON.parse(stored) : [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
-  });
+  const [members, setMembers] = useState<Member[]>([
+    { id: uid(), clientId: "100001", name: "Test Subject" },
+    { id: uid(), clientId: "100002", name: "Example Member" },
+  ]);
   const [memberSearch, setMemberSearch] = useState("");
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>("member-1");
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [role, setRole] = useState<Role>("admin");
-  const [screen, setScreen] = useState<Screen>("input");
-  const [programs, setPrograms] = useState<Program[]>(() => {
-    if (typeof window === "undefined") return buildInitialPrograms();
-    const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
-    return stored ? JSON.parse(stored) : buildInitialPrograms();
-  });
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
-  const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(BLOCK_IDS.day1A);
+  const [screen, setScreen] = useState<Screen>("builder");
+  const [programs, setPrograms] = useState<Program[]>(buildInitialPrograms());
+  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
+  const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [graphAxis, setGraphAxis] = useState<GraphAxis>("date");
   const [sessionDraft, setSessionDraft] = useState<SessionDraft | null>(null);
-  const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
-    if (typeof window === "undefined") return [];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.savedSessions);
-    return stored ? JSON.parse(stored) : [];
-  });
-  const [importText, setImportText] = useState(PROGRAM_1_IMPORT_TEMPLATE);
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
@@ -879,33 +557,6 @@ export default function App() {
 
     return [Math.max(0, Math.floor(min) - 2), Math.ceil(max) + 2] as [number, number];
   }, [graphData]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.members, JSON.stringify(members));
-  }, [members]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.programs, JSON.stringify(programs));
-  }, [programs]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.savedSessions, JSON.stringify(savedSessions));
-  }, [savedSessions]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const alreadySeeded = window.localStorage.getItem(STORAGE_KEYS.seeded);
-
-    if (!alreadySeeded && members[0] && programs[0] && savedSessions.length === 0) {
-      const seededSessions = parseImportedSessions(PROGRAM_1_IMPORT_TEMPLATE, programs[0], members[0].id);
-      setSavedSessions(seededSessions);
-      window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
-    }
-  }, [members, programs, savedSessions.length]);
-
 
   useEffect(() => {
     if (!selectedProgram || !selectedRoutine || !selectedMember) {
@@ -1162,25 +813,6 @@ export default function App() {
     setSessionDraft(createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id));
   };
 
-  const importProgramData = () => {
-    if (!selectedProgram || !selectedMember || !importText.trim()) return;
-    const importedSessions = parseImportedSessions(importText, selectedProgram, selectedMember.id);
-    if (!importedSessions.length) return;
-
-    setSavedSessions(importedSessions);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
-    }
-  };
-
-  const clearStoredSessions = () => {
-    setSavedSessions([]);
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEYS.savedSessions);
-      window.localStorage.removeItem(STORAGE_KEYS.seeded);
-    }
-  };
-
   const pathItems = useMemo(() => {
     if (role === "admin" && screen === "builder") {
       return [{ label: "Admin" }, { label: "Program Builder" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
@@ -1209,7 +841,7 @@ export default function App() {
         <div className="mb-6 text-center">
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Prototype</div>
           <h1 className="mt-1 text-3xl font-bold">Workout App V2</h1>
-          <p className="mt-1 text-sm text-zinc-600">Phase 5 with persistent storage, bulk import, and collapsible sections.</p>
+          <p className="mt-1 text-sm text-zinc-600">Phase 2.5 with admin session history layered on top of the locked shell.</p>
         </div>
 
         <div className="mx-auto w-full max-w-[430px] overflow-hidden rounded-[32px] border border-zinc-300 bg-white shadow-2xl">
@@ -1239,7 +871,7 @@ export default function App() {
 
               {role === "admin" && screen === "builder" && (
                 <div className="space-y-6">
-                  <SectionCard title="Member Workspace" collapsible>
+                  <SectionCard title="Member Workspace">
                     <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                       <div className="space-y-3">
                         <div>
@@ -1273,7 +905,7 @@ export default function App() {
                     </div>
                   </SectionCard>
 
-                  <SectionCard title="Program Library" collapsible defaultOpen={false}>
+                  <SectionCard title="Program Library">
                     <div className="space-y-2">
                       {sortedPrograms.map((program) => (
                         <button key={program.id} onClick={() => setSelectedProgramId(program.id)} className={`w-full rounded-2xl border p-4 text-left transition ${selectedProgram?.id === program.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"}`}>
@@ -1289,7 +921,7 @@ export default function App() {
                     </div>
                   </SectionCard>
 
-                  <SectionCard title="Program Structure" collapsible defaultOpen={false}>
+                  <SectionCard title="Program Structure">
                     <div className="space-y-3">
                       <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Build the selected program's routine loop here. Add Day A, Day B, and so on, then stack paired or single blocks inside each routine.</div>
                       <PrimaryButton onClick={addRoutine} className="w-full">+ Add Routine</PrimaryButton>
@@ -1309,7 +941,7 @@ export default function App() {
                     </div>
                   </SectionCard>
 
-                  <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible defaultOpen={false}>
+                  <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"}>
                     {selectedRoutine ? (
                       <div className="space-y-5">
                         <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
@@ -1391,23 +1023,9 @@ export default function App() {
               )}
 
               {role === "admin" && screen === "input" && (
-                <SectionCard title="Admin Data Input" collapsible>
+                <SectionCard title="Admin Data Input">
                   <div className="space-y-4">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">Builder sets the routine template: exercise names, targets, metrics, block duration, and screen tips. This input tab is where admin logs the actual session performance for a specific program, routine, and session number.</div>
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="mb-2 text-sm font-semibold text-zinc-900">Bulk Import Data</div>
-                      <div className="mb-3 text-sm text-zinc-500">Paste cleaned relay-format text here to replace all saved sessions for the selected member.</div>
-                      <TextArea value={importText} onChange={(e) => setImportText(e.target.value)} rows={16} />
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <PrimaryButton onClick={importProgramData}>Import Program Data</PrimaryButton>
-                        <SmallButton onClick={clearStoredSessions}>Clear Stored Sessions</SmallButton>
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="mb-2 text-sm font-semibold text-zinc-900">Relay Template</div>
-                      <div className="mb-3 text-sm text-zinc-500">Use this format for future data handoff.</div>
-                      <TextArea value={RELAY_TEMPLATE_TEXT} readOnly rows={18} />
-                    </div>
                     <div className="grid gap-3 md:grid-cols-3">
                       <div>
                         <Label>Date</Label>
@@ -1563,7 +1181,7 @@ export default function App() {
               )}
 
               {role === "member" && screen === "programs" && (
-                <SectionCard title="My Programs" collapsible>
+                <SectionCard title="My Programs">
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members start here and open the most recent program first.</div>
                     <div className="space-y-3">
@@ -1769,7 +1387,7 @@ export default function App() {
                   </div>
                 </SectionCard>
               )}
-            </div>
+			              </div>
           </div>
         </div>
       </div>
