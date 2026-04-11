@@ -113,7 +113,6 @@ type ChartPoint = GraphPoint & {
     day: "numeric",
     year: "numeric",
   }).format(new Date(time));
-};
 
 const getStableWeightColor = (weight: string) => {
   const trimmed = weight.trim().toUpperCase();
