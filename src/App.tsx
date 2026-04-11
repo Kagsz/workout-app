@@ -206,14 +206,6 @@ const createRoutine = (index: number): Routine => ({
   blocks: [createBlock("paired")],
 });
 
-const createProgram = (name: string, startedAt: string, routines: Routine[], status: "active" | "closed" = "active"): Program => ({
-  id: uid(),
-  name,
-  startedAt,
-  routines,
-  status,
-});
-
 const createSessionDraft = (programId: string, routine: Routine, memberId: string): SessionDraft => ({
   programId,
   routineId: routine.id,
