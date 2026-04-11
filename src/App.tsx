@@ -90,6 +90,10 @@ type GraphPoint = {
   date: string;
   performance: string;
   duration: string;
+  exerciseName: string;
+  target: string;
+  metric: string;
+  blockType: BlockType;
 };
 
 type GraphSeries = {
@@ -102,6 +106,16 @@ type GraphSeries = {
 type ChartPoint = GraphPoint & {
   chartX: number;
   xLabel: string;
+};
+
+const formatDateLabel = (value: string) => {
+  const time = getSafeDateTime(value);
+  if (!time) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(time));
 };
 
 const getWeightBucketColor = (weight: string) => {
@@ -162,10 +176,23 @@ function GraphTooltip({
   const point = payload[0]?.payload;
   if (!point) return null;
 
+  const durationValue = String(point.duration || "").trim();
+  const durationNumber = Number(durationValue);
+  const durationLabel = durationValue
+    ? `${durationValue} minute${Number.isFinite(durationNumber) && durationNumber === 1 ? "" : "s"}`
+    : "—";
+
+  const targetContext =
+    point.blockType === "single"
+      ? `${durationLabel} for ${point.target || point.metric || "output"}`
+      : `Target: ${`${point.target || "—"} ${point.metric || ""}`.trim()}`;
+
   return (
     <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg">
-      <div className="font-semibold text-zinc-900">Duration: {point.duration || "—"}</div>
-      <div className="mt-1 text-zinc-700">Performance: {point.performance || "—"}</div>
+      <div className="font-semibold text-zinc-900">{point.exerciseName}</div>
+      <div className="mt-1 text-zinc-700">{targetContext}</div>
+      {point.weight ? <div className="mt-1 text-zinc-700">Weight: {point.weight}</div> : null}
+      <div className="mt-1 text-zinc-500">{point.date || "—"}</div>
     </div>
   );
 }
@@ -178,10 +205,10 @@ const normalizeWeightInput = (value: string) => {
   const trimmed = value.trim();
 
   if (!trimmed) return "";
-  if (/^b$/i.test(trimmed)) return "B";
-  if (/^bw$/i.test(trimmed)) return "BW";
+  if (/^(b|bw|body\s*weight)$/i.test(trimmed)) return "BW";
 
-  return trimmed.replace(/[^\d.]/g, "");
+  const numeric = extractFirstNumber(trimmed);
+  return numeric || "";
 };
 
 const createExercise = (): Exercise => ({
@@ -332,9 +359,10 @@ Sets Complete:
 const normalizeWeightLabel = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return "";
-  if (/^bw$/i.test(trimmed)) return "BW";
-  if (/^body\s*weight$/i.test(trimmed)) return "BW";
-  return trimmed.replace(/\s+/g, " ");
+  if (/^(b|bw|body\s*weight)$/i.test(trimmed)) return "BW";
+
+  const numeric = extractFirstNumber(trimmed);
+  return numeric || "";
 };
 
 const extractFirstNumber = (value: string) => {
@@ -342,9 +370,38 @@ const extractFirstNumber = (value: string) => {
   return match ? match[0] : "";
 };
 
+const splitImportedSections = (chunk: string, heading: "paired" | "single") => {
+  const regex =
+    heading === "paired"
+      ? /(Paired Block [A-Z][\s\S]*?)(?=\n\s*(?:Single block|Paired Block [A-Z])|$)/gi
+      : /(Single block[\s\S]*?)(?=\n\s*(?:Paired Block [A-Z]|Single block)|$)/gi;
+
+  return Array.from(chunk.matchAll(regex)).map((match) => match[1].trim());
+};
+
+const parseExerciseLine = (line: string) => {
+  const match = line.match(/^Exercise\s*(\d+)?:\s*(.*)$/i);
+  if (!match) return { name: "", weight: "" };
+
+  const rawValue = match[2].trim();
+  const dividerIndex = rawValue.lastIndexOf(" - ");
+
+  if (dividerIndex === -1) {
+    return {
+      name: rawValue,
+      weight: "",
+    };
+  }
+
+  return {
+    name: rawValue.slice(0, dividerIndex).trim(),
+    weight: normalizeWeightLabel(rawValue.slice(dividerIndex + 3)),
+  };
+};
+
 const parsePairSessionData = (value: string) => {
-  const exercise1 = value.match(/Exercise 1:\s*(\d+(?:\.\d+)?)/i);
-  const exercise2 = value.match(/Exercise 2:\s*(\d+(?:\.\d+)?)/i);
+  const exercise1 = value.match(/Exercise\s*1:\s*(\d+(?:\.\d+)?)/i);
+  const exercise2 = value.match(/Exercise\s*2:\s*(\d+(?:\.\d+)?)/i);
 
   if (exercise1 || exercise2) {
     return {
@@ -353,36 +410,129 @@ const parsePairSessionData = (value: string) => {
     };
   }
 
-  const shared = value.match(/(\d+(?:\.\d+)?)/);
+  const shared = extractFirstNumber(value);
+  if (!shared) {
+    return { exercise1: "", exercise2: "" };
+  }
+
+  if (/each|for each|of each/i.test(value)) {
+    return {
+      exercise1: shared,
+      exercise2: shared,
+    };
+  }
+
   return {
-    exercise1: shared?.[1] || "",
-    exercise2: shared?.[1] || "",
+    exercise1: shared,
+    exercise2: shared,
   };
 };
 
 const parseSingleBlocks = (chunk: string) => {
-  const regex = /Single block\s+Exercise:\s*(.*?)\s+Time:\s*(.*?)\s+Target:\s*(.*?)\s+Session Data:\s*(.*?)(?=\n\n(?:Paired Block [A-Z]|Program \d+\s*\nDay \d+:|Day \d+:|$))/gis;
-  return Array.from(chunk.matchAll(regex)).map((match) => ({
-    exerciseName: match[1].trim(),
-    time: match[2].trim(),
-    target: match[3].trim(),
-    performance: extractFirstNumber(match[4].trim()),
-  }));
+  return splitImportedSections(chunk, "single").map((section) => {
+    const lines = section
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    let exerciseName = "";
+    let time = "";
+    let target = "";
+    let performance = "";
+
+    lines.forEach((line, index) => {
+      const exerciseMatch = line.match(/^Exercise:\s*(.*)$/i);
+      const timeMatch = line.match(/^Time:\s*(.*)$/i);
+      const targetMatch = line.match(/^Target:\s*(.*)$/i);
+      const sessionMatch = line.match(/^Session Data:\s*(.*)$/i);
+      const combinedExerciseTimeMatch = line.match(/^(.*?)\s+Time:\s*(.*)$/i);
+
+      if (exerciseMatch) {
+        exerciseName = exerciseMatch[1].trim();
+        return;
+      }
+
+      if (!exerciseName && combinedExerciseTimeMatch && !/^Single block$/i.test(line)) {
+        exerciseName = combinedExerciseTimeMatch[1].trim();
+        time = extractFirstNumber(combinedExerciseTimeMatch[2].trim()) || combinedExerciseTimeMatch[2].trim();
+        return;
+      }
+
+      if (timeMatch) {
+        time = extractFirstNumber(timeMatch[1].trim()) || timeMatch[1].trim();
+        return;
+      }
+
+      if (targetMatch) {
+        target = targetMatch[1].trim();
+        return;
+      }
+
+      if (sessionMatch) {
+        performance = extractFirstNumber(sessionMatch[1].trim());
+        return;
+      }
+
+      if (!exerciseName && lines[index - 1]?.match(/^Exercise:\s*$/i)) {
+        const inferred = line.match(/^(.*?)\s+Time:\s*(.*)$/i);
+        if (inferred) {
+          exerciseName = inferred[1].trim();
+          time = extractFirstNumber(inferred[2].trim()) || inferred[2].trim();
+        } else {
+          exerciseName = line.trim();
+        }
+      }
+    });
+
+    return {
+      exerciseName,
+      time,
+      target,
+      performance,
+    };
+  });
 };
 
 const parsePairedBlocks = (chunk: string) => {
-  const regex = /Paired Block ([A-Z])\s*-\s*time\s*(.*?)\s+Exercise 1:\s*(.*?)\s*-\s*(.*?)\s+Exercise 2:\s*(.*?)\s*-\s*(.*?)\s+Target reps exercise 1:\s*(.*?)\s+Target reps exercise 2:\s*(.*?)\s+Session Data:\s*(.*?)(?=\n\n(?:Single block|Paired Block [A-Z]|Program \d+\s*\nDay \d+:|Day \d+:|$))/gis;
-  return Array.from(chunk.matchAll(regex)).map((match) => ({
-    blockKey: match[1].trim(),
-    time: extractFirstNumber(match[2].trim()) || match[2].trim(),
-    exercise1Name: match[3].trim(),
-    exercise1Weight: normalizeWeightLabel(match[4]),
-    exercise2Name: match[5].trim(),
-    exercise2Weight: normalizeWeightLabel(match[6]),
-    target1: match[7].trim(),
-    target2: match[8].trim(),
-    sessionData: parsePairSessionData(match[9].trim()),
-  }));
+  return splitImportedSections(chunk, "paired").map((section) => {
+    const lines = section
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const header = lines[0] || "";
+    const blockKey = header.match(/Paired Block\s+([A-Z])/i)?.[1]?.trim() || "";
+    const time = extractFirstNumber(header) || "";
+
+    const exerciseLines = lines.filter((line) => /^Exercise\s*[12]:/i.test(line));
+    const targets = lines
+      .filter((line) => /^Target/i.test(line))
+      .map((line) => line.split(":").slice(1).join(":").trim());
+
+    const sessionDataIndex = lines.findIndex((line) => /^Session Data:/i.test(line));
+    const sessionDataLines =
+      sessionDataIndex >= 0
+        ? [
+            lines[sessionDataIndex].replace(/^Session Data:\s*/i, "").trim(),
+            ...lines.slice(sessionDataIndex + 1),
+          ].filter(Boolean)
+        : [];
+
+    const exercise1 = parseExerciseLine(exerciseLines[0] || "");
+    const exercise2 = parseExerciseLine(exerciseLines[1] || "");
+
+    return {
+      blockKey,
+      time,
+      exercise1Name: exercise1.name,
+      exercise1Weight: exercise1.weight,
+      exercise2Name: exercise2.name,
+      exercise2Weight: exercise2.weight,
+      target1: targets[0] || "",
+      target2: targets[1] || targets[0] || "",
+      sessionData: parsePairSessionData(sessionDataLines.join(" ")),
+    };
+  });
 };
 
 const createProgramOne = (): Program => ({
@@ -772,6 +922,7 @@ export default function App() {
     if (!selectedBlock || !selectedRoutine || !selectedProgram || !selectedMember) return [];
 
     const seriesMap: Record<string, GraphSeries> = {};
+    const exerciseLookup = new Map(selectedBlock.exercises.map((exercise) => [exercise.id, exercise]));
 
     const scopedSessions = savedSessions.filter(
       (session) =>
@@ -785,7 +936,9 @@ export default function App() {
       if (!matchingBlock) return;
 
       matchingBlock.entries.forEach((entry) => {
-        const y = Number(entry.setsCompleted);
+        const exercise = exerciseLookup.get(entry.exerciseId);
+        const rawY = selectedBlock.type === "single" ? entry.performance : entry.setsCompleted;
+        const y = Number(rawY);
         const sessionNumber = Number(session.sessionNumber);
 
         if (!Number.isFinite(y) || !Number.isFinite(sessionNumber)) return;
@@ -801,12 +954,16 @@ export default function App() {
         seriesMap[entry.exerciseId].points.push({
           x: graphAxis === "date" ? session.date : sessionNumber,
           y,
-          weight: entry.weight,
+          weight: normalizeWeightInput(entry.weight),
           sessionId: session.id,
           sessionNumber,
           date: session.date,
           performance: entry.performance,
           duration: selectedBlock.duration,
+          exerciseName: entry.exerciseName,
+          target: exercise?.target || "",
+          metric: exercise?.metric || "",
+          blockType: selectedBlock.type,
         });
       });
     });
@@ -823,7 +980,9 @@ export default function App() {
   }, [savedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
 
   const chartSeries = useMemo(() => {
-    const dateLabels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date))));
+    const dateLabels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
+      (a, b) => getSafeDateTime(a) - getSafeDateTime(b)
+    );
     const dateIndexMap = new Map(dateLabels.map((label, index) => [label, index + 1]));
     const pairOffset = selectedBlock?.type === "paired" ? 0.12 : 0;
 
@@ -834,7 +993,7 @@ export default function App() {
 
       const points: ChartPoint[] = series.points.map((point) => {
         const baseX = graphAxis === "date" ? Number(dateIndexMap.get(point.date) || 0) : point.sessionNumber;
-        const xLabel = graphAxis === "date" ? point.date : `S${point.sessionNumber}`;
+        const xLabel = graphAxis === "date" ? formatDateLabel(point.date) : `S${point.sessionNumber}`;
 
         return {
           ...point,
@@ -854,7 +1013,9 @@ export default function App() {
 
   const xAxisTicks = useMemo(() => {
     if (graphAxis === "date") {
-      const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date))));
+      const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
+        (a, b) => getSafeDateTime(a) - getSafeDateTime(b)
+      );
       return labels.map((_, index) => index + 1);
     }
 
@@ -866,9 +1027,11 @@ export default function App() {
     const map = new Map<number, string>();
 
     if (graphAxis === "date") {
-      const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date))));
+      const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
+        (a, b) => getSafeDateTime(a) - getSafeDateTime(b)
+      );
       labels.forEach((label, index) => {
-        map.set(index + 1, label);
+        map.set(index + 1, formatDateLabel(label));
       });
       return map;
     }
@@ -886,9 +1049,21 @@ export default function App() {
 
     const min = Math.min(...values);
     const max = Math.max(...values);
+    const padding = selectedBlock?.type === "single" ? 1 : 2;
 
-    return [Math.max(0, Math.floor(min) - 2), Math.ceil(max) + 2] as [number, number];
-  }, [graphData]);
+    return [Math.max(0, Math.floor(min) - padding), Math.ceil(max) + padding] as [number, number];
+  }, [graphData, selectedBlock?.type]);
+
+  const graphLegendItems = useMemo(
+    () =>
+      chartSeries.map((series) => ({
+        exerciseId: series.exerciseId,
+        exerciseName: series.exerciseName,
+        shape: series.shape as "circle" | "square" | "triangle",
+        dash: series.dash,
+      })),
+    [chartSeries]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1656,26 +1831,27 @@ export default function App() {
                       <div className="rounded-2xl border border-zinc-200 bg-white p-3">
                         <div className="h-[280px] w-full">
                           <ResponsiveContainer width="100%" height="100%">
-                            <LineChart margin={{ top: 12, right: 12, left: 0, bottom: 42 }}>
+                            <LineChart margin={{ top: 12, right: 16, left: 4, bottom: 52 }}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} />
                               <XAxis
                                 type="number"
                                 dataKey="chartX"
                                 ticks={xAxisTicks}
-                                domain={[Math.min(...xAxisTicks), Math.max(...xAxisTicks)]}
+                                domain={[Math.min(...xAxisTicks) - 0.4, Math.max(...xAxisTicks) + 0.4]}
                                 tickFormatter={(value) => xAxisLabelMap.get(Number(value)) || ""}
-                                angle={-35}
-                                textAnchor="end"
-                                height={52}
-                                tickMargin={10}
+                                angle={graphAxis === "date" ? -24 : 0}
+                                textAnchor={graphAxis === "date" ? "end" : "middle"}
+                                height={graphAxis === "date" ? 62 : 40}
+                                tick={{ fontSize: 11 }}
+                                tickMargin={8}
                                 allowDecimals={false}
                               />
                               <YAxis
                                 type="number"
                                 domain={yDomain}
-                                allowDecimals={false}
-                                tickCount={Math.max(4, yDomain[1] - yDomain[0] + 1)}
-                                label={{ value: "Sets", angle: -90, position: "insideLeft" }}
+                                tickCount={Math.max(4, Math.min(8, yDomain[1] - yDomain[0] + 1))}
+                                allowDecimals={selectedBlock?.type === "single"}
+                                label={{ value: "Completed Output", angle: -90, position: "insideLeft" }}
                               />
                               <Tooltip content={<GraphTooltip />} />
                               {chartSeries.map((series, seriesIndex) => (
@@ -1725,31 +1901,32 @@ export default function App() {
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                         <div className="mb-2 text-sm font-semibold text-zinc-900">Exercise Key</div>
                         <div className="space-y-2 text-sm text-zinc-600">
-                          {selectedBlock.type === "single" ? (
-                            <div className="flex items-center gap-2">
-                              <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
-                                <line x1="2" y1="10" x2="18" y2="10" stroke="#111111" strokeWidth="2" />
-                                <polygon points="10,4 5,14 15,14" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
-                              </svg>
-                              <span>Triangle + solid line</span>
-                            </div>
+                          {graphLegendItems.length ? (
+                            graphLegendItems.map((item, index) => (
+                              <div key={item.exerciseId} className="flex items-center gap-2">
+                                <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
+                                  <line
+                                    x1="2"
+                                    y1="10"
+                                    x2="18"
+                                    y2="10"
+                                    stroke={index === 1 ? "#52525b" : "#111111"}
+                                    strokeWidth="2"
+                                    strokeDasharray={item.dash}
+                                  />
+                                  {item.shape === "triangle" ? (
+                                    <polygon points="10,4 5,14 15,14" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                  ) : item.shape === "square" ? (
+                                    <rect x="6" y="6" width="8" height="8" rx="1.5" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                  ) : (
+                                    <circle cx="10" cy="10" r="4" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                  )}
+                                </svg>
+                                <span>{item.exerciseName}</span>
+                              </div>
+                            ))
                           ) : (
-                            <>
-                              <div className="flex items-center gap-2">
-                                <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
-                                  <line x1="2" y1="10" x2="18" y2="10" stroke="#111111" strokeWidth="2" />
-                                  <circle cx="10" cy="10" r="4" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
-                                </svg>
-                                <span>Circle + solid line</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
-                                  <line x1="2" y1="10" x2="18" y2="10" stroke="#52525b" strokeWidth="2" strokeDasharray="5 4" />
-                                  <rect x="6" y="6" width="8" height="8" rx="1.5" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
-                                </svg>
-                                <span>Square + dotted line</span>
-                              </div>
-                            </>
+                            <div>No exercise key data yet.</div>
                           )}
                         </div>
                       </div>
