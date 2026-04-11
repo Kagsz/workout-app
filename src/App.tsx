@@ -108,26 +108,28 @@ type ChartPoint = GraphPoint & {
   xLabel: string;
 };
 
-const formatDateLabel = (value: string) => {
+const formatFullDateLabel = (value: string) => {
   const time = getSafeDateTime(value);
   if (!time) return value;
 
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
+    year: "numeric",
   }).format(new Date(time));
 };
 
-const getWeightBucketColor = (weight: string) => {
+const getStableWeightColor = (weight: string) => {
   const trimmed = weight.trim().toUpperCase();
 
   if (!trimmed || trimmed === "BW" || trimmed === "B") return "#9ca3af";
 
-  const numericWeight = Number(trimmed);
-  if (!Number.isFinite(numericWeight)) return "#9ca3af";
-  if (numericWeight < 25) return "#3b82f6";
-  if (numericWeight < 50) return "#22c55e";
-  return "#ef4444";
+  let hash = 0;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    hash = (hash * 31 + trimmed.charCodeAt(index)) % 360;
+  }
+
+  return `hsl(${hash} 65% 55%)`;
 };
 
 const buildTrianglePath = (cx: number, cy: number, size: number) => {
@@ -149,7 +151,7 @@ function ExerciseDot({
 }) {
   if (cx == null || cy == null || !payload) return null;
 
-  const fill = getWeightBucketColor(payload.weight);
+  const fill = getStableWeightColor(payload.weight);
   const stroke = "#111827";
   const size = 10;
 
@@ -191,8 +193,6 @@ function GraphTooltip({
     <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg">
       <div className="font-semibold text-zinc-900">{point.exerciseName}</div>
       <div className="mt-1 text-zinc-700">{targetContext}</div>
-      {point.weight ? <div className="mt-1 text-zinc-700">Weight: {point.weight}</div> : null}
-      <div className="mt-1 text-zinc-500">{point.date || "—"}</div>
     </div>
   );
 }
@@ -979,11 +979,39 @@ export default function App() {
     }));
   }, [savedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
 
-  const chartSeries = useMemo(() => {
-    const dateLabels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
+  const dateAxisMeta = useMemo(() => {
+    const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
       (a, b) => getSafeDateTime(a) - getSafeDateTime(b)
     );
-    const dateIndexMap = new Map(dateLabels.map((label, index) => [label, index + 1]));
+
+    if (!labels.length) {
+      return {
+        positionMap: new Map<string, number>(),
+        tickValues: [] as number[],
+        labelMap: new Map<number, string>(),
+        domain: [0, 1] as [number, number],
+      };
+    }
+
+    const firstTime = getSafeDateTime(labels[0]);
+    const tickValues = labels.map((label) => {
+      const diffMs = Math.max(0, getSafeDateTime(label) - firstTime);
+      return diffMs / (1000 * 60 * 60 * 24) + 1;
+    });
+    const positionMap = new Map(labels.map((label, index) => [label, tickValues[index]]));
+    const labelMap = new Map<number, string>(tickValues.map((tick, index) => [tick, `D${index + 1}`]));
+    const minTick = Math.min(...tickValues);
+    const maxTick = Math.max(...tickValues);
+
+    return {
+      positionMap,
+      tickValues,
+      labelMap,
+      domain: [Math.max(0, minTick - 0.4), maxTick + 0.4] as [number, number],
+    };
+  }, [graphData]);
+
+  const chartSeries = useMemo(() => {
     const pairOffset = selectedBlock?.type === "paired" ? 0.12 : 0;
 
     return graphData.map((series, seriesIndex) => {
@@ -992,8 +1020,8 @@ export default function App() {
       const offset = selectedBlock?.type === "paired" ? (seriesIndex === 0 ? -pairOffset : pairOffset) : 0;
 
       const points: ChartPoint[] = series.points.map((point) => {
-        const baseX = graphAxis === "date" ? Number(dateIndexMap.get(point.date) || 0) : point.sessionNumber;
-        const xLabel = graphAxis === "date" ? formatDateLabel(point.date) : `S${point.sessionNumber}`;
+        const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(point.date) || 0) : point.sessionNumber;
+        const xLabel = graphAxis === "date" ? dateAxisMeta.labelMap.get(baseX) || "" : `S${point.sessionNumber}`;
 
         return {
           ...point,
@@ -1009,39 +1037,35 @@ export default function App() {
         points,
       };
     });
-  }, [graphData, graphAxis, selectedBlock]);
+  }, [dateAxisMeta.labelMap, dateAxisMeta.positionMap, graphData, graphAxis, selectedBlock]);
 
   const xAxisTicks = useMemo(() => {
     if (graphAxis === "date") {
-      const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
-        (a, b) => getSafeDateTime(a) - getSafeDateTime(b)
-      );
-      return labels.map((_, index) => index + 1);
+      return dateAxisMeta.tickValues;
     }
 
     const sessions = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.sessionNumber))));
     return sessions.sort((a, b) => a - b);
-  }, [graphData, graphAxis]);
+  }, [dateAxisMeta.tickValues, graphData, graphAxis]);
 
   const xAxisLabelMap = useMemo(() => {
-    const map = new Map<number, string>();
-
     if (graphAxis === "date") {
-      const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
-        (a, b) => getSafeDateTime(a) - getSafeDateTime(b)
-      );
-      labels.forEach((label, index) => {
-        map.set(index + 1, formatDateLabel(label));
-      });
-      return map;
+      return dateAxisMeta.labelMap;
     }
 
+    const map = new Map<number, string>();
     const sessions = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.sessionNumber))));
     sessions.forEach((sessionNumber) => {
       map.set(sessionNumber, `S${sessionNumber}`);
     });
     return map;
-  }, [graphData, graphAxis]);
+  }, [dateAxisMeta.labelMap, graphData, graphAxis]);
+
+  const xAxisDomain = useMemo<[number, number]>(() => {
+    if (!xAxisTicks.length) return [0, 1];
+    if (graphAxis === "date") return dateAxisMeta.domain;
+    return [Math.min(...xAxisTicks) - 0.4, Math.max(...xAxisTicks) + 0.4];
+  }, [dateAxisMeta.domain, graphAxis, xAxisTicks]);
 
   const yDomain = useMemo(() => {
     const values = graphData.flatMap((series) => series.points.map((point) => point.y));
@@ -1064,6 +1088,27 @@ export default function App() {
       })),
     [chartSeries]
   );
+
+
+  const weightLegendItems = useMemo(() => {
+    const weights = Array.from(
+      new Set(
+        graphData
+          .flatMap((series) => series.points.map((point) => normalizeWeightInput(point.weight)))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => {
+      if (a === "BW") return -1;
+      if (b === "BW") return 1;
+      return Number(a) - Number(b);
+    });
+
+    return weights.map((weight) => ({
+      value: weight,
+      label: weight === "BW" ? "BW" : `${weight} lbs`,
+      color: getStableWeightColor(weight),
+    }));
+  }, [graphData]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1837,12 +1882,12 @@ export default function App() {
                                 type="number"
                                 dataKey="chartX"
                                 ticks={xAxisTicks}
-                                domain={[Math.min(...xAxisTicks) - 0.4, Math.max(...xAxisTicks) + 0.4]}
+                                domain={xAxisDomain}
                                 tickFormatter={(value) => xAxisLabelMap.get(Number(value)) || ""}
-                                angle={graphAxis === "date" ? -24 : 0}
-                                textAnchor={graphAxis === "date" ? "end" : "middle"}
-                                height={graphAxis === "date" ? 62 : 40}
-                                tick={{ fontSize: 11 }}
+                                angle={0}
+                                textAnchor="middle"
+                                height={40}
+                                tick={{ fontSize: graphAxis === "date" ? 10 : 11 }}
                                 tickMargin={8}
                                 allowDecimals={false}
                               />
@@ -1897,13 +1942,13 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                    <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div>
                         <div className="mb-2 text-sm font-semibold text-zinc-900">Exercise Key</div>
-                        <div className="space-y-2 text-sm text-zinc-600">
-                          {graphLegendItems.length ? (
-                            graphLegendItems.map((item, index) => (
-                              <div key={item.exerciseId} className="flex items-center gap-2">
+                        {graphLegendItems.length ? (
+                          <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
+                            {graphLegendItems.map((item, index) => (
+                              <div key={item.exerciseId} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
                                 <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
                                   <line
                                     x1="2"
@@ -1924,33 +1969,27 @@ export default function App() {
                                 </svg>
                                 <span>{item.exerciseName}</span>
                               </div>
-                            ))
-                          ) : (
-                            <div>No exercise key data yet.</div>
-                          )}
-                        </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-zinc-500">No exercise key data yet.</div>
+                        )}
                       </div>
 
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div>
                         <div className="mb-2 text-sm font-semibold text-zinc-900">Weight Key</div>
-                        <div className="space-y-2 text-sm text-zinc-600">
-                          <div className="flex items-center gap-2">
-                            <span className="inline-block h-3 w-3 rounded-full bg-gray-400" />
-                            <span>BW = Gray</span>
+                        {weightLegendItems.length ? (
+                          <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
+                            {weightLegendItems.map((item) => (
+                              <div key={item.value} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                <span className="inline-block h-3 w-3 rounded-full border border-zinc-300" style={{ backgroundColor: item.color }} />
+                                <span>{item.label}</span>
+                              </div>
+                            ))}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="inline-block h-3 w-3 rounded-full bg-blue-500" />
-                            <span>Lighter load</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="inline-block h-3 w-3 rounded-full bg-green-500" />
-                            <span>Medium load</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="inline-block h-3 w-3 rounded-full bg-red-500" />
-                            <span>Heavier load</span>
-                          </div>
-                        </div>
+                        ) : (
+                          <div className="text-sm text-zinc-500">No weight key data yet.</div>
+                        )}
                       </div>
                     </div>
                   </div>
