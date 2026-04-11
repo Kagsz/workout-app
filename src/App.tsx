@@ -108,6 +108,30 @@ type ChartPoint = GraphPoint & {
   xLabel: string;
 };
 
+const formatFullDateLabel = (value: string) => {
+  const time = getSafeDateTime(value);
+  if (!time) return value;
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(time));
+};
+
+const WEIGHT_COLOR_PALETTE = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#06b6d4",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+  "#14b8a6",
+  "#f43f5e",
+];
+
 const getStableWeightColor = (weight: string) => {
   const trimmed = weight.trim().toUpperCase();
 
@@ -115,10 +139,10 @@ const getStableWeightColor = (weight: string) => {
 
   let hash = 0;
   for (let index = 0; index < trimmed.length; index += 1) {
-    hash = (hash * 31 + trimmed.charCodeAt(index)) % 360;
+    hash = (hash * 31 + trimmed.charCodeAt(index)) >>> 0;
   }
 
-  return `hsl(${hash} 65% 55%)`;
+  return WEIGHT_COLOR_PALETTE[hash % WEIGHT_COLOR_PALETTE.length];
 };
 
 const buildTrianglePath = (cx: number, cy: number, size: number) => {
