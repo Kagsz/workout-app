@@ -108,12 +108,6 @@ type ChartPoint = GraphPoint & {
   xLabel: string;
 };
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(time));
-
 const getStableWeightColor = (weight: string) => {
   const trimmed = weight.trim().toUpperCase();
 
