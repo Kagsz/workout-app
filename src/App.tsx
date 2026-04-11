@@ -206,6 +206,14 @@ const createRoutine = (index: number): Routine => ({
   blocks: [createBlock("paired")],
 });
 
+const createProgram = (name: string, startedAt: string, routines: Routine[], status: "active" | "closed" = "active"): Program => ({
+  id: uid(),
+  name,
+  startedAt,
+  routines,
+  status,
+});
+
 const createSessionDraft = (programId: string, routine: Routine, memberId: string): SessionDraft => ({
   programId,
   routineId: routine.id,
@@ -514,6 +522,24 @@ const getRoutineIdForSessionNumber = (sessionNumber: number) =>
 const getRoutineTemplateById = (program: Program, routineId: string) =>
   program.routines.find((routine) => routine.id === routineId) || program.routines[0];
 
+const normalizeImportedDate = (value: string) =>
+  value
+    .trim()
+    .replace(/(\d+)(st|nd|rd|th)/gi, "$1")
+    .replace(/\s+/g, " ");
+
+const getSafeDateIsoString = (value: string) => {
+  const normalized = normalizeImportedDate(value);
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? new Date(time).toISOString() : new Date().toISOString();
+};
+
+const getSafeDateTime = (value: string) => {
+  const normalized = normalizeImportedDate(value);
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : 0;
+};
+
 const buildImportedSession = (program: Program, memberId: string, sessionNumber: number, date: string, chunk: string): SavedSession | null => {
   const routineId = getRoutineIdForSessionNumber(sessionNumber);
   const routine = getRoutineTemplateById(program, routineId);
@@ -559,10 +585,10 @@ const buildImportedSession = (program: Program, memberId: string, sessionNumber:
     programId: program.id,
     routineId,
     memberId,
-    date,
+    date: normalizeImportedDate(date),
     sessionNumber: String(sessionNumber),
     blocks,
-    createdAt: new Date(date).toISOString(),
+    createdAt: getSafeDateIsoString(date),
   };
 };
 
@@ -716,7 +742,7 @@ export default function App() {
   );
 
   const sortedPrograms = useMemo(
-    () => [...programs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()),
+    () => [...programs].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
     [programs]
   );
 
@@ -745,7 +771,7 @@ export default function App() {
           session.routineId === selectedRoutine.id &&
           session.memberId === selectedMember.id
       )
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt));
   }, [savedSessions, selectedMember, selectedProgram, selectedRoutine]);
 
   const latestSavedSession = matchingSavedSessions[0] || null;
@@ -797,7 +823,7 @@ export default function App() {
       ...series,
       points: [...series.points].sort((a, b) => {
         if (graphAxis === "date") {
-          return new Date(a.date).getTime() - new Date(b.date).getTime();
+          return getSafeDateTime(a.date) - getSafeDateTime(b.date);
         }
         return a.sessionNumber - b.sessionNumber;
       }),
