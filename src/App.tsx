@@ -1,3 +1,45 @@
+type BlockType = "paired" | "single";
+
+type ProgramDefinition = {
+  id: string;
+  name: string;
+  startedAt?: string;
+  status?: "active" | "closed" | "archived";
+  routines: RoutineDefinition[];
+};
+
+type RoutineDefinition = {
+  id: string;
+  label: string;
+  order: number;
+  blocks: BlockDefinition[];
+};
+
+type BlockDefinition = {
+  id: string;
+  label: string;
+  order: number;
+  type: BlockType;
+  durationMinutes?: number;
+  notes?: string;
+  slots: ExerciseSlotDefinition[];
+};
+
+type ExerciseSlotDefinition = {
+  id: string;
+  order: number;
+  lineStyle: "solid" | "dashed";
+  baseShape: "circle" | "square" | "triangle" | "diamond";
+  allowedExercises: ExerciseDefinition[];
+};
+
+type ExerciseDefinition = {
+  id: string;
+  name: string;
+  targetLabel: string;
+  metric: string;
+  shapeOverride?: "circle" | "square" | "triangle" | "diamond";
+};
 type RoutineDefinition = {
   id: string;
   label: string;
