@@ -26,52 +26,50 @@ type ParsedSession = {
 
 // ---------- PARSER ----------
 
-function extractNumber(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const match = value.match(/\d+(\.\d+)?/);
-  return match ? Number(match[0]) : undefined;
+function getLineValue(input: string, label: string): string {
+  const line = input
+    .split("\\n")
+    .find((l) => l.trim().startsWith(label));
+
+  return line ? line.replace(label, "").trim() : "";
 }
 
 function parseSession(input: string): ParsedSession {
-  const sessionNumber = Number(input.match(/Session #:\s*(\d+)/)?.[1] || 0);
-  const date = input.match(/Date:\s*([^\n]+)/)?.[1]?.trim() || "";
-  const routine = input.match(/Routine:\s*([^\n]+)/)?.[1]?.trim() || "";
+  const sessionNumber = Number(getLineValue(input, "Session #:"));
+  const date = getLineValue(input, "Date:");
+  const routine = getLineValue(input, "Routine:");
 
-  const blockSections = input.split(/Paired Block|Single Block/).slice(1);
+  const blockMatches = input.match(/(Paired Block [A-Z]|Single Block)[\\s\\S]*?(?=(Paired Block|Single Block|$))/g) || [];
 
-  const blockHeaders = input.match(/Paired Block [A-Z]|Single Block/g) || [];
-
-  const blocks: ParsedBlock[] = blockSections.map((section, index) => {
-    const header = blockHeaders[index];
-
-    const isPaired = header.includes("Paired");
-    const labelMatch = header.match(/Block ([A-Z])/);
+  const blocks: ParsedBlock[] = blockMatches.map((block) => {
+    const isPaired = block.includes("Paired Block");
+    const labelMatch = block.match(/Block ([A-Z])/);
 
     if (isPaired) {
-      const ex1Name = section.match(/Exercise 1:\s*([^\n]+)/)?.[1];
-      const ex1Weight = section.match(/Exercise 1:[\s\S]*?Weight:\s*([^\n]+)/)?.[1];
-      const ex1Value = extractNumber(section.match(/Exercise 1:[\s\S]*?Sets Complete:\s*([^\n]+)/)?.[1]);
+      const ex1Name = getLineValue(block, "Exercise 1:");
+      const ex1Weight = getLineValue(block, "Weight:");
+      const ex1Value = extractNumber(getLineValue(block, "Sets Complete:"));
 
-      const ex2Name = section.match(/Exercise 2:\s*([^\n]+)/)?.[1];
-      const ex2Weight = section.match(/Exercise 2:[\s\S]*?Weight:\s*([^\n]+)/)?.[1];
-      const ex2Value = extractNumber(section.match(/Exercise 2:[\s\S]*?Sets Complete:\s*([^\n]+)/)?.[1]);
+      const ex2Name = block.match(/Exercise 2:\\s*([^\\n]+)/)?.[1] || "";
+      const ex2Weight = block.match(/Exercise 2:[\\s\\S]*?Weight:\\s*([^\\n]+)/)?.[1];
+      const ex2Value = extractNumber(block.match(/Exercise 2:[\\s\\S]*?Sets Complete:\\s*([^\\n]+)/)?.[1]);
 
       return {
         type: "paired",
         label: labelMatch?.[1],
         exercises: [
-          { name: ex1Name || "", weight: ex1Weight, value: ex1Value },
-          { name: ex2Name || "", weight: ex2Weight, value: ex2Value },
+          { name: ex1Name, weight: ex1Weight, value: ex1Value },
+          { name: ex2Name, weight: ex2Weight, value: ex2Value },
         ],
       };
     } else {
-      const name = section.match(/Exercise:\s*([^\n]+)/)?.[1];
-      const weight = section.match(/Weight:\s*([^\n]+)/)?.[1];
-      const value = extractNumber(section.match(/Performance:\s*([^\n]+)/)?.[1]);
+      const name = getLineValue(block, "Exercise:");
+      const weight = getLineValue(block, "Weight:");
+      const value = extractNumber(getLineValue(block, "Performance:"));
 
       return {
         type: "single",
-        exercises: [{ name: name || "", weight, value }],
+        exercises: [{ name, weight, value }],
       };
     }
   });
