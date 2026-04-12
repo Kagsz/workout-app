@@ -98,11 +98,6 @@ export default function AppV2() {
     setSeries(mock);
   }, []);
 
-  const allPoints = useMemo(
-    () => series.flatMap((s) => s.points),
-    [series]
-  );
-
   return (
     <div style={{ padding: 20 }}>
       <h1>V2 Polish Graph</h1>
