@@ -109,22 +109,11 @@ type ChartPoint = GraphPoint & {
 };
 
 
-const WEIGHT_COLOR_SCALE = [
-  "#2563eb",
-  "#1d4ed8",
-  "#0f766e",
-  "#0d9488",
-  "#059669",
-  "#16a34a",
-  "#65a30d",
-  "#ca8a04",
-  "#ea580c",
-  "#dc2626",
-  "#c026d3",
-  "#9333ea",
-  "#7c3aed",
-  "#be123c",
-  "#b91c1c",
+const WEIGHT_COLOR_BANDS = [
+  ["#2563eb", "#06b6d4", "#22c55e", "#eab308", "#f97316", "#ef4444"],
+  ["#7c3aed", "#3b82f6", "#14b8a6", "#84cc16", "#f59e0b", "#ec4899"],
+  ["#0f766e", "#16a34a", "#ca8a04", "#ea580c", "#dc2626", "#9333ea"],
+  ["#1d4ed8", "#0891b2", "#65a30d", "#d97706", "#db2777", "#7c3aed"],
 ] as const;
 
 const getStableWeightColor = (weight: string) => {
@@ -134,11 +123,11 @@ const getStableWeightColor = (weight: string) => {
 
   const numericWeight = Number(normalized);
   if (Number.isFinite(numericWeight)) {
-    const steppedIndex = Math.max(
-      0,
-      Math.min(WEIGHT_COLOR_SCALE.length - 1, Math.round(numericWeight / 2.5))
-    );
-    return WEIGHT_COLOR_SCALE[steppedIndex];
+    const steppedIndex = Math.max(0, Math.round(numericWeight / 2.5));
+    const bandSize = WEIGHT_COLOR_BANDS[0].length;
+    const bandIndex = Math.floor(steppedIndex / bandSize) % WEIGHT_COLOR_BANDS.length;
+    const colorIndex = steppedIndex % bandSize;
+    return WEIGHT_COLOR_BANDS[bandIndex][colorIndex];
   }
 
   let hash = 0;
@@ -146,7 +135,8 @@ const getStableWeightColor = (weight: string) => {
     hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
   }
 
-  return WEIGHT_COLOR_SCALE[hash % WEIGHT_COLOR_SCALE.length];
+  const flatPalette = WEIGHT_COLOR_BANDS.flat();
+  return flatPalette[hash % flatPalette.length];
 };
 
 const buildTrianglePath = (cx: number, cy: number, size: number) => {
@@ -1651,7 +1641,7 @@ export default function App() {
                               onClick={() => stepGraphBlock("previous")}
                               disabled={!canGoToPreviousBlock}
                               aria-label="Previous graph"
-                              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                              className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
                             >
                               ‹
                             </button>
@@ -1660,7 +1650,7 @@ export default function App() {
                               onClick={() => stepGraphBlock("next")}
                               disabled={!canGoToNextBlock}
                               aria-label="Next graph"
-                              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                              className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
                             >
                               ›
                             </button>
@@ -1846,7 +1836,7 @@ export default function App() {
                               onClick={() => stepGraphBlock("previous")}
                               disabled={!canGoToPreviousBlock}
                               aria-label="Previous graph"
-                              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                              className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
                             >
                               ‹
                             </button>
@@ -1855,7 +1845,7 @@ export default function App() {
                               onClick={() => stepGraphBlock("next")}
                               disabled={!canGoToNextBlock}
                               aria-label="Next graph"
-                              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                              className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
                             >
                               ›
                             </button>
@@ -2007,7 +1997,7 @@ export default function App() {
                               onClick={() => stepGraphBlock("previous")}
                               disabled={!canGoToPreviousBlock}
                               aria-label="Previous graph"
-                              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                              className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
                             >
                               ‹
                             </button>
@@ -2016,7 +2006,7 @@ export default function App() {
                               onClick={() => stepGraphBlock("next")}
                               disabled={!canGoToNextBlock}
                               aria-label="Next graph"
-                              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                              className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
                             >
                               ›
                             </button>

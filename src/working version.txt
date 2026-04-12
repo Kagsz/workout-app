@@ -109,30 +109,44 @@ type ChartPoint = GraphPoint & {
 };
 
 
-const WEIGHT_COLOR_PALETTE = [
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#06b6d4",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
-  "#f43f5e",
-];
+const WEIGHT_COLOR_SCALE = [
+  "#2563eb",
+  "#1d4ed8",
+  "#0f766e",
+  "#0d9488",
+  "#059669",
+  "#16a34a",
+  "#65a30d",
+  "#ca8a04",
+  "#ea580c",
+  "#dc2626",
+  "#c026d3",
+  "#9333ea",
+  "#7c3aed",
+  "#be123c",
+  "#b91c1c",
+] as const;
 
 const getStableWeightColor = (weight: string) => {
-  const trimmed = weight.trim().toUpperCase();
+  const normalized = normalizeWeightInput(weight).toUpperCase();
 
-  if (!trimmed || trimmed === "BW" || trimmed === "B") return "#9ca3af";
+  if (!normalized || normalized === "BW" || normalized === "B") return "#9ca3af";
 
-  let hash = 0;
-  for (let index = 0; index < trimmed.length; index += 1) {
-    hash = (hash * 31 + trimmed.charCodeAt(index)) >>> 0;
+  const numericWeight = Number(normalized);
+  if (Number.isFinite(numericWeight)) {
+    const steppedIndex = Math.max(
+      0,
+      Math.min(WEIGHT_COLOR_SCALE.length - 1, Math.round(numericWeight / 2.5))
+    );
+    return WEIGHT_COLOR_SCALE[steppedIndex];
   }
 
-  return WEIGHT_COLOR_PALETTE[hash % WEIGHT_COLOR_PALETTE.length];
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+  }
+
+  return WEIGHT_COLOR_SCALE[hash % WEIGHT_COLOR_SCALE.length];
 };
 
 const buildTrianglePath = (cx: number, cy: number, size: number) => {
@@ -1346,6 +1360,20 @@ export default function App() {
     setScreen("graph");
   };
 
+  const selectedBlockIndex = selectedRoutine?.blocks.findIndex((block) => block.id === selectedBlock?.id) ?? -1;
+  const canGoToPreviousBlock = selectedBlockIndex > 0;
+  const canGoToNextBlock = !!selectedRoutine && selectedBlockIndex >= 0 && selectedBlockIndex < selectedRoutine.blocks.length - 1;
+
+  const stepGraphBlock = (direction: "previous" | "next") => {
+    if (!selectedRoutine || selectedBlockIndex < 0) return;
+
+    const nextIndex = direction === "previous" ? selectedBlockIndex - 1 : selectedBlockIndex + 1;
+    const nextBlock = selectedRoutine.blocks[nextIndex];
+    if (!nextBlock) return;
+
+    setSelectedBlockId(nextBlock.id);
+  };
+
   const updateSessionDraftField = (field: "date" | "sessionNumber", value: string) => {
     setSessionDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
   };
@@ -1615,6 +1643,29 @@ export default function App() {
                             </div>
                           ))}
                         </div>
+
+                        {selectedRoutine.blocks.length > 1 ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => stepGraphBlock("previous")}
+                              disabled={!canGoToPreviousBlock}
+                              aria-label="Previous graph"
+                              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                            >
+                              ‹
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => stepGraphBlock("next")}
+                              disabled={!canGoToNextBlock}
+                              aria-label="Next graph"
+                              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                            >
+                              ›
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="text-sm text-zinc-500">Select a routine to begin editing.</div>
@@ -1787,6 +1838,29 @@ export default function App() {
                             <div className="text-sm text-zinc-500">No saved session history yet for this program/routine/member.</div>
                           )}
                         </div>
+
+                        {selectedRoutine.blocks.length > 1 ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => stepGraphBlock("previous")}
+                              disabled={!canGoToPreviousBlock}
+                              aria-label="Previous graph"
+                              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                            >
+                              ‹
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => stepGraphBlock("next")}
+                              disabled={!canGoToNextBlock}
+                              aria-label="Next graph"
+                              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                            >
+                              ›
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">No routine selected yet.</div>
@@ -1876,7 +1950,7 @@ export default function App() {
                     </div>
 
                     {chartSeries.length ? (
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-2 sm:p-3">
+                      <div className="relative rounded-2xl border border-zinc-200 bg-white p-2 sm:p-3">
                         <div className="h-[320px] w-full">
                           <ResponsiveContainer width="100%" height="100%">
                             <LineChart margin={{ top: 12, right: 8, left: 0, bottom: 52 }}>
@@ -1925,6 +1999,29 @@ export default function App() {
                             </LineChart>
                           </ResponsiveContainer>
                         </div>
+
+                        {selectedRoutine.blocks.length > 1 ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => stepGraphBlock("previous")}
+                              disabled={!canGoToPreviousBlock}
+                              aria-label="Previous graph"
+                              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                            >
+                              ‹
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => stepGraphBlock("next")}
+                              disabled={!canGoToNextBlock}
+                              aria-label="Next graph"
+                              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/80 bg-white/75 text-xl text-zinc-700 shadow-sm backdrop-blur sm:hidden disabled:pointer-events-none disabled:opacity-25"
+                            >
+                              ›
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-zinc-500">
