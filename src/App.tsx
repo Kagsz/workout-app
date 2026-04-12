@@ -1,159 +1,107 @@
 import React from "react";
 
-// ===== V2 STEP 3 (IMPORTER ADDED) =====
+// ===== V2 STEP 3 PHASE 2 =====
 
 // ---------- TYPES ----------
 
-type BlockType = "paired" | "single";
-
-type ProgramDefinition = {
-  id: string;
+type ParsedExercise = {
   name: string;
-  routines: RoutineDefinition[];
+  weight?: string;
+  target?: string;
+  value?: number;
 };
 
-type RoutineDefinition = {
-  id: string;
-  label: string;
-  order: number;
-  blocks: BlockDefinition[];
+type ParsedBlock = {
+  type: "paired" | "single";
+  label?: string;
+  exercises: ParsedExercise[];
 };
 
-type BlockDefinition = {
-  id: string;
-  label: string;
-  order: number;
-  type: BlockType;
-  slots: ExerciseSlotDefinition[];
-};
-
-type ExerciseSlotDefinition = {
-  id: string;
-  order: number;
-  lineStyle: "solid" | "dashed";
-  baseShape: "circle" | "square";
-  allowedExercises: ExerciseDefinition[];
-};
-
-type ExerciseDefinition = {
-  id: string;
-  name: string;
-};
-
-// ---------- PROGRAMS ----------
-
-const PROGRAM_1: ProgramDefinition = {
-  id: "program-1",
-  name: "Program 1",
-  routines: [
-    { id: "p1-d1", label: "Day 1", order: 1, blocks: [] },
-    { id: "p1-d2", label: "Day 2", order: 2, blocks: [] },
-  ],
-};
-
-const PROGRAM_2: ProgramDefinition = {
-  id: "program-2",
-  name: "Program 2",
-  routines: [
-    { id: "p2-d1", label: "Day 1", order: 1, blocks: [] },
-    { id: "p2-d2", label: "Day 2", order: 2, blocks: [] },
-    { id: "p2-d3", label: "Day 3", order: 3, blocks: [] },
-    { id: "p2-d4", label: "Day 4", order: 4, blocks: [] },
-  ],
-};
-
-// ---------- IMPORTER ----------
-
-type ImportDraft = {
+type ParsedSession = {
   sessionNumber: number;
   date: string;
-  routineLabel: string;
+  routine: string;
+  blocks: ParsedBlock[];
 };
 
-type SessionRecord = {
-  sessionNumber: number;
-  date: string;
-  routineLabel: string;
-};
+// ---------- PARSER ----------
 
-let sessionStore: SessionRecord[] = [];
-
-function parseRelayText(input: string): ImportDraft[] {
-  const blocks = input.split("Program:").filter(Boolean);
-
-  return blocks.map((block) => {
-    const sessionMatch = block.match(/Session #:\s*(\d+)/);
-    const dateMatch = block.match(/Date:\s*([^\n]+)/);
-    const routineMatch = block.match(/Routine:\s*([^\n]+)/);
-
-    return {
-      sessionNumber: sessionMatch ? Number(sessionMatch[1]) : 0,
-      date: dateMatch ? dateMatch[1].trim() : "",
-      routineLabel: routineMatch ? routineMatch[1].trim() : "",
-    };
-  });
+function extractNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const match = value.match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : undefined;
 }
 
-function upsertSessions(newSessions: SessionRecord[]) {
-  newSessions.forEach((incoming) => {
-    const index = sessionStore.findIndex(
-      (s) => s.sessionNumber === incoming.sessionNumber
-    );
+function parseSession(input: string): ParsedSession {
+  const sessionNumber = Number(input.match(/Session #:\s*(\d+)/)?.[1] || 0);
+  const date = input.match(/Date:\s*([^\n]+)/)?.[1]?.trim() || "";
+  const routine = input.match(/Routine:\s*([^\n]+)/)?.[1]?.trim() || "";
 
-    if (index >= 0) {
-      sessionStore[index] = incoming;
+  const blockSections = input.split(/Paired Block|Single Block/).slice(1);
+
+  const blockHeaders = input.match(/Paired Block [A-Z]|Single Block/g) || [];
+
+  const blocks: ParsedBlock[] = blockSections.map((section, index) => {
+    const header = blockHeaders[index];
+
+    const isPaired = header.includes("Paired");
+    const labelMatch = header.match(/Block ([A-Z])/);
+
+    if (isPaired) {
+      const ex1Name = section.match(/Exercise 1:\s*([^\n]+)/)?.[1];
+      const ex1Weight = section.match(/Exercise 1:[\s\S]*?Weight:\s*([^\n]+)/)?.[1];
+      const ex1Value = extractNumber(section.match(/Exercise 1:[\s\S]*?Sets Complete:\s*([^\n]+)/)?.[1]);
+
+      const ex2Name = section.match(/Exercise 2:\s*([^\n]+)/)?.[1];
+      const ex2Weight = section.match(/Exercise 2:[\s\S]*?Weight:\s*([^\n]+)/)?.[1];
+      const ex2Value = extractNumber(section.match(/Exercise 2:[\s\S]*?Sets Complete:\s*([^\n]+)/)?.[1]);
+
+      return {
+        type: "paired",
+        label: labelMatch?.[1],
+        exercises: [
+          { name: ex1Name || "", weight: ex1Weight, value: ex1Value },
+          { name: ex2Name || "", weight: ex2Weight, value: ex2Value },
+        ],
+      };
     } else {
-      sessionStore.push(incoming);
+      const name = section.match(/Exercise:\s*([^\n]+)/)?.[1];
+      const weight = section.match(/Weight:\s*([^\n]+)/)?.[1];
+      const value = extractNumber(section.match(/Performance:\s*([^\n]+)/)?.[1]);
+
+      return {
+        type: "single",
+        exercises: [{ name: name || "", weight, value }],
+      };
     }
   });
+
+  return { sessionNumber, date, routine, blocks };
 }
 
 // ---------- APP ----------
 
 export default function AppV2() {
-  const programs = [PROGRAM_1, PROGRAM_2];
   const [input, setInput] = React.useState("");
 
-  const handleImport = () => {
-    const drafts = parseRelayText(input);
-
-    const sessions: SessionRecord[] = drafts.map((d) => ({
-      sessionNumber: d.sessionNumber,
-      date: d.date,
-      routineLabel: d.routineLabel,
-    }));
-
-    upsertSessions(sessions);
-
-    console.log("Imported Sessions:", sessionStore);
+  const handleParse = () => {
+    const parsed = parseSession(input);
+    console.log("PARSED SESSION:", parsed);
   };
 
   return (
     <div style={{ padding: 20 }}>
-      <h1>V2 Step 3</h1>
-
-      <p>Programs: {programs.length}</p>
-
-      {programs.map((p) => (
-        <div key={p.id}>
-          <h2>{p.name}</h2>
-          <p>Routines: {p.routines.length}</p>
-        </div>
-      ))}
-
-      <hr />
-
-      <h3>Importer</h3>
+      <h1>V2 Phase 2 Parser</h1>
 
       <textarea
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        rows={10}
+        rows={12}
         style={{ width: "100%" }}
       />
 
-      <button onClick={handleImport} style={{ marginTop: 10 }}>
-        Import Sessions
+      <button onClick={handleParse} style={{ marginTop: 10 }}>
+        Parse Session
       </button>
     </div>
   );
