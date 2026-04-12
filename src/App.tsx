@@ -25,7 +25,11 @@ type ParsedSession = {
 };
 
 // ---------- PARSER ----------
-
+function extractNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const match = value.match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : undefined;
+}
 function getLineValue(input: string, label: string): string {
   const line = input
     .split("\\n")
