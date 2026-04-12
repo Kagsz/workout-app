@@ -1,5 +1,6 @@
+import React from "react";
 
-// ===== CLEAN V2 (STEP 2) =====
+// ===== V2 STEP 3 (IMPORTER ADDED) =====
 
 // ---------- TYPES ----------
 
@@ -45,41 +46,8 @@ const PROGRAM_1: ProgramDefinition = {
   id: "program-1",
   name: "Program 1",
   routines: [
-    {
-      id: "p1-d1",
-      label: "Day 1",
-      order: 1,
-      blocks: [
-        {
-          id: "p1-d1-a",
-          label: "Block A",
-          order: 1,
-          type: "paired",
-          slots: [
-            {
-              id: "p1-d1-a-1",
-              order: 1,
-              lineStyle: "solid",
-              baseShape: "circle",
-              allowedExercises: [{ id: "skydivers", name: "Skydivers" }],
-            },
-            {
-              id: "p1-d1-a-2",
-              order: 2,
-              lineStyle: "dashed",
-              baseShape: "square",
-              allowedExercises: [{ id: "goblet", name: "Goblet Squat" }],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: "p1-d2",
-      label: "Day 2",
-      order: 2,
-      blocks: [],
-    },
+    { id: "p1-d1", label: "Day 1", order: 1, blocks: [] },
+    { id: "p1-d2", label: "Day 2", order: 2, blocks: [] },
   ],
 };
 
@@ -94,22 +62,99 @@ const PROGRAM_2: ProgramDefinition = {
   ],
 };
 
+// ---------- IMPORTER ----------
+
+type ImportDraft = {
+  sessionNumber: number;
+  date: string;
+  routineLabel: string;
+};
+
+type SessionRecord = {
+  sessionNumber: number;
+  date: string;
+  routineLabel: string;
+};
+
+let sessionStore: SessionRecord[] = [];
+
+function parseRelayText(input: string): ImportDraft[] {
+  const blocks = input.split("Program:").filter(Boolean);
+
+  return blocks.map((block) => {
+    const sessionMatch = block.match(/Session #:\s*(\d+)/);
+    const dateMatch = block.match(/Date:\s*([^\n]+)/);
+    const routineMatch = block.match(/Routine:\s*([^\n]+)/);
+
+    return {
+      sessionNumber: sessionMatch ? Number(sessionMatch[1]) : 0,
+      date: dateMatch ? dateMatch[1].trim() : "",
+      routineLabel: routineMatch ? routineMatch[1].trim() : "",
+    };
+  });
+}
+
+function upsertSessions(newSessions: SessionRecord[]) {
+  newSessions.forEach((incoming) => {
+    const index = sessionStore.findIndex(
+      (s) => s.sessionNumber === incoming.sessionNumber
+    );
+
+    if (index >= 0) {
+      sessionStore[index] = incoming;
+    } else {
+      sessionStore.push(incoming);
+    }
+  });
+}
+
 // ---------- APP ----------
 
 export default function AppV2() {
   const programs = [PROGRAM_1, PROGRAM_2];
+  const [input, setInput] = React.useState("");
+
+  const handleImport = () => {
+    const drafts = parseRelayText(input);
+
+    const sessions: SessionRecord[] = drafts.map((d) => ({
+      sessionNumber: d.sessionNumber,
+      date: d.date,
+      routineLabel: d.routineLabel,
+    }));
+
+    upsertSessions(sessions);
+
+    console.log("Imported Sessions:", sessionStore);
+  };
 
   return (
     <div style={{ padding: 20 }}>
-      <h1>V2 Clean Build</h1>
+      <h1>V2 Step 3</h1>
+
       <p>Programs: {programs.length}</p>
 
       {programs.map((p) => (
-        <div key={p.id} style={{ marginBottom: 20 }}>
+        <div key={p.id}>
           <h2>{p.name}</h2>
           <p>Routines: {p.routines.length}</p>
         </div>
       ))}
+
+      <hr />
+
+      <h3>Importer</h3>
+
+      <textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        rows={10}
+        style={{ width: "100%" }}
+      />
+
+      <button onClick={handleImport} style={{ marginTop: 10 }}>
+        Import Sessions
+      </button>
     </div>
   );
 }
