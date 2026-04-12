@@ -1,0 +1,463 @@
+Program: 2
+
+Session #: 1
+Date: August 19, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 22
+Target: 10
+Sets Complete: 5
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 10
+Target: 5
+Sets Complete: 4
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 36.8
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 5
+Target: 5
+Sets Complete: 4
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 40
+Time (minutes): 3
+Target: 50 yards
+Performance: 4
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 12
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 4
+
+Program: 2
+
+Session #: 5
+Date: August 23, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 22
+Target: 10
+Sets Complete: 3
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 10
+Target: 5
+Sets Complete: 4
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 38.3
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 5
+Target: 5
+Sets Complete: 4
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 4
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 40
+Time (minutes): 3
+Target: 50 yards
+Performance: 5
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 12
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 5
+
+Program: 2
+
+Session #: 9
+Date: August 28, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 22
+Target: 10
+Sets Complete: 4
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 10
+Target: 5
+Sets Complete: 4
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 40
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 5
+Target: 5
+Sets Complete: 4
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 4
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 45
+Time (minutes): 3
+Target: 50 yards
+Performance: 3
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 15
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 5
+
+Program: 2
+
+Session #: 13
+Date: September 2, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 25
+Target: 10
+Sets Complete: 4
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 20
+Target: 5
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 38
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 7.5
+Target: 5
+Sets Complete: 4
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 4
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 45
+Time (minutes): 3
+Target: 50 yards
+Performance: 3
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 15
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 5
+
+Program: 2
+
+Session #: 17
+Date: September 9, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 25
+Target: 10 
+Sets Complete: 4
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 20
+Target: 5
+Sets Complete: 4
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 38
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 25
+Target: 5
+Sets Complete: 4
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 4
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 45
+Time (minutes): 3
+Target: 50 yards
+Performance: 3
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 17
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 4
+
+Program: 2
+
+Session #: 21
+Date: September 16, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 27
+Target: 10
+Sets Complete: 4
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 25
+Target: 5
+Sets Complete: 4
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 35
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 10
+Target: 5
+Sets Complete: 3
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 2
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 45
+Time (minutes): 3
+Target: 50 yards
+Performance: 4
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 17
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 5
+
+Program: 2
+
+Session #: 25
+Date: September 23, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 30
+Target: 10
+Sets Complete: 3
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 25
+Target: 5
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 34
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 10
+Target: 5
+Sets Complete: 3
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 45
+Time (minutes): 3
+Target: 50 yards
+Performance: 4
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 17
+Target: 10
+Sets Complete: 5
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 4
+
+Program: 2
+
+Session #: 29
+Date: September 29, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: TEMPO CS 1 Arm DB Row
+Weight: 30
+Target: 10
+Sets Complete: 4
+
+Exercise 2: TEMPO Plate Reach Squat
+Weight: 25
+Target: 5
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3 
+Target: 30/30 Calories
+Performance: 36.8
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: TEMPO 1 Leg RDL Iso Hand Pass
+Weight: 10
+Target: 5
+Sets Complete: 4
+
+Exercise 2: Plank March
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Farmer's Carry
+Weight: 50
+Time (minutes): 3
+Target: 50 yards
+Performance: 4
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: TEMPO DB Bicep Curls
+Weight: 20
+Target: 10
+Sets Complete: 4
+
+Exercise 2: PAUSE Shoulder Taps
+Weight: BW
+Target: 5
+Sets Complete: 3

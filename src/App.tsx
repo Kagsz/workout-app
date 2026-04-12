@@ -59,6 +59,8 @@ type SessionExerciseInput = {
   weight: string;
   performance: string;
   setsCompleted: string;
+  target?: string;
+  metric?: string;
 };
 
 type SessionBlockInput = {
@@ -145,6 +147,20 @@ const buildTrianglePath = (cx: number, cy: number, size: number) => {
   return `${cx},${cy - height / 2} ${cx - half},${cy + height / 2} ${cx + half},${cy + height / 2}`;
 };
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const formatTargetLabel = (target: string, metric: string) => {
+  const trimmedTarget = String(target || "").trim();
+  const trimmedMetric = String(metric || "").trim();
+
+  if (!trimmedTarget) return "—";
+  if (!trimmedMetric) return trimmedTarget;
+
+  const metricPattern = new RegExp(`\\b${escapeRegExp(trimmedMetric)}\\b`, "i");
+  return metricPattern.test(trimmedTarget) ? trimmedTarget : `${trimmedTarget} ${trimmedMetric}`.trim();
+};
+
+
 function ExerciseDot({
   cx,
   cy,
@@ -194,7 +210,7 @@ function GraphTooltip({
   const targetContext =
     point.blockType === "single"
       ? `${durationLabel} for ${point.target || point.metric || "output"}`
-      : `Target: ${`${point.target || "—"} ${point.metric || ""}`.trim()}`;
+      : `Target: ${formatTargetLabel(point.target, point.metric)}`;
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg">
@@ -255,20 +271,26 @@ const createSessionDraft = (programId: string, routine: Routine, memberId: strin
       weight: "",
       performance: "",
       setsCompleted: "",
+      target: exercise.target,
+      metric: exercise.metric,
     })),
   })),
 });
+
 
 const STORAGE_KEYS = {
   members: "workout-app-members-v1",
   programs: "workout-app-programs-v1",
   savedSessions: "workout-app-saved-sessions-v1",
   seeded: "workout-app-seeded-program1-v1",
+  seededProgram2: "workout-app-seeded-program2-v1",
 };
 
 const ROUTINE_IDS = {
   day1: "routine-day-1",
   day2: "routine-day-2",
+  day3: "routine-day-3",
+  day4: "routine-day-4",
 };
 
 const BLOCK_IDS = {
@@ -282,6 +304,16 @@ const BLOCK_IDS = {
   day2B: "block-day2-b",
   day2Single2: "block-day2-single-2",
   day2C: "block-day2-c",
+  day3A: "block-day3-a",
+  day3Single1: "block-day3-single-1",
+  day3B: "block-day3-b",
+  day3Single2: "block-day3-single-2",
+  day3C: "block-day3-c",
+  day4A: "block-day4-a",
+  day4Single1: "block-day4-single-1",
+  day4B: "block-day4-b",
+  day4Single2: "block-day4-single-2",
+  day4C: "block-day4-c",
 };
 
 const EXERCISE_IDS = {
@@ -301,8 +333,26 @@ const EXERCISE_IDS = {
   rower2: "exercise-rower-2",
   bentOverRow: "exercise-db-bent-over-row",
   bearToPushup: "exercise-bear-to-pushup",
+  p2TempoCsOneArmDbRow: "exercise-p2-tempo-cs-one-arm-db-row",
+  p2TempoPlateReachSquat: "exercise-p2-tempo-plate-reach-squat",
+  p2TempoOneLegRdlIsoHandPass: "exercise-p2-tempo-one-leg-rdl-iso-hand-pass",
+  p2TempoDbBicepCurls: "exercise-p2-tempo-db-bicep-curls",
+  p2InclineDbBench: "exercise-p2-1-arm-inc-db-bench-press",
+  p2TempoCsAltOhReach: "exercise-p2-tempo-cs-alt-oh-reach",
+  p2ContraSplitSquat: "exercise-p2-contra-split-squat",
+  p2MbSlams: "exercise-p2-mb-slams",
+  p2Kbdl: "exercise-p2-kbdl",
+  p2PauseFarmerMarch: "exercise-p2-pause-1-arm-farmers-march",
+  p2Day3Rower: "exercise-p2-rower-day3",
+  p2BallGbEccHc: "exercise-p2-ball-gb-ecc-hc",
+  p2DeadbugLegsOnly: "exercise-p2-deadbug-legs-only",
+  p2Day3FarmersCarry: "exercise-p2-farmers-carry-day3",
+  p2Day4MbSlams: "exercise-p2-mb-slams-day4",
+  p2BearMtClimbers: "exercise-p2-bear-mt-climbers",
+  p2ContraStepUps: "exercise-p2-contra-step-ups",
+  p2OneArmDbRowDay4: "exercise-p2-one-arm-db-row-day4",
+  p2OneArmSkullcrusher: "exercise-p2-one-arm-skullcrusher",
 };
-
 const PROGRAM_1_IMPORT_TEMPLATE = "Program 1 \nDay 1: July 25, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - BW \nExercise 2: Goblet Squat - 20 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 4 sets completed of each exercise \n\nSingle block \nExercise: \nBike Time: 3m \nTarget: Calories \nSession Data: 18 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 20 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW\nTarget reps exercise 1: 5 \nTarget reps exercise 2: 5 \nSession Data: 4 sets completed of each \n\nSingle block \nExercise: Run/walk \nTime: 3m \nTarget: Laps \nSession Data: 3 \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 25 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 3 sets completed of each\n\nProgram 1 \nDay 2: July 28th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 20 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 8 \nSession data: \nExercise 1: 4 sets completed\nExercise 2: 3 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 30  \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - BW \nExercise 2: DB Bench Press - 15 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 5 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes\nTarget: Calories \nSession Data: 34 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 15 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10\nTarget reps exercise 2: 5 \nSession Data: 3 sets of each completed\n\nProgram 1 \nDay 3: July 30th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 3 lbs \nExercise 2: Goblet Squat - 22 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 4 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 \nTarget: Calories \nSession Data: 26 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 22 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 \nTarget: Laps \nSession Data: 3 \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 30 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 5 sets of each completed\n\nProgram 1 \nDay 4: July 31st, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 20 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 4 sets complete \nExercise 2: 3 sets complete \n\nSingle block \nExercise: Rower \nTime: 3 \nTarget: Calories \nSession Data: 38 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - BW \nExercise 2: DB Bench Press - 17 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: \nExercise 1: 5 sets completed \nExercise 2: 4 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 \nTarget: Calories \nSession Data: 36  \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 15 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 5 sets of each completed\n\nProgram 1\nDay 5: August 1st, 2025\n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 3 lbs \nExercise 2: Goblet Squat - 25 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data:\nExercise 1: 5 sets completed\nExercise 2: 4 sets completed \n\nSingle block \nExercise: Bike \nTime: 3 \nTarget: Calories \nSession Data: 28\n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 25 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: \nExercise 1: 6 sets completed \nExercise 2: 5 sets completed \n\nSingle block \nExercise: Run/walk \nTime: 3 \nTarget: Laps \nSession Data: 4 \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 35 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: \nExercise 1: 4 sets completed\nExercise 2: 2 sets completed\n\n\nProgram 1 \nDay 6: August 2nd, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 17 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 7 sets completed \nExercise 2: 6 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 41 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 15 lbs \nExercise 2: DB Bench Press - 20 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 34 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 17 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: \nExercise 1: 6 sets completed \nExercise 2: 5 sets completed\n\nProgram 1 \nDay 7: August 4th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 3 lbs \nExercise 2: Goblet Squat - 25 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 6 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 28.9 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 25 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 6 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 35 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 5 sets of each completed\n\n\nProgram 1 \nDay 8: August 5th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 17 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 7 sets \nExercise 2: 6 sets \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 45 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 15 lbs \nExercise 2: DB Bench Press - 27 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 44 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 17 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 5 sets of each completed\n\nProgram 1 \nDay 9: August 7th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 27 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: \nExercise 1: 4 sets completed \nExercise 2: 3 sets completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 31 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 27 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 5 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 35 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 4 sets completed of each\n\n\nProgram 1 \nDay 10: August 8th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 17 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 7 sets completed \nExercise 2: 6 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 50 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 17 lbs \nExercise 2: DB Bench Press - 30 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 45 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 17 lbs \nExercise 2: Bear to Pushup - bw \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 6 sets of each completed\n\nProgram 1 \nDay 11: August 11th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 27 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 5 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 31 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 27 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 5 sets of each completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 40 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: \nExercise 1: 4 sets completed \nExercise 2: 3 sets completed\n\n\nProgram 1 \nDay 12: August 12th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 20 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: 6 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 51 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 20 lbs \nExercise 2: DB Bench Press - 30 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 44 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 20 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 5 sets of each completed\n\nProgram 1 \nDay 13: August 13th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 30 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 5 sets of each completed \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 32 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 30 lbs \nExercise 2: PAUSE Bench Shoulder Taps \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: \nExercise 1: 5 sets completed \nExercise 2: 4 sets completed \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 40 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: 3 sets of each completed\n\nProgram 1\nDay 14: August 14th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 25 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: \nExercise 1: 8 sets completed\nExercise 2: 7 sets completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 51 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 20 lbs \nExercise 2: DB Bench Press - 30 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: \nExercise 1: 5 sets completed \nExercise 2: 4 sets completed\n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 45 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 20 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: \nExercise 1: 6 sets completed\nExercise 2: 5 sets completed\n\nProgram 1 \nDay 15: August 15th, 2025 \n\nPaired Block A - time 10 minutes \nExercise 1: PAUSE CS Skydivers - 5 lbs \nExercise 2: Goblet Squat - 30 lbs \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 10 \nSession data: 5 sets completed for each \n\nSingle block \nExercise: Bike \nTime: 3 minutes \nTarget: Calories \nSession Data: 34 \n\nPaired Block B - time 10 minutes \nExercise 1: PAUSE 1 Arm DB Row - 30 lbs \nExercise 2: PAUSE Bench Shoulder Taps - BW \nTarget reps exercise: 5 \nTarget reps exercise: 5 \nSession Data: 5 sets completed of each \n\nSingle block \nExercise: Run/walk \nTime: 3 minutes \nTarget: Laps \nSession Data: 4.5  \n\nPaired Block C - time 10 minutes \nExercise 1: TEMPO BW 1 Leg RDL - BW \nExercise 2: Farmer's Carry - 40 lbs \nTarget reps exercise 1: 5 \nTarget reps exercise 2: 50 yards \nSession Data: \nExercise 1: 4 sets completed \nExercise 2: 3 sets completed\n\n\nProgram 1 \nDay 16: August 16th, 2025 \nPaired Block A - time 10 minutes \nExercise 1: DB RDL - 27 lbs \nExercise 2: Plank March - BW \nTarget reps exercise 1: 8 \nTarget reps exercise 2: 4 \nSession data: 6 sets completed of each \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 52 \n\nPaired Block B - time 10 minutes \nExercise 1: Goblet Reverse Lunge - 20 lbs \nExercise 2: DB Bench Press - 35 lbs \nTarget reps exercise: 8 \nTarget reps exercise: 8 \nSession Data: 4 sets of each completed \n\nSingle block \nExercise: Rower \nTime: 3 minutes \nTarget: Calories \nSession Data: 47 \n\nPaired Block C - time 10 minutes \nExercise 1: DB Bent Over Row - 20 lbs \nExercise 2: Bear to Pushup - BW \nTarget reps exercise 1: 10 \nTarget reps exercise 2: 5 \nSession Data: 6 sets of each complete";
 
 const RELAY_TEMPLATE_TEXT = `Program:
@@ -362,6 +412,8 @@ Weight:
 Target:
 Sets Complete:
 `;
+
+const PROGRAM_2_RELAY_TEMPLATE = "Program: 2\n\nSession #: 1\nDate: August 19, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 22\nTarget: 10\nSets Complete: 5\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 10\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 36.8\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 5\nTarget: 5\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 40\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 12\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nProgram: 2\n\nSession #: 5\nDate: August 23, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 22\nTarget: 10\nSets Complete: 3\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 10\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 38.3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 5\nTarget: 5\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 40\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 12\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nProgram: 2\n\nSession #: 9\nDate: August 28, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 22\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 10\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 40\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 5\nTarget: 5\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 3\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 15\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nProgram: 2\n\nSession #: 13\nDate: September 2, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 25\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 20\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 38\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 7.5\nTarget: 5\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 3\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 15\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nProgram: 2\n\nSession #: 17\nDate: September 9, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 25\nTarget: 10 \nSets Complete: 4\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 20\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 38\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 25\nTarget: 5\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 3\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 17\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nProgram: 2\n\nSession #: 21\nDate: September 16, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 27\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 25\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 35\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 10\nTarget: 5\nSets Complete: 3\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 2\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 17\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nProgram: 2\n\nSession #: 25\nDate: September 23, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 30\nTarget: 10\nSets Complete: 3\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 25\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 34\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 10\nTarget: 5\nSets Complete: 3\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 17\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nProgram: 2\n\nSession #: 29\nDate: September 29, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: TEMPO CS 1 Arm DB Row\nWeight: 30\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO Plate Reach Squat\nWeight: 25\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3 \nTarget: 30/30 Calories\nPerformance: 36.8\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: TEMPO 1 Leg RDL Iso Hand Pass\nWeight: 10\nTarget: 5\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 50\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TEMPO DB Bicep Curls\nWeight: 20\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nProgram: 2\n\nSession #: 2\nDate: August 20, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press \nWeight: 25\nTarget: 10\nSets Complete: 5\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 15\nTarget: 8\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 50\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 40\nTarget: 8\nSets Complete: 5\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 40\nTarget: 4\nSets Complete: 5\n\nProgram: 2\n\nSession #: 6\nDate: August 24, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press \nWeight: 27\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 15\nTarget: 8\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 53\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 44\nTarget: 8\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 10\nDate: August 29, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press\nWeight: 30\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.25\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 15\nTarget: 8\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 62 \n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 44\nTarget: 8\nSets Complete: 5\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 14\nDate: September 3, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press\nWeight: 30\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 15\nTarget: 8\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 71\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 44\nTarget: 8\nSets Complete: 5\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 18\nDate: September 10, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press\nWeight: 30\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.25\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 15\nTarget: 8\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 66\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 50\nTarget: 8\nSets Complete: 5\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 22\nDate: September 17, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1:  1 Arm Inc. DB Bench Press\nWeight: 35\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.75\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 17\nTarget: 8\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 68\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 60\nTarget: 8\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 50\nTarget: 4\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 26\nDate: September 24, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press\nWeight: 35\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.75\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 17\nTarget: 8\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 70\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 60\nTarget: 8\nSets Complete: 5\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 50\nTarget: 4\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 30\nDate: September 30, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: 1 Arm Inc. DB Bench Press\nWeight: 35\nTarget: 10\nSets Complete: 4\n\nExercise 2: TEMPO CS Alt. OH Reach\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.9\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Split Squat\nWeight: 17\nTarget: 8\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 72\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 70\nTarget: 8\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 55\nTarget: 4\nSets Complete: 3\n\nProgram: 2\n\nSession #: 3\nDate: August 21, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 27\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Bent Over Row\nWeight: 17\nTarget: 12 down by 1\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 52\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 40\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 7\nDate: August 25, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 27\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Bent Over Row\nWeight: 20\nTarget: 12 down by 1\nSets Complete: 5\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 52\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 5\n\nExercise 2: Plank March\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 40\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 3\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 11\nDate: August 31, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 27\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Bent Over Row\nWeight: 20\nTarget: 12 down by 1\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 49\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nExercise 2: Plank March\nWeight: BW\nTarget: 5\nSets Complete: 3\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 40\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 3\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 15\nDate: September 4, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 27\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Bent Over Row\nWeight: 20\nTarget: 12 down by 1\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 50\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: Plank March\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 40\nTime (minutes): 3\nTarget: 50 yards \nPerformance: 5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 19\nDate: September 13, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 35\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Bent Over Row\nWeight: 20\nTarget: 12 down by 1\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 50\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: Deadbug - legs only\nWeight: BW\nTarget: 6\nSets Complete: 3\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 23\nDate: September 19, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 40\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Bent Over Row\nWeight: 22\nTarget: 12 down by 1\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 48\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nExercise 2: Deadbug - legs only\nWeight: BW\nTarget: 6\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 27\nDate: September 25, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 45\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Bent Over Row\nWeight: 22\nTarget: 12 down by 1\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 48\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: Deadbug - legs only\nWeight: BW\nTarget: 6\nSets Complete: 3\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 45\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 5\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 31\nDate: October 1, 2025\nRoutine: Day 3 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: Goblet Squat\nWeight: 45\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Bent Over Row\nWeight: 25\nTarget: 12 down by 1\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 30/30 Calories\nPerformance: 47\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Ball GB Ecc. HC\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: Deadbug - legs only\nWeight: BW\nTarget: 6\nSets Complete: 4\n\nSingle Block \nExercise: Farmer's Carry\nWeight: 50\nTime (minutes): 3\nTarget: 50 yards\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: PAUSE CS Skydivers\nWeight: 7.5\nTarget: 10\nSets Complete: 5\n\nExercise 2: PAUSE Shoulder Taps\nWeight: BW\nTarget: 5\nSets Complete: 4\n\nProgram: 2\n\nSession #: 4\nDate: August 22, 2025\nRoutine: Day 4 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 25\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 46\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 25\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.25\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 7.5\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 40\nTarget: 4\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 8\nDate: August 27, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 27\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 62\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 27\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 15\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 40\nTarget: 4\nSets Complete: 3\n\n\nProgram: 2\n\nSession #: 12\nDate: September 1, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 30\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 6\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 70\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: 5\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 30\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 15\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 40\nTarget: 4\nSets Complete: 4\n\n\nProgram: 2\n\nSession #: 16\nDate: September 8, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 30\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 6\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 76\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: 10\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 30\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 3\n\n\nProgram: 2\n\nSession #: 20\nDate: September 15, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 30\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 79 \n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: 12\nTarget: 8\nSets Complete: 3\n\nExercise 2: 1 Arm DB Row\nWeight: 30\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 17\nTarget: 10\nSets Complete: 3\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 3\n\n\nProgram: 2\n\nSession #: 24\nDate: September 22, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 35\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 79\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: 12\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 30\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 5\n\n\nProgram: 2\n\nSession #: 28\nDate: September 26, 2025\nRoutine: Day 4 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 35\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 6\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 82\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: 12\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 30\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.75\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 45\nTarget: 4\nSets Complete: 3\n\n\nProgram: 2\n\nSession #: 32\nDate: October 2, 2025\nRoutine: Day 4 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 35\nTarget: 10\nSets Complete: 6\n\nExercise 2: Bear Mt. Climbers\nWeight: BW\nTarget: 5\nSets Complete: 5\n\nSingle Block \nExercise: MB Slams\nTime (minutes): 3\nTarget: Reps\nPerformance: 84\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: Contra. Step Ups\nWeight: 12\nTarget: 8\nSets Complete: 4\n\nExercise 2: 1 Arm DB Row\nWeight: 30\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Walk/run\nTime (minutes): 3\nTarget: Laps\nPerformance: 4.5\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: 1 Arm Skullcrusher\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nExercise 2: PAUSE 1 Arm Farmer's March\nWeight: 50\nTarget: 4\nSets Complete: 3";
 
 const normalizeWeightLabel = (value: string) => {
   const trimmed = value.trim();
@@ -661,16 +713,266 @@ const createProgramOne = (): Program => ({
   ],
 });
 
+
+const createProgramTwo = (): Program => ({
+  id: "program-2",
+  name: "Program 2",
+  startedAt: "2025-08-19",
+  status: "active",
+  routines: [
+    {
+      id: ROUTINE_IDS.day1,
+      label: "Day 1",
+      blocks: [
+        {
+          id: BLOCK_IDS.day1A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2TempoCsOneArmDbRow, name: "TEMPO CS 1 Arm DB Row", target: "10", metric: "reps" },
+            { id: EXERCISE_IDS.p2TempoPlateReachSquat, name: "TEMPO Plate Reach Squat", target: "5", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.bike, name: "Bike", target: "30/30 Calories", metric: "calories" }],
+        },
+        {
+          id: BLOCK_IDS.day1B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2TempoOneLegRdlIsoHandPass, name: "TEMPO 1 Leg RDL Iso Hand Pass", target: "5", metric: "reps" },
+            { id: EXERCISE_IDS.plankMarch, name: "Plank March", target: "8", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.farmersCarry, name: "Farmer's Carry", target: "50 yards", metric: "yards" }],
+        },
+        {
+          id: BLOCK_IDS.day1C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2TempoDbBicepCurls, name: "TEMPO DB Bicep Curls", target: "10", metric: "reps" },
+            { id: EXERCISE_IDS.benchShoulderTaps, name: "PAUSE Shoulder Taps", target: "5", metric: "reps" },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day2,
+      label: "Day 2",
+      blocks: [
+        {
+          id: BLOCK_IDS.day2A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2InclineDbBench, name: "1 Arm Inc. DB Bench Press", target: "10", metric: "reps" },
+            { id: EXERCISE_IDS.p2TempoCsAltOhReach, name: "TEMPO CS Alt. OH Reach", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.runWalk, name: "Walk/run", target: "Laps", metric: "laps" }],
+        },
+        {
+          id: BLOCK_IDS.day2B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2ContraSplitSquat, name: "Contra. Split Squat", target: "8", metric: "reps" },
+            { id: EXERCISE_IDS.bearToPushup, name: "Bear to Pushup", target: "5", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.p2MbSlams, name: "MB Slams", target: "Reps", metric: "reps" }],
+        },
+        {
+          id: BLOCK_IDS.day2C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2Kbdl, name: "KBDL", target: "8", metric: "reps" },
+            { id: EXERCISE_IDS.p2PauseFarmerMarch, name: "PAUSE 1 Arm Farmer's March", target: "4", metric: "reps" },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day3,
+      label: "Day 3",
+      blocks: [
+        {
+          id: BLOCK_IDS.day3A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.gobletSquat, name: "Goblet Squat", target: "12 down by 1", metric: "reps" },
+            { id: EXERCISE_IDS.bentOverRow, name: "DB Bent Over Row", target: "12 down by 1", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.p2Day3Rower, name: "Rower", target: "30/30 Calories", metric: "calories" }],
+        },
+        {
+          id: BLOCK_IDS.day3B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2BallGbEccHc, name: "Ball GB Ecc. HC", target: "8", metric: "reps" },
+            { id: EXERCISE_IDS.plankMarch, name: "Plank March", target: "5", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.p2Day3FarmersCarry, name: "Farmer's Carry", target: "50 yards", metric: "yards" }],
+        },
+        {
+          id: BLOCK_IDS.day3C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.skydivers, name: "PAUSE CS Skydivers", target: "10", metric: "reps" },
+            { id: EXERCISE_IDS.benchShoulderTaps, name: "PAUSE Shoulder Taps", target: "5", metric: "reps" },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day4,
+      label: "Day 4",
+      blocks: [
+        {
+          id: BLOCK_IDS.day4A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.dbRdl, name: "DB RDL", target: "10", metric: "reps" },
+            { id: EXERCISE_IDS.p2BearMtClimbers, name: "Bear Mt. Climbers", target: "5", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.p2Day4MbSlams, name: "MB Slams", target: "Reps", metric: "reps" }],
+        },
+        {
+          id: BLOCK_IDS.day4B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2ContraStepUps, name: "Contra. Step Ups", target: "8", metric: "reps" },
+            { id: EXERCISE_IDS.p2OneArmDbRowDay4, name: "1 Arm DB Row", target: "8", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: EXERCISE_IDS.runWalk, name: "Walk/run", target: "Laps", metric: "laps" }],
+        },
+        {
+          id: BLOCK_IDS.day4C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: EXERCISE_IDS.p2OneArmSkullcrusher, name: "1 Arm Skullcrusher", target: "10", metric: "reps" },
+            { id: EXERCISE_IDS.p2PauseFarmerMarch, name: "PAUSE 1 Arm Farmer's March", target: "4", metric: "reps" },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
 function buildInitialPrograms(): Program[] {
-  return [createProgramOne()];
+  return [createProgramOne(), createProgramTwo()];
 }
 
-const getRoutineIdForSessionNumber = (sessionNumber: number) =>
-  sessionNumber % 2 === 1 ? ROUTINE_IDS.day1 : ROUTINE_IDS.day2;
+const mergeProgramsWithBase = (storedPrograms: Program[]) => {
+  const basePrograms = buildInitialPrograms();
+  const storedMap = new Map(storedPrograms.map((program) => [program.id, program]));
+
+  return [
+    ...basePrograms.map((program) => storedMap.get(program.id) || program),
+    ...storedPrograms.filter((program) => !basePrograms.some((baseProgram) => baseProgram.id === program.id)),
+  ];
+};
+
+const getRoutineIdForSessionNumber = (program: Program, sessionNumber: number) => {
+  const routineCount = program.routines.length;
+
+  if (routineCount <= 2) {
+    return sessionNumber % 2 === 1 ? ROUTINE_IDS.day1 : ROUTINE_IDS.day2;
+  }
+
+  const index = ((sessionNumber - 1) % routineCount) + 1;
+  return ROUTINE_IDS[`day${index}` as keyof typeof ROUTINE_IDS];
+};
 
 const getRoutineTemplateById = (program: Program, routineId: string) =>
   program.routines.find((routine) => routine.id === routineId) || program.routines[0];
 
+const getRoutineTemplateByLabel = (program: Program, routineLabel: string) =>
+  program.routines.find((routine) => routine.label.toLowerCase() === routineLabel.trim().toLowerCase()) || program.routines[0];
 const normalizeImportedDate = (value: string) =>
   value
     .trim()
@@ -690,7 +992,7 @@ const getSafeDateTime = (value: string) => {
 };
 
 const buildImportedSession = (program: Program, memberId: string, sessionNumber: number, date: string, chunk: string): SavedSession | null => {
-  const routineId = getRoutineIdForSessionNumber(sessionNumber);
+  const routineId = getRoutineIdForSessionNumber(program, sessionNumber);
   const routine = getRoutineTemplateById(program, routineId);
   const pairedBlocks = parsePairedBlocks(chunk);
   const singleBlocks = parseSingleBlocks(chunk);
@@ -754,6 +1056,208 @@ const parseImportedSessions = (raw: string, program: Program, memberId: string) 
   }
 
   return sessions;
+};
+
+
+
+const normalizeExerciseKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const buildImportedExerciseId = (blockId: string, exerciseName: string, fallbackIndex: number) => {
+  const normalizedName = normalizeExerciseKey(exerciseName);
+  return `${blockId}-${normalizedName || `exercise-${fallbackIndex + 1}`}`;
+};
+
+const inferMetricFromTarget = (target: string, fallback = "reps") => {
+  const normalized = String(target || "").trim().toLowerCase();
+
+  if (!normalized) return fallback;
+  if (normalized.includes("yard")) return "yards";
+  if (normalized.includes("lap")) return "laps";
+  if (normalized.includes("cal")) return "calories";
+  if (normalized.includes("rep")) return "reps";
+  return fallback;
+};
+
+const parseRelayPairedBlocks = (chunk: string) => {
+  return splitImportedSections(chunk, "paired").map((section) => {
+    const lines = section
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const blockKey = lines[0]?.match(/Paired Block\s+([A-Z])/i)?.[1]?.trim() || "";
+    const time = extractFirstNumber(lines.find((line) => /^Time \(minutes\):/i.test(line))?.split(":").slice(1).join(":").trim() || "");
+
+    const entries: Array<{ name: string; weight: string; target: string; setsCompleted: string }> = [];
+    let currentEntry: { name: string; weight: string; target: string; setsCompleted: string } | null = null;
+
+    lines.slice(1).forEach((line) => {
+      const exerciseMatch = line.match(/^Exercise\s*\d+:\s*(.*)$/i);
+      const weightMatch = line.match(/^Weight:\s*(.*)$/i);
+      const targetMatch = line.match(/^Target:\s*(.*)$/i);
+      const setsMatch = line.match(/^Sets Complete:\s*(.*)$/i);
+
+      if (exerciseMatch) {
+        if (currentEntry) entries.push(currentEntry);
+        currentEntry = {
+          name: exerciseMatch[1].trim(),
+          weight: "",
+          target: "",
+          setsCompleted: "",
+        };
+        return;
+      }
+
+      if (!currentEntry) return;
+
+      if (weightMatch) {
+        currentEntry.weight = normalizeWeightInput(weightMatch[1].trim());
+        return;
+      }
+
+      if (targetMatch) {
+        currentEntry.target = targetMatch[1].trim();
+        return;
+      }
+
+      if (setsMatch) {
+        currentEntry.setsCompleted = extractFirstNumber(setsMatch[1].trim());
+      }
+    });
+
+    if (currentEntry) entries.push(currentEntry);
+
+    return {
+      blockKey,
+      time,
+      entries,
+    };
+  });
+};
+
+const parseRelaySingleBlocks = (chunk: string) => {
+  return splitImportedSections(chunk, "single").map((section) => {
+    const lines = section
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const exerciseName = lines.find((line) => /^Exercise:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+    const weight = normalizeWeightInput(lines.find((line) => /^Weight:/i.test(line))?.split(":").slice(1).join(":").trim() || "");
+    const time = extractFirstNumber(lines.find((line) => /^Time \(minutes\):/i.test(line))?.split(":").slice(1).join(":").trim() || "");
+    const target = lines.find((line) => /^Target:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+    const performance = extractFirstNumber(lines.find((line) => /^Performance:/i.test(line))?.split(":").slice(1).join(":").trim() || "");
+
+    return {
+      exerciseName,
+      weight,
+      time,
+      target,
+      performance,
+    };
+  });
+};
+
+const buildRelayImportedSession = (
+  program: Program,
+  memberId: string,
+  sessionNumber: number,
+  date: string,
+  routineLabel: string,
+  chunk: string
+): SavedSession | null => {
+  const routine = getRoutineTemplateByLabel(program, routineLabel);
+  if (!routine) return null;
+
+  const pairedBlocks = parseRelayPairedBlocks(chunk);
+  const singleBlocks = parseRelaySingleBlocks(chunk);
+  let singleIndex = 0;
+
+  const blocks: SessionBlockInput[] = routine.blocks.map((block) => {
+    if (block.type === "paired") {
+      const pairData = pairedBlocks.find((item) => `Paired Block ${item.blockKey}` === block.title);
+      return {
+        blockId: block.id,
+        blockTitle: block.title,
+        entries: block.exercises.map((exercise, exerciseIndex) => {
+          const importedEntry = pairData?.entries[exerciseIndex];
+          const exerciseName = importedEntry?.name || exercise.name;
+          const target = importedEntry?.target || exercise.target;
+          const metric = inferMetricFromTarget(target, exercise.metric);
+
+          return {
+            exerciseId: exerciseName === exercise.name ? exercise.id : buildImportedExerciseId(block.id, exerciseName, exerciseIndex),
+            exerciseName,
+            weight: importedEntry?.weight || "",
+            performance: "",
+            setsCompleted: importedEntry?.setsCompleted || "",
+            target,
+            metric,
+          };
+        }),
+      };
+    }
+
+    const singleData = singleBlocks[singleIndex++];
+    const exercise = block.exercises[0];
+
+    const exerciseName = singleData?.exerciseName || exercise?.name || "";
+    const target = singleData?.target || exercise?.target || "";
+    const metric = inferMetricFromTarget(target, exercise?.metric || "");
+
+    return {
+      blockId: block.id,
+      blockTitle: block.title,
+      entries: [
+        {
+          exerciseId: exerciseName === exercise?.name ? exercise.id : buildImportedExerciseId(block.id, exerciseName, 0),
+          exerciseName,
+          weight: singleData?.weight || "",
+          performance: singleData?.performance || "",
+          setsCompleted: "",
+          target,
+          metric,
+        },
+      ],
+    };
+  });
+
+  return {
+    id: uid(),
+    programId: program.id,
+    routineId: routine.id,
+    memberId,
+    date: normalizeImportedDate(date),
+    sessionNumber: String(sessionNumber),
+    blocks,
+    createdAt: getSafeDateIsoString(date),
+  };
+};
+
+const parseRelayImportedSessions = (raw: string, program: Program, memberId: string) => {
+  const sessionRegex = /Program:\s*\d+\s*\n+Session #:\s*(\d+)\s*\n+Date:\s*([^\n]+)\s*\n+Routine:\s*(Day \d+)\s*\n+([\s\S]*?)(?=(?:\n\s*Program:\s*\d+\s*\n+Session #:\s*\d+)|$)/g;
+  const sessions: SavedSession[] = [];
+
+  for (const match of raw.matchAll(sessionRegex)) {
+    const sessionNumber = Number(match[1]);
+    const date = match[2].trim();
+    const routineLabel = match[3].trim();
+    const chunk = match[4].trim();
+    const session = buildRelayImportedSession(program, memberId, sessionNumber, date, routineLabel, chunk);
+    if (session) sessions.push(session);
+  }
+
+  return sessions;
+};
+
+const parseAnyImportedSessions = (raw: string, program: Program, memberId: string) => {
+  return /Session #:/i.test(raw) && /Routine:\s*Day\s*\d+/i.test(raw)
+    ? parseRelayImportedSessions(raw, program, memberId)
+    : parseImportedSessions(raw, program, memberId);
 };
 
 
@@ -865,7 +1369,7 @@ export default function App() {
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms();
     const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
-    return stored ? JSON.parse(stored) : buildInitialPrograms();
+    return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms();
   });
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
@@ -968,8 +1472,8 @@ export default function App() {
           performance: entry.performance,
           duration: selectedBlock.duration,
           exerciseName: entry.exerciseName,
-          target: exercise?.target || "",
-          metric: exercise?.metric || "",
+          target: entry.target || exercise?.target || "",
+          metric: entry.metric || exercise?.metric || "",
           blockType: selectedBlock.type,
         });
       });
@@ -1134,14 +1638,37 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const alreadySeeded = window.localStorage.getItem(STORAGE_KEYS.seeded);
 
-    if (!alreadySeeded && members[0] && programs[0] && savedSessions.length === 0) {
-      const seededSessions = parseImportedSessions(PROGRAM_1_IMPORT_TEMPLATE, programs[0], members[0].id);
-      setSavedSessions(seededSessions);
+    const alreadySeededProgram1 = window.localStorage.getItem(STORAGE_KEYS.seeded);
+    if (!alreadySeededProgram1 && members[0] && programs.find((program) => program.id === "program-1")) {
+      const programOne = programs.find((program) => program.id === "program-1");
+      if (!programOne) return;
+
+      const seededSessions = parseImportedSessions(PROGRAM_1_IMPORT_TEMPLATE, programOne, members[0].id);
+      setSavedSessions((prev) => {
+        const hasProgramOne = prev.some((session) => session.programId === programOne.id && session.memberId === members[0].id);
+        return hasProgramOne ? prev : [...prev, ...seededSessions];
+      });
       window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
     }
-  }, [members, programs, savedSessions.length]);
+  }, [members, programs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const alreadySeededProgram2 = window.localStorage.getItem(STORAGE_KEYS.seededProgram2);
+    if (!alreadySeededProgram2 && members[0] && programs.find((program) => program.id === "program-2")) {
+      const programTwo = programs.find((program) => program.id === "program-2");
+      if (!programTwo) return;
+
+      const seededSessions = parseRelayImportedSessions(PROGRAM_2_RELAY_TEMPLATE, programTwo, members[0].id);
+      setSavedSessions((prev) => {
+        const hasProgramTwo = prev.some((session) => session.programId === programTwo.id && session.memberId === members[0].id);
+        return hasProgramTwo ? prev : [...prev, ...seededSessions];
+      });
+      window.localStorage.setItem(STORAGE_KEYS.seededProgram2, "true");
+    }
+  }, [members, programs]);
 
 
   useEffect(() => {
@@ -1415,12 +1942,23 @@ export default function App() {
 
   const importProgramData = () => {
     if (!selectedProgram || !selectedMember || !importText.trim()) return;
-    const importedSessions = parseImportedSessions(importText, selectedProgram, selectedMember.id);
+    const importedSessions = parseAnyImportedSessions(importText, selectedProgram, selectedMember.id);
     if (!importedSessions.length) return;
 
-    setSavedSessions(importedSessions);
+    setSavedSessions((prev) => [
+      ...prev.filter(
+        (session) => !(session.programId === selectedProgram.id && session.memberId === selectedMember.id)
+      ),
+      ...importedSessions,
+    ]);
+
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
+      if (selectedProgram.id === "program-1") {
+        window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
+      }
+      if (selectedProgram.id === "program-2") {
+        window.localStorage.setItem(STORAGE_KEYS.seededProgram2, "true");
+      }
     }
   };
 
@@ -1429,6 +1967,7 @@ export default function App() {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(STORAGE_KEYS.savedSessions);
       window.localStorage.removeItem(STORAGE_KEYS.seeded);
+      window.localStorage.removeItem(STORAGE_KEYS.seededProgram2);
     }
   };
 

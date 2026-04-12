@@ -1,0 +1,56 @@
+Program: 
+
+Session #: 
+Date: 
+Routine: Day 1 / Day 2 
+
+Paired Block A 
+Time (minutes): 
+
+Exercise 1: 
+Weight: 
+Target: 
+Sets Complete: 
+
+Exercise 2: 
+Weight: 
+Target: 
+Sets Complete: 
+
+Single Block 
+Exercise: 
+Time (minutes): 
+Target: 
+Performance: 
+
+Paired Block B 
+Time (minutes): 
+
+Exercise 1: 
+Weight: 
+Target: 
+Sets Complete: 
+
+Exercise 2: 
+Weight: 
+Target: 
+Sets Complete: 
+
+Single Block 
+Exercise: 
+Time (minutes): 
+Target: 
+Performance: 
+
+Paired Block C 
+Time (minutes): 
+
+Exercise 1: 
+Weight: 
+Target: 
+Sets Complete: 
+
+Exercise 2: 
+Weight: 
+Target: 
+Sets Complete:

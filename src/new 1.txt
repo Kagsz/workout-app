@@ -1,0 +1,660 @@
+import React, { useMemo, useState } from "react";
+import { Moon, Sun, ChevronLeft, User, Dumbbell, Activity, Settings2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+
+type Role = "member" | "admin";
+type Screen = "programs" | "routines" | "routine" | "graph" | "admin";
+type AxisMode = "date" | "session";
+type ThemeMode = "light" | "dark";
+type Shape = "circle" | "square" | "triangle";
+type BlockType = "paired" | "single";
+type AdminTab = "builder" | "input";
+
+type SeriesPoint = {
+  label: string;
+  shape: Shape;
+  value: number;
+  color: string;
+};
+
+type GraphPoint = {
+  x: string;
+  series: SeriesPoint[];
+};
+
+type Block = {
+  id: string;
+  key: string;
+  type: BlockType;
+  title: string;
+  titleDisplay: string;
+  duration: number;
+  notes: string;
+  ex1?: string;
+  ex2?: string;
+  exercise?: string;
+  metric?: string;
+  graph: {
+    yLabel: string;
+    legend: { shape: Shape; label: string }[];
+    datePoints: GraphPoint[];
+    sessionPoints: GraphPoint[];
+  };
+};
+
+type SessionEntry = {
+  id: string;
+  sessionNumber: number;
+  routineLabel: string;
+  sessionDate: string;
+  summary: { totalBlocks: number; totalSets: number; totalMinutes: number };
+  blocks: Block[];
+};
+
+type Program = {
+  id: string;
+  memberId: string;
+  number: number;
+  title: string;
+  routineLabels: string[];
+  sessions: SessionEntry[];
+};
+
+type Member = { id: string; name: string };
+
+const members: Member[] = [
+  { id: "m1", name: "Test Subject" },
+  { id: "m2", name: "Example Member" },
+];
+
+function colorForWeight(weightLabel: string) {
+  if (weightLabel === "BW") return "#6b7280";
+  const palette = ["#60a5fa", "#34d399", "#f59e0b", "#f97316", "#ef4444", "#a855f7", "#ec4899", "#6366f1"];
+  const numeric = Number(String(weightLabel).replace(/[^\d.]/g, "")) || 1;
+  return palette[Math.floor(numeric) % palette.length];
+}
+
+function makePairedBlock(args: {
+  id: string;
+  key: string;
+  title: string;
+  ex1: string;
+  ex2: string;
+  date: string;
+  sessionNumber: number;
+  sets1: number;
+  sets2: number;
+  weight1: string;
+  weight2: string;
+  note: string;
+}): Block {
+  const { id, key, title, ex1, ex2, date, sessionNumber, sets1, sets2, weight1, weight2, note } = args;
+  return {
+    id,
+    key,
+    type: "paired",
+    title,
+    titleDisplay: `${title} (${ex1} / ${ex2})`,
+    duration: 10,
+    notes: note,
+    ex1,
+    ex2,
+    graph: {
+      yLabel: "Completed Sets",
+      legend: [
+        { shape: "circle", label: ex1 },
+        { shape: "square", label: ex2 },
+      ],
+      datePoints: [{ x: date, series: [
+        { label: ex1, shape: "circle", value: sets1, color: colorForWeight(weight1) },
+        { label: ex2, shape: "square", value: sets2, color: colorForWeight(weight2) },
+      ] }],
+      sessionPoints: [{ x: `S${sessionNumber}`, series: [
+        { label: ex1, shape: "circle", value: sets1, color: colorForWeight(weight1) },
+        { label: ex2, shape: "square", value: sets2, color: colorForWeight(weight2) },
+      ] }],
+    },
+  };
+}
+
+function makeSingleBlock(args: {
+  id: string;
+  key: string;
+  title: string;
+  exercise: string;
+  metric: string;
+  date: string;
+  sessionNumber: number;
+  value: number;
+  note: string;
+}): Block {
+  const { id, key, title, exercise, metric, date, sessionNumber, value, note } = args;
+  return {
+    id,
+    key,
+    type: "single",
+    title,
+    titleDisplay: `${title} (${exercise})`,
+    duration: 3,
+    notes: note,
+    exercise,
+    metric,
+    graph: {
+      yLabel: metric,
+      legend: [{ shape: "triangle", label: exercise }],
+      datePoints: [{ x: date, series: [{ label: exercise, shape: "triangle", value, color: "#111827" }] }],
+      sessionPoints: [{ x: `S${sessionNumber}`, series: [{ label: exercise, shape: "triangle", value, color: "#111827" }] }],
+    },
+  };
+}
+
+const programs: Program[] = [
+  {
+    id: "program-1",
+    memberId: "m1",
+    number: 1,
+    title: "Sample 2-Routine Program",
+    routineLabels: ["Day A", "Day B"],
+    sessions: [
+      {
+        id: "s1",
+        sessionNumber: 1,
+        routineLabel: "Day A",
+        sessionDate: "Jul 01, 2025",
+        summary: { totalBlocks: 5, totalSets: 22, totalMinutes: 36 },
+        blocks: [
+          makePairedBlock({ id: "s1-a", key: "A-block-1", title: "Paired Block A", ex1: "Exercise Alpha", ex2: "Exercise Beta", date: "Jul 01, 2025", sessionNumber: 1, sets1: 4, sets2: 4, weight1: "BW", weight2: "20 lb", note: "Target reps: 10 / 10" }),
+          makeSingleBlock({ id: "s1-b", key: "A-single-1", title: "Single Block", exercise: "Bike", metric: "Calories", date: "Jul 01, 2025", sessionNumber: 1, value: 18, note: "Target: Calories" }),
+        ],
+      },
+      {
+        id: "s2",
+        sessionNumber: 2,
+        routineLabel: "Day B",
+        sessionDate: "Jul 03, 2025",
+        summary: { totalBlocks: 5, totalSets: 24, totalMinutes: 36 },
+        blocks: [
+          makePairedBlock({ id: "s2-a", key: "B-block-1", title: "Paired Block A", ex1: "Exercise Gamma", ex2: "Exercise Delta", date: "Jul 03, 2025", sessionNumber: 2, sets1: 4, sets2: 3, weight1: "20 lb", weight2: "BW", note: "Target reps: 8 / 4" }),
+          makeSingleBlock({ id: "s2-b", key: "B-single-1", title: "Single Block", exercise: "Rower", metric: "Calories", date: "Jul 03, 2025", sessionNumber: 2, value: 32, note: "Target: Calories" }),
+        ],
+      },
+      {
+        id: "s3",
+        sessionNumber: 3,
+        routineLabel: "Day A",
+        sessionDate: "Jul 05, 2025",
+        summary: { totalBlocks: 5, totalSets: 26, totalMinutes: 36 },
+        blocks: [
+          makePairedBlock({ id: "s3-a", key: "A-block-1", title: "Paired Block A", ex1: "Exercise Alpha", ex2: "Exercise Beta", date: "Jul 05, 2025", sessionNumber: 3, sets1: 5, sets2: 4, weight1: "5 lb", weight2: "25 lb", note: "Target reps: 10 / 10" }),
+          makeSingleBlock({ id: "s3-b", key: "A-single-1", title: "Single Block", exercise: "Bike", metric: "Calories", date: "Jul 05, 2025", sessionNumber: 3, value: 24, note: "Target: Calories" }),
+        ],
+      },
+      {
+        id: "s4",
+        sessionNumber: 4,
+        routineLabel: "Day B",
+        sessionDate: "Jul 07, 2025",
+        summary: { totalBlocks: 5, totalSets: 28, totalMinutes: 36 },
+        blocks: [
+          makePairedBlock({ id: "s4-a", key: "B-block-1", title: "Paired Block A", ex1: "Exercise Gamma", ex2: "Exercise Delta", date: "Jul 07, 2025", sessionNumber: 4, sets1: 6, sets2: 5, weight1: "25 lb", weight2: "BW", note: "Target reps: 8 / 4" }),
+          makeSingleBlock({ id: "s4-b", key: "B-single-1", title: "Single Block", exercise: "Rower", metric: "Calories", date: "Jul 07, 2025", sessionNumber: 4, value: 40, note: "Target: Calories" }),
+        ],
+      },
+    ],
+  },
+  {
+    id: "program-2",
+    memberId: "m2",
+    number: 2,
+    title: "Sample 4-Routine Program",
+    routineLabels: ["Day A", "Day B", "Day C", "Day D"],
+    sessions: [
+      {
+        id: "p2s1",
+        sessionNumber: 1,
+        routineLabel: "Day A",
+        sessionDate: "Example",
+        summary: { totalBlocks: 4, totalSets: 16, totalMinutes: 30 },
+        blocks: [makePairedBlock({ id: "p2s1-a", key: "P2A-1", title: "Paired Block A", ex1: "Example Lift 1", ex2: "Example Lift 2", date: "Example", sessionNumber: 1, sets1: 3, sets2: 3, weight1: "10 lb", weight2: "10 lb", note: "Example only" })],
+      },
+    ],
+  },
+];
+
+function ShapeIcon({ shape, color = "#111827", darkMode = false }: { shape: Shape; color?: string; darkMode?: boolean }) {
+  const borderColor = darkMode ? "rgb(244 244 245)" : "rgb(24 24 27)";
+  if (shape === "circle") return <div className="h-3 w-3 rounded-full border" style={{ backgroundColor: color, borderColor }} />;
+  if (shape === "square") return <div className="h-3 w-3 border" style={{ backgroundColor: color, borderColor }} />;
+  return <div className="h-0 w-0 border-l-[7px] border-r-[7px] border-b-[12px] border-l-transparent border-r-transparent" style={{ borderBottomColor: borderColor }} />;
+}
+
+function buildRoutineAggregateBlock(program: Program, selectedSession: SessionEntry, selectedBlock: Block): Block {
+  const routineSessions = program.sessions
+    .filter((session) => session.routineLabel === selectedSession.routineLabel)
+    .sort((a, b) => a.sessionNumber - b.sessionNumber);
+
+  const rows = routineSessions
+    .map((session) => {
+      const block = session.blocks.find((b) => b.key === selectedBlock.key);
+      if (!block) return null;
+      return {
+        date: session.sessionDate,
+        sessionLabel: `S${session.sessionNumber}`,
+        series: block.graph.datePoints[0]?.series || [],
+      };
+    })
+    .filter(Boolean) as { date: string; sessionLabel: string; series: SeriesPoint[] }[];
+
+  return {
+    ...selectedBlock,
+    notes: `${selectedSession.routineLabel} routine trend across all matching sessions.`,
+    graph: {
+      ...selectedBlock.graph,
+      datePoints: rows.map((row) => ({ x: row.date, series: row.series })),
+      sessionPoints: rows.map((row) => ({ x: row.sessionLabel, series: row.series })),
+    },
+  };
+}
+
+function AppChart({ block, axisMode, darkMode }: { block: Block; axisMode: AxisMode; darkMode: boolean }) {
+  const points = axisMode === "date" ? block.graph.datePoints : block.graph.sessionPoints;
+  const values = points.flatMap((p) => p.series.map((s) => s.value));
+  const minVal = Math.min(...values);
+  const maxVal = Math.max(...values);
+  const axisMin = Math.max(0, Math.floor(minVal - 2));
+  const axisMax = Math.ceil(maxVal + 2);
+  const axisRange = Math.max(axisMax - axisMin, 1);
+  const ticks = [axisMax, Math.max(axisMin, axisMax - 2), Math.max(axisMin, axisMax - 4), axisMin];
+
+  const seriesBuckets = new Map<string, { shape: Shape; points: { x: number; y: number }[] }>();
+  points.forEach((point, i) => {
+    point.series.forEach((series, seriesIndex) => {
+      const key = `${series.label}-${series.shape}`;
+      const x = ((i + 0.5) / points.length) * 100;
+      const y = 100 - ((series.value - axisMin) / axisRange) * 100;
+      const xAdj = point.series.length === 1 ? x : x + (seriesIndex === 0 ? -2.4 : 2.4);
+      if (!seriesBuckets.has(key)) seriesBuckets.set(key, { shape: series.shape, points: [] });
+      seriesBuckets.get(key)!.points.push({ x: xAdj, y });
+    });
+  });
+
+  return (
+    <Card className={darkMode ? "border-zinc-800 bg-zinc-900 text-zinc-100" : "bg-white"}>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className={`text-xs font-bold uppercase tracking-wide ${darkMode ? "text-zinc-400" : "text-zinc-500"}`}>
+              {block.type === "paired" ? "Routine Graph" : "Routine Graph"}
+            </div>
+            <CardTitle className="mt-1 text-lg">{block.titleDisplay}</CardTitle>
+          </div>
+          <div className={`rounded-xl border px-3 py-2 text-xs font-bold ${darkMode ? "border-zinc-700 bg-zinc-950 text-zinc-300" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
+            X-Axis: {axisMode === "date" ? "Date" : "Session #"}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className={`rounded-2xl border p-3 text-xs leading-relaxed ${darkMode ? "border-zinc-800 bg-zinc-950 text-zinc-400" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
+          One graph per routine block. Data grows as new matching sessions are logged.
+        </div>
+
+        <div className="grid grid-cols-[42px_1fr] gap-3">
+          <div className="relative h-[300px]">
+            <div className={`absolute left-0 top-1/2 -translate-x-full -translate-y-1/2 -rotate-90 whitespace-nowrap text-xs font-bold ${darkMode ? "text-zinc-400" : "text-zinc-500"}`}>
+              {block.graph.yLabel}
+            </div>
+            <div className={`absolute inset-y-0 right-0 flex flex-col justify-between text-[11px] font-bold ${darkMode ? "text-zinc-400" : "text-zinc-500"}`}>
+              {ticks.map((tick, idx) => <div key={`${tick}-${idx}`}>{tick}</div>)}
+            </div>
+          </div>
+
+          <div>
+            <div className={`relative h-[300px] border-b-2 border-l-2 ${darkMode ? "border-zinc-700 bg-zinc-950" : "border-zinc-300 bg-white"}`}>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible">
+                {[0, 25, 50, 75, 100].map((v) => <line key={v} x1="0" y1={v} x2="100" y2={v} stroke={darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)"} strokeWidth="0.8" />)}
+                {points.map((_, i) => {
+                  const x = ((i + 0.5) / points.length) * 100;
+                  return <line key={`v-${i}`} x1={x} y1="0" x2={x} y2="100" stroke={darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.07)"} strokeWidth="0.8" />;
+                })}
+                {[...seriesBuckets.entries()].map(([key, bucket]) => (
+                  <polyline
+                    key={key}
+                    points={bucket.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                    fill="none"
+                    stroke={bucket.shape === "square" ? (darkMode ? "#a1a1aa" : "#52525b") : (darkMode ? "#fafafa" : "#111827")}
+                    strokeWidth="2.2"
+                    strokeDasharray={bucket.shape === "square" ? "4 3" : undefined}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ))}
+              </svg>
+
+              {points.map((point, i) => {
+                const x = ((i + 0.5) / points.length) * 100;
+                return point.series.map((series, seriesIndex) => {
+                  const xAdj = point.series.length === 1 ? x : x + (seriesIndex === 0 ? -2.4 : 2.4);
+                  const y = ((series.value - axisMin) / axisRange) * 100;
+                  return (
+                    <div key={`${point.x}-${series.label}`} className="absolute z-10 -translate-x-1/2 translate-y-1/2" style={{ left: `${xAdj}%`, bottom: `${y}%` }}>
+                      <div className={`absolute left-1/2 top-[-18px] -translate-x-1/2 rounded-full border px-1 text-[10px] font-bold ${darkMode ? "border-zinc-700 bg-zinc-900 text-zinc-100" : "border-zinc-200 bg-white text-zinc-800"}`}>
+                        {series.value}
+                      </div>
+                      <ShapeIcon shape={series.shape} color={series.color} darkMode={darkMode} />
+                    </div>
+                  );
+                });
+              })}
+            </div>
+
+            <div className="mt-2 grid text-center text-[11px] font-bold text-zinc-500" style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}>
+              {points.map((point) => (
+                <div key={point.x} className="flex h-14 items-start justify-center pt-2">
+                  <span className={`inline-block -rotate-[28deg] whitespace-nowrap ${darkMode ? "text-zinc-400" : "text-zinc-500"}`}>{point.x}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function routineSummaries(program: Program) {
+  return program.routineLabels.map((label) => {
+    const sessions = program.sessions.filter((s) => s.routineLabel === label);
+    return {
+      label,
+      sessionCount: sessions.length,
+      lastDate: sessions[sessions.length - 1]?.sessionDate || "",
+      blocks: sessions[0]?.blocks.length || 0,
+      representativeSession: sessions[0],
+    };
+  });
+}
+
+function runSelfChecks() {
+  const p1 = programs[0];
+  if (!p1) throw new Error("Missing Program 1");
+  if (p1.routineLabels.length !== 2) throw new Error("Program 1 should expose 2 routines");
+  const dayA = p1.sessions.filter((s) => s.routineLabel === "Day A");
+  const dayB = p1.sessions.filter((s) => s.routineLabel === "Day B");
+  if (dayA.length < 2 || dayB.length < 2) throw new Error("Shell test data should include at least 2 sessions per routine");
+  const aggregate = buildRoutineAggregateBlock(p1, p1.sessions[0], p1.sessions[0].blocks[0]);
+  if (aggregate.graph.datePoints.length !== dayA.length) throw new Error("Aggregated Day A graph should match the number of Day A sessions");
+}
+
+runSelfChecks();
+
+export default function WorkoutProgressAppStarter() {
+  const [role, setRole] = useState<Role>("member");
+  const [screen, setScreen] = useState<Screen>("programs");
+  const [themeMode, setThemeMode] = useState<ThemeMode>("light");
+  const [axisMode, setAxisMode] = useState<AxisMode>("date");
+  const [selectedMemberId, setSelectedMemberId] = useState("m1");
+  const [selectedProgramId, setSelectedProgramId] = useState("program-1");
+  const [selectedSessionId, setSelectedSessionId] = useState("s1");
+  const [selectedBlockId, setSelectedBlockId] = useState("s1-a");
+  const [adminTab, setAdminTab] = useState<AdminTab>("builder");
+
+  const darkMode = themeMode === "dark";
+  const filteredPrograms = useMemo(() => programs.filter((p) => p.memberId === selectedMemberId), [selectedMemberId]);
+  const selectedProgram = useMemo(() => programs.find((p) => p.id === selectedProgramId) || filteredPrograms[0] || programs[0], [selectedProgramId, filteredPrograms]);
+  const selectedSession = useMemo(() => selectedProgram.sessions.find((s) => s.id === selectedSessionId) || selectedProgram.sessions[0], [selectedProgram, selectedSessionId]);
+  const selectedBlock = useMemo(() => selectedSession.blocks.find((b) => b.id === selectedBlockId) || selectedSession.blocks[0], [selectedSession, selectedBlockId]);
+  const aggregateBlock = useMemo(() => buildRoutineAggregateBlock(selectedProgram, selectedSession, selectedBlock), [selectedProgram, selectedSession, selectedBlock]);
+  const summaries = useMemo(() => routineSummaries(selectedProgram), [selectedProgram]);
+
+  function resetForProgram(programId: string) {
+    const program = programs.find((p) => p.id === programId) || programs[0];
+    const firstSession = program.sessions[0];
+    const firstBlock = firstSession.blocks[0];
+    setSelectedProgramId(program.id);
+    setSelectedSessionId(firstSession.id);
+    setSelectedBlockId(firstBlock.id);
+  }
+
+  function Breadcrumb() {
+    const items: { label: string; onClick?: () => void }[] = [];
+    if (screen === "routines") items.push({ label: `Program ${selectedProgram.number}`, onClick: () => setScreen("programs") });
+    if (screen === "routine") {
+      items.push({ label: `Program ${selectedProgram.number}`, onClick: () => setScreen("routines") });
+      items.push({ label: `${selectedSession.routineLabel}` });
+    }
+    if (screen === "graph") {
+      items.push({ label: `Program ${selectedProgram.number}`, onClick: () => setScreen("routines") });
+      items.push({ label: `${selectedSession.routineLabel} Routine`, onClick: () => setScreen("routine") });
+      items.push({ label: selectedBlock.title });
+    }
+    if (!items.length) return null;
+
+    return (
+      <div className={`mb-3 flex flex-wrap items-center gap-1 text-sm font-bold ${darkMode ? "text-zinc-300" : "text-zinc-600"}`}>
+        {items.map((item, i) => (
+          <React.Fragment key={item.label}>
+            {i === 0 ? (
+              <button onClick={item.onClick} className="inline-flex items-center gap-1 hover:underline">
+                <ChevronLeft className="h-4 w-4" /> {item.label}
+              </button>
+            ) : (
+              <>
+                <span className="text-zinc-400">/</span>
+                <button onClick={item.onClick} className={item.onClick ? "hover:underline" : "cursor-default"}>{item.label}</button>
+              </>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  }
+
+  const shell = darkMode ? "min-h-screen bg-zinc-950 p-6 text-zinc-100" : "min-h-screen bg-zinc-100 p-6 text-zinc-900";
+  const phone = darkMode ? "mx-auto w-full max-w-[430px] overflow-hidden rounded-[28px] border border-zinc-800 bg-zinc-900 shadow-2xl" : "mx-auto w-full max-w-[430px] overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-2xl";
+  const content = darkMode ? "min-h-[780px] bg-zinc-950 p-4" : "min-h-[780px] bg-zinc-50 p-4";
+
+  return (
+    <div className={shell}>
+      <div className="mx-auto mb-4 max-w-xl text-center">
+        <h1 className="text-3xl font-bold">Workout Progress App Starter</h1>
+        <p className={`mt-2 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>
+          Clean shell rebuild: routine-based member graphs plus separate admin builder and data input views.
+        </p>
+      </div>
+
+      <div className={phone}>
+        <div className={`border-b p-4 ${darkMode ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white"}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className={`text-xs font-bold uppercase tracking-wide ${darkMode ? "text-zinc-400" : "text-zinc-500"}`}>Shell Prototype</div>
+              <div className="text-xl font-bold">Workout Progress App</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant={role === "member" ? "default" : "outline"} size="sm" onClick={() => { setRole("member"); setScreen("programs"); }}>Member</Button>
+              <Button variant={role === "admin" ? "default" : "outline"} size="sm" onClick={() => { setRole("admin"); setScreen("admin"); }}>Admin</Button>
+              <Button variant="outline" size="icon" onClick={() => setThemeMode(darkMode ? "light" : "dark")}>
+                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className={content}>
+          <Breadcrumb />
+
+          {role === "member" && screen === "programs" && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-2xl font-bold">Programs</h2>
+                <p className={`mt-1 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>Members see programs by routine loop. Tap a program, then choose a routine to open its aggregated graphs.</p>
+              </div>
+              {filteredPrograms.map((program) => (
+                <Card key={program.id} className={darkMode ? "border-zinc-800 bg-zinc-900" : "bg-white"}>
+                  <CardContent className="flex items-start justify-between gap-4 p-4">
+                    <div>
+                      <div className={`text-xs font-bold uppercase tracking-wide ${darkMode ? "text-zinc-400" : "text-zinc-500"}`}>Program {program.number}</div>
+                      <div className="mt-1 text-lg font-bold">{program.title}</div>
+                      <div className={`mt-2 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>{program.routineLabels.length} routines • {program.sessions.length} sessions logged</div>
+                    </div>
+                    <Button onClick={() => { resetForProgram(program.id); setScreen("routines"); }}>Open</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {role === "member" && screen === "routines" && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-2xl font-bold">Program {selectedProgram.number} Routines</h2>
+                <p className={`mt-1 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>Members do not need standalone session browsing. They open a routine and see the graphs that grow as admin adds session data.</p>
+              </div>
+
+              {summaries.map((summary) => (
+                <Card key={summary.label} className={darkMode ? "border-zinc-800 bg-zinc-900" : "bg-white"}>
+                  <CardContent className="flex items-start justify-between gap-4 p-4">
+                    <div>
+                      <div className="text-lg font-bold">{summary.label}</div>
+                      <div className={`mt-1 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>{summary.blocks} blocks • {summary.sessionCount} logged sessions • last seen {summary.lastDate}</div>
+                    </div>
+                    <Button onClick={() => { setSelectedSessionId(summary.representativeSession.id); setSelectedBlockId(summary.representativeSession.blocks[0].id); setScreen("routine"); }}>Open</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {role === "member" && screen === "routine" && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-2xl font-bold">{selectedSession.routineLabel}</h2>
+                <p className={`mt-1 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>Each block opens one aggregated graph for this routine. The admin updates sessions in the background, and members only see the growing routine graphs.</p>
+              </div>
+              {selectedSession.blocks.map((block) => (
+                <Card key={block.id} className={darkMode ? "border-zinc-800 bg-zinc-900" : "bg-white"}>
+                  <CardContent className="flex items-center justify-between p-4">
+                    <div>
+                      <div className="font-bold">{block.titleDisplay}</div>
+                      <div className={`mt-1 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>{selectedSession.routineLabel} • {block.notes}</div>
+                    </div>
+                    <Button onClick={() => { setSelectedBlockId(block.id); setScreen("graph"); }}>Graph</Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {role === "member" && screen === "graph" && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Button variant={axisMode === "date" ? "default" : "outline"} onClick={() => setAxisMode("date")}>View by Date</Button>
+                <Button variant={axisMode === "session" ? "default" : "outline"} onClick={() => setAxisMode("session")}>View by Session #</Button>
+              </div>
+              <AppChart block={aggregateBlock} axisMode={axisMode} darkMode={darkMode} />
+            </div>
+          )}
+
+          {role === "admin" && screen === "admin" && (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-2xl font-bold">Admin Workspace</h2>
+                <p className={`mt-1 text-sm ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>Program structure and performance logging are split into two views. Screen tips live in the builder. Structured results go into the data-entry table.</p>
+              </div>
+
+              <div className={`inline-flex rounded-2xl border p-1 ${darkMode ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white"}`}>
+                <button
+                  onClick={() => setAdminTab("builder")}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold ${adminTab === "builder" ? (darkMode ? "bg-zinc-100 text-zinc-900" : "bg-zinc-900 text-white") : (darkMode ? "text-zinc-400" : "text-zinc-500")}`}
+                >
+                  Program Builder
+                </button>
+                <button
+                  onClick={() => setAdminTab("input")}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold ${adminTab === "input" ? (darkMode ? "bg-zinc-100 text-zinc-900" : "bg-zinc-900 text-white") : (darkMode ? "text-zinc-400" : "text-zinc-500")}`}
+                >
+                  Data Input
+                </button>
+              </div>
+
+              <Card className={darkMode ? "border-zinc-800 bg-zinc-900" : "bg-white"}>
+                <CardHeader>
+                  <CardTitle className="text-lg">{adminTab === "builder" ? "Program Builder" : "Data Input"}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {adminTab === "builder" ? (
+                    <>
+                      <div>
+                        <Label>Member</Label>
+                        <Select value={selectedMemberId} onValueChange={(value) => setSelectedMemberId(value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>{members.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Program Name</Label>
+                        <Input defaultValue="Starter Program" />
+                      </div>
+                      <div>
+                        <Label>Number of Routines in Loop</Label>
+                        <Input defaultValue="2" />
+                      </div>
+                      <div>
+                        <Label>Routine Notes</Label>
+                        <Textarea defaultValue="Build Day A and Day B templates here. Later programs can use 3-, 4-, or more-routine loops." />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label>Date</Label>
+                          <Input defaultValue="Jul 20, 2025" />
+                        </div>
+                        <div>
+                          <Label>Routine</Label>
+                          <Select defaultValue="Day A">
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Day A">Day A</SelectItem>
+                              <SelectItem value="Day B">Day B</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label>Session #</Label>
+                          <Input defaultValue="9" />
+                        </div>
+                      </div>
+                      <div>
+                        <Label>Block Performance Entry</Label>
+                        <Textarea defaultValue="Paired Block A\nExercise 1 sets: 5\nExercise 1 weight: 25 lb\nExercise 2 sets: 4\nExercise 2 weight: BW\n\nSingle Block\nResult: 42 Calories" />
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </div>
+
+        <div className={`grid border-t ${role === "member" ? "grid-cols-4" : "grid-cols-1"} ${darkMode ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-white"}`}>
+          {role === "member" ? (
+            <>
+              <button className={`px-2 py-3 text-xs font-bold ${screen === "programs" ? (darkMode ? "text-zinc-100" : "text-zinc-900") : "text-zinc-500"}`} onClick={() => setScreen("programs")}><User className="mx-auto mb-1 h-4 w-4" />Programs</button>
+              <button className={`px-2 py-3 text-xs font-bold ${screen === "routines" ? (darkMode ? "text-zinc-100" : "text-zinc-900") : "text-zinc-500"}`} onClick={() => setScreen("routines")}><Dumbbell className="mx-auto mb-1 h-4 w-4" />Routines</button>
+              <button className={`px-2 py-3 text-xs font-bold ${screen === "routine" ? (darkMode ? "text-zinc-100" : "text-zinc-900") : "text-zinc-500"}`} onClick={() => setScreen("routine")}><Activity className="mx-auto mb-1 h-4 w-4" />Routine</button>
+              <button className={`px-2 py-3 text-xs font-bold ${screen === "graph" ? (darkMode ? "text-zinc-100" : "text-zinc-900") : "text-zinc-500"}`} onClick={() => setScreen("graph")}><Settings2 className="mx-auto mb-1 h-4 w-4" />Graphs</button>
+            </>
+          ) : (
+            <button className="px-2 py-3 text-xs font-bold text-zinc-500" onClick={() => { setRole("member"); setScreen("programs"); }}>Back to Member View</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
