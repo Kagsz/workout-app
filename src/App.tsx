@@ -1,4 +1,3 @@
-import React from "react";
 
 // ===== CLEAN V2 (STEP 2) =====
 
