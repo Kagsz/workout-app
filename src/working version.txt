@@ -156,7 +156,7 @@ function ExerciseDot({
 
   const fill = getStableWeightColor(payload.weight);
   const stroke = "#111827";
-  const size = 10;
+  const size = 8;
 
   if (shape === "square") {
     return <rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} rx={2} fill={fill} stroke={stroke} strokeWidth={1} />;
@@ -1015,7 +1015,7 @@ export default function App() {
   }, [graphData]);
 
   const chartSeries = useMemo(() => {
-    const pairOffset = selectedBlock?.type === "paired" ? 0.12 : 0;
+    const pairOffset = selectedBlock?.type === "paired" ? 0.24 : 0;
 
     return graphData.map((series, seriesIndex) => {
       const shape = selectedBlock?.type === "single" ? "triangle" : seriesIndex === 0 ? "circle" : "square";
@@ -1876,10 +1876,10 @@ export default function App() {
                     </div>
 
                     {chartSeries.length ? (
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-3">
-                        <div className="h-[280px] w-full">
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-2 sm:p-3">
+                        <div className="h-[320px] w-full">
                           <ResponsiveContainer width="100%" height="100%">
-                            <LineChart margin={{ top: 12, right: 16, left: 4, bottom: 52 }}>
+                            <LineChart margin={{ top: 12, right: 8, left: 0, bottom: 52 }}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} />
                               <XAxis
                                 type="number"
@@ -1899,7 +1899,10 @@ export default function App() {
                                 domain={yDomain}
                                 tickCount={Math.max(4, Math.min(8, yDomain[1] - yDomain[0] + 1))}
                                 allowDecimals={selectedBlock?.type === "single"}
-                                label={{ value: "Completed Output", angle: -90, position: "insideLeft" }}
+                                width={42}
+                                tick={{ fontSize: 10 }}
+                                tickMargin={4}
+                                label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -2 }}
                               />
                               <Tooltip content={<GraphTooltip />} />
                               {chartSeries.map((series, seriesIndex) => (
