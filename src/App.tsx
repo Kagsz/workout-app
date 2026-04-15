@@ -1096,13 +1096,6 @@ type RelayParsedBlock = {
   exercises: RelayParsedExercise[];
 };
 
-type RelayParsedSession = {
-  sessionNumber: number;
-  date: string;
-  routineLabel: string;
-  blocks: RelayParsedBlock[];
-};
-
 const getRelayLineValue = (input: string, label: string) => {
   const lines = String(input || "").split(/\r?\n/);
   for (const line of lines) {
