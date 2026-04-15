@@ -1082,155 +1082,174 @@ const inferMetricFromTarget = (target: string, fallback = "reps") => {
   return fallback;
 };
 
+const parseRelayPairedBlocks = (chunk: string) => {
+  return splitImportedSections(chunk, "paired").map((section) => {
+    const lines = section
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
 
-type RelayParsedExercise = {
-  name: string;
-  weight: string;
-  target: string;
-  value: string;
-};
+    const blockKey = lines[0]?.match(/Paired Block\s+([A-Z])/i)?.[1]?.trim() || "";
+    const time = extractFirstNumber(lines.find((line) => /^Time \(minutes\):/i.test(line))?.split(":").slice(1).join(":").trim() || "");
 
-type RelayParsedBlock = {
-  type: BlockType;
-  label?: string;
-  exercises: RelayParsedExercise[];
-};
+    const entries: Array<{ name: string; weight: string; target: string; setsCompleted: string }> = [];
+    let currentEntry: { name: string; weight: string; target: string; setsCompleted: string } | null = null;
 
-type RelayParsedSession = {
-  sessionNumber: number;
-  date: string;
-  routineLabel: string;
-  blocks: RelayParsedBlock[];
-};
+    lines.slice(1).forEach((line) => {
+      const exerciseMatch = line.match(/^Exercise\s*\d+:\s*(.*)$/i);
+      const weightMatch = line.match(/^Weight:\s*(.*)$/i);
+      const targetMatch = line.match(/^Target:\s*(.*)$/i);
+      const setsMatch = line.match(/^Sets Complete:\s*(.*)$/i);
 
-const getRelayLineValue = (input: string, label: string) => {
-  const lines = String(input || "").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith(label)) {
-      return trimmed.slice(label.length).trim();
-    }
-  }
-  return "";
-};
+      if (exerciseMatch) {
+        if (currentEntry) entries.push(currentEntry);
+        currentEntry = {
+          name: exerciseMatch[1].trim(),
+          weight: "",
+          target: "",
+          setsCompleted: "",
+        };
+        return;
+      }
 
-const parseRelaySessionChunk = (chunk: string): RelayParsedBlock[] => {
-  const blockMatches =
-    chunk.match(/(Paired Block [A-Z]|Single Block)[\s\S]*?(?=(Paired Block [A-Z]|Single Block|$))/g) || [];
+      if (!currentEntry) return;
 
-  return blockMatches.map((block) => {
-    if (block.includes("Paired Block")) {
-      const label = block.match(/Paired Block\s+([A-Z])/i)?.[1]?.trim() || "";
-      const ex1Section = block.match(/Exercise 1:[\s\S]*?(?=Exercise 2:|$)/)?.[0] || "";
-      const ex2Section = block.match(/Exercise 2:[\s\S]*?$/)?.[0] || "";
+      if (weightMatch) {
+        currentEntry.weight = normalizeWeightInput(weightMatch[1].trim());
+        return;
+      }
 
-      return {
-        type: "paired" as const,
-        label,
-        exercises: [
-          {
-            name: getRelayLineValue(ex1Section, "Exercise 1:"),
-            weight: normalizeWeightInput(getRelayLineValue(ex1Section, "Weight:")),
-            target: getRelayLineValue(ex1Section, "Target:"),
-            value: extractFirstNumber(getRelayLineValue(ex1Section, "Sets Complete:")),
-          },
-          {
-            name: getRelayLineValue(ex2Section, "Exercise 2:"),
-            weight: normalizeWeightInput(getRelayLineValue(ex2Section, "Weight:")),
-            target: getRelayLineValue(ex2Section, "Target:"),
-            value: extractFirstNumber(getRelayLineValue(ex2Section, "Sets Complete:")),
-          },
-        ],
-      };
-    }
+      if (targetMatch) {
+        currentEntry.target = targetMatch[1].trim();
+        return;
+      }
+
+      if (setsMatch) {
+        currentEntry.setsCompleted = extractFirstNumber(setsMatch[1].trim());
+      }
+    });
+
+    if (currentEntry) entries.push(currentEntry);
 
     return {
-      type: "single" as const,
-      exercises: [
-        {
-          name: getRelayLineValue(block, "Exercise:"),
-          weight: normalizeWeightInput(getRelayLineValue(block, "Weight:")),
-          target: getRelayLineValue(block, "Target:"),
-          value: extractFirstNumber(getRelayLineValue(block, "Performance:")),
-        },
-      ],
+      blockKey,
+      time,
+      entries,
     };
   });
 };
 
-const parseRelayImportedSessions = (raw: string, program: Program, memberId: string) => {
-  const sections = String(raw || "")
-    .split(/(?=^\s*Program:\s*\d+)/gm)
-    .map((section) => section.trim())
-    .filter((section) => section && /Session #:/i.test(section));
+const parseRelaySingleBlocks = (chunk: string) => {
+  return splitImportedSections(chunk, "single").map((section) => {
+    const lines = section
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
 
-  const sessions: SavedSession[] = [];
+    const exerciseName = lines.find((line) => /^Exercise:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+    const weight = normalizeWeightInput(lines.find((line) => /^Weight:/i.test(line))?.split(":").slice(1).join(":").trim() || "");
+    const time = extractFirstNumber(lines.find((line) => /^Time \(minutes\):/i.test(line))?.split(":").slice(1).join(":").trim() || "");
+    const target = lines.find((line) => /^Target:/i.test(line))?.split(":").slice(1).join(":").trim() || "";
+    const performance = extractFirstNumber(lines.find((line) => /^Performance:/i.test(line))?.split(":").slice(1).join(":").trim() || "");
 
-  sections.forEach((section) => {
-    const sessionNumber = Number(getRelayLineValue(section, "Session #:"));
-    const date = getRelayLineValue(section, "Date:");
-    const routineLabel = getRelayLineValue(section, "Routine:");
-    const routine = getRoutineTemplateByLabel(program, routineLabel);
+    return {
+      exerciseName,
+      weight,
+      time,
+      target,
+      performance,
+    };
+  });
+};
 
-    if (!Number.isFinite(sessionNumber) || !date || !routine) return;
+const buildRelayImportedSession = (
+  program: Program,
+  memberId: string,
+  sessionNumber: number,
+  date: string,
+  routineLabel: string,
+  chunk: string
+): SavedSession | null => {
+  const routine = getRoutineTemplateByLabel(program, routineLabel);
+  if (!routine) return null;
 
-    const parsedBlocks = parseRelaySessionChunk(section);
+  const pairedBlocks = parseRelayPairedBlocks(chunk);
+  const singleBlocks = parseRelaySingleBlocks(chunk);
+  let singleIndex = 0;
 
-    const blocks: SessionBlockInput[] = routine.blocks.map((templateBlock, blockIndex) => {
-      const importedBlock = parsedBlocks[blockIndex];
-
-      if (!importedBlock || importedBlock.type !== templateBlock.type) {
-        return {
-          blockId: templateBlock.id,
-          blockTitle: templateBlock.title,
-          entries: templateBlock.exercises.map((exercise) => ({
-            exerciseId: exercise.id,
-            exerciseName: exercise.name,
-            weight: "",
-            performance: "",
-            setsCompleted: "",
-            target: exercise.target,
-            metric: exercise.metric,
-          })),
-        };
-      }
-
+  const blocks: SessionBlockInput[] = routine.blocks.map((block) => {
+    if (block.type === "paired") {
+      const pairData = pairedBlocks.find((item) => `Paired Block ${item.blockKey}` === block.title);
       return {
-        blockId: templateBlock.id,
-        blockTitle: templateBlock.title,
-        entries: templateBlock.exercises.map((exercise, exerciseIndex) => {
-          const importedEntry = importedBlock.exercises[exerciseIndex];
+        blockId: block.id,
+        blockTitle: block.title,
+        entries: block.exercises.map((exercise, exerciseIndex) => {
+          const importedEntry = pairData?.entries[exerciseIndex];
           const exerciseName = importedEntry?.name || exercise.name;
           const target = importedEntry?.target || exercise.target;
           const metric = inferMetricFromTarget(target, exercise.metric);
 
           return {
-            exerciseId:
-              exerciseName === exercise.name
-                ? exercise.id
-                : buildImportedExerciseId(templateBlock.id, exerciseName, exerciseIndex),
+            exerciseId: exerciseName === exercise.name ? exercise.id : buildImportedExerciseId(block.id, exerciseName, exerciseIndex),
             exerciseName,
             weight: importedEntry?.weight || "",
-            performance: importedBlock.type === "single" ? importedEntry?.value || "" : "",
-            setsCompleted: importedBlock.type === "paired" ? importedEntry?.value || "" : "",
+            performance: "",
+            setsCompleted: importedEntry?.setsCompleted || "",
             target,
             metric,
           };
         }),
       };
-    });
+    }
 
-    sessions.push({
-      id: uid(),
-      programId: program.id,
-      routineId: routine.id,
-      memberId,
-      date: normalizeImportedDate(date),
-      sessionNumber: String(sessionNumber),
-      blocks,
-      createdAt: getSafeDateIsoString(date),
-    });
+    const singleData = singleBlocks[singleIndex++];
+    const exercise = block.exercises[0];
+
+    const exerciseName = singleData?.exerciseName || exercise?.name || "";
+    const target = singleData?.target || exercise?.target || "";
+    const metric = inferMetricFromTarget(target, exercise?.metric || "");
+
+    return {
+      blockId: block.id,
+      blockTitle: block.title,
+      entries: [
+        {
+          exerciseId: exerciseName === exercise?.name ? exercise.id : buildImportedExerciseId(block.id, exerciseName, 0),
+          exerciseName,
+          weight: singleData?.weight || "",
+          performance: singleData?.performance || "",
+          setsCompleted: "",
+          target,
+          metric,
+        },
+      ],
+    };
   });
+
+  return {
+    id: uid(),
+    programId: program.id,
+    routineId: routine.id,
+    memberId,
+    date: normalizeImportedDate(date),
+    sessionNumber: String(sessionNumber),
+    blocks,
+    createdAt: getSafeDateIsoString(date),
+  };
+};
+
+const parseRelayImportedSessions = (raw: string, program: Program, memberId: string) => {
+  const sessionRegex = /Program:\s*\d+\s*\n+Session #:\s*(\d+)\s*\n+Date:\s*([^\n]+)\s*\n+Routine:\s*(Day \d+)\s*\n+([\s\S]*?)(?=(?:\n\s*Program:\s*\d+\s*\n+Session #:\s*\d+)|$)/g;
+  const sessions: SavedSession[] = [];
+
+  for (const match of raw.matchAll(sessionRegex)) {
+    const sessionNumber = Number(match[1]);
+    const date = match[2].trim();
+    const routineLabel = match[3].trim();
+    const chunk = match[4].trim();
+    const session = buildRelayImportedSession(program, memberId, sessionNumber, date, routineLabel, chunk);
+    if (session) sessions.push(session);
+  }
 
   return sessions;
 };
