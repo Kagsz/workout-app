@@ -151,6 +151,22 @@ const getStableWeightColor = (weight: string) => {
   return flatPalette[hash % flatPalette.length];
 };
 
+
+const getDarkerStrokeColor = (fill: string) => {
+  const normalized = String(fill || "").trim();
+  if (!/^#([0-9a-f]{6})$/i.test(normalized)) return "#111827";
+
+  const value = normalized.slice(1);
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+
+  const darken = (channel: number) => Math.max(0, Math.round(channel * 0.78));
+  const toHex = (channel: number) => darken(channel).toString(16).padStart(2, "0");
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
 const buildTrianglePath = (cx: number, cy: number, size: number) => {
   const half = size / 2;
   const height = size * 0.9;
@@ -185,7 +201,7 @@ function ExerciseDot({
   if (cx == null || cy == null || !payload) return null;
 
   const fill = getStableWeightColor(payload.weight);
-  const stroke = "#111827";
+  const stroke = getDarkerStrokeColor(fill);
   const size = shape === "diamond" ? 10 : 8;
 
   if (shape === "square") {
