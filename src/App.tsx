@@ -278,6 +278,50 @@ function GraphYAxisTick({
 }
 
 
+const GRAPH_UI_LOCK_CSS = `
+  .graph-ui-lock,
+  .graph-ui-lock * {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .graph-ui-lock .graph-select-none,
+  .graph-ui-lock .graph-select-none *,
+  .graph-ui-lock .recharts-wrapper,
+  .graph-ui-lock .recharts-wrapper *,
+  .graph-ui-lock .recharts-surface,
+  .graph-ui-lock .recharts-surface *,
+  .graph-ui-lock .recharts-cartesian-axis,
+  .graph-ui-lock .recharts-cartesian-axis *,
+  .graph-ui-lock .recharts-cartesian-grid,
+  .graph-ui-lock .recharts-cartesian-grid *,
+  .graph-ui-lock .recharts-label,
+  .graph-ui-lock .recharts-label *,
+  .graph-ui-lock .recharts-tooltip-wrapper,
+  .graph-ui-lock text,
+  .graph-ui-lock tspan {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .graph-ui-lock .recharts-cartesian-axis,
+  .graph-ui-lock .recharts-cartesian-axis *,
+  .graph-ui-lock .recharts-cartesian-grid,
+  .graph-ui-lock .recharts-cartesian-grid *,
+  .graph-ui-lock .recharts-label,
+  .graph-ui-lock .recharts-label *,
+  .graph-ui-lock text,
+  .graph-ui-lock tspan {
+    pointer-events: none;
+  }
+
+  .graph-ui-lock .recharts-tooltip-wrapper {
+    pointer-events: none;
+  }
+`;
+
+
 // ===== HELPERS =====
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -2589,13 +2633,14 @@ export default function App() {
                       <ToggleButton active={graphAxis === "session"} onClick={() => setGraphAxis("session")}>By Session #</ToggleButton>
                     </div>
 
-                    <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div>
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Exercise Key</div>
+                    <div className="graph-ui-lock space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div className="graph-select-none">
+                        <style>{GRAPH_UI_LOCK_CSS}</style>
+                        <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Exercise Key</div>
                         {graphLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
                             {graphLegendItems.map((item) => (
-                              <div key={item.exerciseId} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                              <div key={item.exerciseId} className="graph-select-none inline-flex select-none items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
                                 <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
                                   <line
                                     x1="2"
@@ -2622,13 +2667,13 @@ export default function App() {
                             ))}
                           </div>
                         ) : (
-                          <div className="text-sm text-zinc-500">No exercise key data yet.</div>
+                          <div className="text-sm text-zinc-500 select-none">No exercise key data yet.</div>
                         )}
                       </div>
 
                       {chartSeries.length ? (
-                        <div className="relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5">
-                          <div className="h-[320px] w-full">
+                        <div className="graph-select-none relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5">
+                          <div className="graph-select-none h-[320px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
                                 margin={{ top: 36, right: 6, left: -6, bottom: 34 }}
@@ -2709,24 +2754,24 @@ export default function App() {
                           ) : null}
                         </div>
                       ) : (
-                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-zinc-500">
+                        <div className="graph-select-none rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-zinc-500 select-none">
                           No graph data yet for this block.
                         </div>
                       )}
 
-                      <div>
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Weight Key</div>
+                      <div className="graph-select-none">
+                        <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Weight Key</div>
                         {weightLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
                             {weightLegendItems.map((item) => (
-                              <div key={item.value} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                              <div key={item.value} className="graph-select-none inline-flex select-none items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
                                 <span className="inline-block h-3 w-3 rounded-full border border-zinc-300" style={{ backgroundColor: item.color }} />
                                 <span>{item.label}</span>
                               </div>
                             ))}
                           </div>
                         ) : (
-                          <div className="text-sm text-zinc-500">No weight key data yet.</div>
+                          <div className="text-sm text-zinc-500 select-none">No weight key data yet.</div>
                         )}
                       </div>
                     </div>
