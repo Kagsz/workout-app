@@ -111,6 +111,15 @@ type ChartPoint = GraphPoint & {
   xLabel: string;
 };
 
+type PositionedSeries = GraphSeries & {
+  slot: 1 | 2;
+  shape: "circle" | "square" | "triangle" | "diamond";
+  dash?: string;
+  stroke: string;
+  isChangedMidRoutine: boolean;
+  points: ChartPoint[];
+};
+
 
 const WEIGHT_COLOR_BANDS = [
   ["#2563eb", "#06b6d4", "#22c55e", "#eab308", "#f97316", "#ef4444"],
@@ -235,6 +244,37 @@ function getSmartTooltipPosition(activePoint: ChartPoint | null, chartWidth: num
   }
 
   return topCenter;
+}
+
+
+const PAIRED_SAME_Y_TOTAL_OFFSET = 0.26;
+
+const getYAxisTickDy = (value: number) => {
+  if (value === 7) return 2;
+  if (value === 6) return 1;
+  if (value === 1) return -1;
+  return 0;
+};
+
+function GraphYAxisTick({
+  x,
+  y,
+  payload,
+}: {
+  x?: number;
+  y?: number;
+  payload?: { value?: number | string };
+}) {
+  if (x == null || y == null || payload?.value == null) return null;
+
+  const numericValue = Number(payload.value);
+  const dy = Number.isFinite(numericValue) ? getYAxisTickDy(numericValue) : 0;
+
+  return (
+    <text x={x} y={y} dy={dy} textAnchor="end" fill="#71717a" fontSize={10}>
+      {payload.value}
+    </text>
+  );
 }
 
 
@@ -1517,8 +1557,7 @@ export default function App() {
     };
   }, [graphData]);
 
-  const chartSeries = useMemo(() => {
-    const pairOffset = selectedBlock?.type === "paired" ? 0.14 : 0;
+  const chartSeries = useMemo<PositionedSeries[]>(() => {
     const baselineBySlot = new Map<1 | 2, number>();
 
     graphData.forEach((series) => {
@@ -1532,6 +1571,20 @@ export default function App() {
         baselineBySlot.set(slot, baseX);
       }
     });
+
+    const collisionMap = new Map<string, GraphPoint[]>();
+
+    if (selectedBlock?.type === "paired") {
+      graphData.forEach((series) => {
+        series.points.forEach((point) => {
+          const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(point.date) || 0) : point.sessionNumber;
+          const collisionKey = `${baseX}::${point.y}`;
+          const cluster = collisionMap.get(collisionKey) || [];
+          cluster.push(point);
+          collisionMap.set(collisionKey, cluster);
+        });
+      });
+    }
 
     return graphData.map((series) => {
       const firstPoint = series.points[0];
@@ -1555,12 +1608,24 @@ export default function App() {
               : "circle";
 
       const dash = selectedBlock?.type === "paired" && slot === 2 ? "6 4" : undefined;
-      const offset = selectedBlock?.type === "paired" ? (slot === 1 ? -pairOffset : pairOffset) : 0;
       const stroke = selectedBlock?.type === "paired" && slot === 2 ? "#52525b" : "#111111";
 
       const points: ChartPoint[] = series.points.map((point) => {
         const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(point.date) || 0) : point.sessionNumber;
         const xLabel = graphAxis === "date" ? dateAxisMeta.labelMap.get(baseX) || "" : `S${point.sessionNumber}`;
+
+        let offset = 0;
+        if (selectedBlock?.type === "paired") {
+          const collisionKey = `${baseX}::${point.y}`;
+          const cluster = (collisionMap.get(collisionKey) || []).slice().sort((a, b) => {
+            if (a.slot !== b.slot) return a.slot - b.slot;
+            return a.exerciseName.localeCompare(b.exerciseName);
+          });
+
+          if (cluster.length === 2 && cluster[0].slot !== cluster[1].slot) {
+            offset = point.slot === 1 ? -(PAIRED_SAME_Y_TOTAL_OFFSET / 2) : PAIRED_SAME_Y_TOTAL_OFFSET / 2;
+          }
+        }
 
         return {
           ...point,
@@ -1581,7 +1646,7 @@ export default function App() {
     });
   }, [dateAxisMeta.labelMap, dateAxisMeta.positionMap, graphData, graphAxis, selectedBlock]);
 
-  const xAxisTicks = useMemo(() => {
+  const xAxisTicks = useMemo<number[]>(() => {
     if (graphAxis === "date") {
       return dateAxisMeta.tickValues;
     }
@@ -1590,7 +1655,7 @@ export default function App() {
     return sessions.sort((a, b) => a - b);
   }, [dateAxisMeta.tickValues, graphData, graphAxis]);
 
-  const xAxisLabelMap = useMemo(() => {
+  const xAxisLabelMap = useMemo<Map<number, string>>(() => {
     if (graphAxis === "date") {
       return dateAxisMeta.labelMap;
     }
@@ -1619,6 +1684,16 @@ export default function App() {
 
     return [Math.max(0, Math.floor(min) - padding), Math.ceil(max) + padding] as [number, number];
   }, [graphData, selectedBlock?.type]);
+
+  const yAxisTicks = useMemo(() => {
+    if (selectedBlock?.type !== "paired") return undefined;
+
+    const ticks: number[] = [];
+    for (let value = yDomain[1]; value >= yDomain[0]; value -= 1) {
+      ticks.push(value);
+    }
+    return ticks;
+  }, [selectedBlock?.type, yDomain]);
 
   const graphLegendItems = useMemo(
     () =>
@@ -2552,11 +2627,11 @@ export default function App() {
                       </div>
 
                       {chartSeries.length ? (
-                        <div className="relative rounded-2xl border border-zinc-200 bg-white p-2 sm:p-3">
+                        <div className="relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5">
                           <div className="h-[320px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
-                                margin={{ top: 48, right: 8, left: 0, bottom: 52 }}
+                                margin={{ top: 36, right: 6, left: -6, bottom: 34 }}
                                 onMouseMove={(state: any) => {
                                   const point = state?.activePayload?.[0]?.payload as ChartPoint | undefined;
                                   if (point) setLastHoveredGraphPoint(point);
@@ -2571,20 +2646,21 @@ export default function App() {
                                   tickFormatter={(value) => xAxisLabelMap.get(Number(value)) || ""}
                                   angle={0}
                                   textAnchor="middle"
-                                  height={40}
+                                  height={28}
                                   tick={{ fontSize: graphAxis === "date" ? 10 : 11 }}
-                                  tickMargin={8}
+                                  tickMargin={6}
                                   allowDecimals={false}
                                 />
                                 <YAxis
                                   type="number"
                                   domain={yDomain}
+                                  ticks={yAxisTicks}
                                   tickCount={Math.max(4, Math.min(8, yDomain[1] - yDomain[0] + 1))}
                                   allowDecimals={selectedBlock?.type === "single"}
-                                  width={42}
-                                  tick={{ fontSize: 10 }}
-                                  tickMargin={4}
-                                  label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -2 }}
+                                  width={34}
+                                  tick={selectedBlock?.type === "paired" ? <GraphYAxisTick /> : { fontSize: 10 }}
+                                  tickMargin={2}
+                                  label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -1 }}
                                 />
                                 <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} />
                                 {chartSeries.map((series) => (
