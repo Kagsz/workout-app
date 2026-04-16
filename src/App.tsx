@@ -2557,7 +2557,7 @@ export default function App() {
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
                                 margin={{ top: 48, right: 8, left: 0, bottom: 52 }}
-                                onMouseMove={(state) => {
+                                onMouseMove={(state: any) => {
                                   const point = state?.activePayload?.[0]?.payload as ChartPoint | undefined;
                                   if (point) setLastHoveredGraphPoint(point);
                                 }}
