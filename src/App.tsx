@@ -312,12 +312,23 @@ const GRAPH_UI_LOCK_CSS = `
   .graph-ui-lock .recharts-label,
   .graph-ui-lock .recharts-label *,
   .graph-ui-lock text,
-  .graph-ui-lock tspan {
+  .graph-ui-lock tspan,
+  .graph-ui-lock .recharts-line-curve,
+  .graph-ui-lock .recharts-curve.recharts-line-curve,
+  .graph-ui-lock .recharts-layer.recharts-line,
+  .graph-ui-lock .recharts-reference-line,
+  .graph-ui-lock .recharts-reference-line * {
     pointer-events: none;
   }
 
   .graph-ui-lock .recharts-tooltip-wrapper {
     pointer-events: none;
+  }
+
+  .graph-ui-lock .recharts-active-dot,
+  .graph-ui-lock .recharts-dot,
+  .graph-ui-lock [data-graph-dot="true"] {
+    pointer-events: auto;
   }
 `;
 
@@ -2673,7 +2684,7 @@ export default function App() {
 
                       {chartSeries.length ? (
                         <div className="graph-select-none relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5">
-                          <div className="graph-select-none h-[320px] w-full">
+                          <div className="graph-select-none h-[320px] w-full touch-manipulation" onTouchStartCapture={(event) => event.preventDefault()}>
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
                                 margin={{ top: 36, right: 6, left: -6, bottom: 34 }}
@@ -2720,8 +2731,25 @@ export default function App() {
                                     stroke={series.stroke}
                                     strokeWidth={2}
                                     strokeDasharray={series.dash}
-                                    dot={(props) => <ExerciseDot {...props} payload={props.payload as GraphPoint} shape={series.shape as "circle" | "square" | "triangle" | "diamond"} />}
-                                    activeDot={(props) => <ExerciseDot {...props} payload={props.payload as GraphPoint} shape={series.shape as "circle" | "square" | "triangle" | "diamond"} />}
+                                    style={{ pointerEvents: "none" }}
+                                    dot={(props) => (
+                                      <g data-graph-dot="true" style={{ pointerEvents: "auto" }}>
+                                        <ExerciseDot
+                                          {...props}
+                                          payload={props.payload as GraphPoint}
+                                          shape={series.shape as "circle" | "square" | "triangle" | "diamond"}
+                                        />
+                                      </g>
+                                    )}
+                                    activeDot={(props) => (
+                                      <g data-graph-dot="true" style={{ pointerEvents: "auto" }}>
+                                        <ExerciseDot
+                                          {...props}
+                                          payload={props.payload as GraphPoint}
+                                          shape={series.shape as "circle" | "square" | "triangle" | "diamond"}
+                                        />
+                                      </g>
+                                    )}
                                     isAnimationActive={false}
                                     connectNulls={false}
                                   />
