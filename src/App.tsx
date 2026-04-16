@@ -96,6 +96,7 @@ type GraphPoint = {
   target: string;
   metric: string;
   blockType: BlockType;
+  slot: 1 | 2;
 };
 
 type GraphSeries = {
@@ -169,14 +170,14 @@ function ExerciseDot({
 }: {
   cx?: number;
   cy?: number;
-  payload?: GraphPoint;
-  shape: "circle" | "square" | "triangle";
+  payload?: GraphPoint | ChartPoint;
+  shape: "circle" | "square" | "triangle" | "diamond";
 }) {
   if (cx == null || cy == null || !payload) return null;
 
   const fill = getStableWeightColor(payload.weight);
   const stroke = "#111827";
-  const size = 8;
+  const size = shape === "diamond" ? 10 : 8;
 
   if (shape === "square") {
     return <rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} rx={2} fill={fill} stroke={stroke} strokeWidth={1} />;
@@ -184,6 +185,10 @@ function ExerciseDot({
 
   if (shape === "triangle") {
     return <polygon points={buildTrianglePath(cx, cy, size)} fill={fill} stroke={stroke} strokeWidth={1} />;
+  }
+
+  if (shape === "diamond") {
+    return <polygon points={`${cx},${cy - size / 2} ${cx + size / 2},${cy} ${cx},${cy + size / 2} ${cx - size / 2},${cy}`} fill={fill} stroke={stroke} strokeWidth={1} />;
   }
 
   return <circle cx={cx} cy={cy} r={size / 2} fill={fill} stroke={stroke} strokeWidth={1} />;
@@ -219,6 +224,19 @@ function GraphTooltip({
     </div>
   );
 }
+
+function getSmartTooltipPosition(activePoint: ChartPoint | null, chartWidth: number) {
+  const topCenter = { x: Math.max(72, chartWidth / 2 - 92), y: 8 };
+  if (!activePoint) return topCenter;
+
+  const hoveredX = Number(activePoint.chartX ?? activePoint.x ?? 0);
+  if (hoveredX >= 3.5 && hoveredX <= 5.5) {
+    return hoveredX < 4.5 ? { x: chartWidth - 214, y: 8 } : { x: 24, y: 8 };
+  }
+
+  return topCenter;
+}
+
 
 // ===== HELPERS =====
 
@@ -1349,6 +1367,7 @@ export default function App() {
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(BLOCK_IDS.day1A);
   const [graphAxis, setGraphAxis] = useState<GraphAxis>("date");
+  const [lastHoveredGraphPoint, setLastHoveredGraphPoint] = useState<ChartPoint | null>(null);
   const [sessionDraft, setSessionDraft] = useState<SessionDraft | null>(null);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
     if (typeof window === "undefined") return [];
@@ -1420,11 +1439,12 @@ export default function App() {
       const matchingBlock = session.blocks.find((block) => block.blockId === selectedBlock.id);
       if (!matchingBlock) return;
 
-      matchingBlock.entries.forEach((entry) => {
+      matchingBlock.entries.forEach((entry, entryIndex) => {
         const exercise = exerciseLookup.get(entry.exerciseId);
         const rawY = selectedBlock.type === "single" ? entry.performance : entry.setsCompleted;
         const y = Number(rawY);
         const sessionNumber = Number(session.sessionNumber);
+        const slot: 1 | 2 = selectedBlock.type === "paired" ? (entryIndex === 0 ? 1 : 2) : 1;
 
         if (!Number.isFinite(y) || !Number.isFinite(sessionNumber)) return;
 
@@ -1449,6 +1469,7 @@ export default function App() {
           target: entry.target || exercise?.target || "",
           metric: entry.metric || exercise?.metric || "",
           blockType: selectedBlock.type,
+          slot,
         });
       });
     });
@@ -1497,12 +1518,45 @@ export default function App() {
   }, [graphData]);
 
   const chartSeries = useMemo(() => {
-    const pairOffset = selectedBlock?.type === "paired" ? 0.24 : 0;
+    const pairOffset = selectedBlock?.type === "paired" ? 0.14 : 0;
+    const baselineBySlot = new Map<1 | 2, number>();
 
-    return graphData.map((series, seriesIndex) => {
-      const shape = selectedBlock?.type === "single" ? "triangle" : seriesIndex === 0 ? "circle" : "square";
-      const dash = selectedBlock?.type === "paired" && seriesIndex === 1 ? "5 4" : undefined;
-      const offset = selectedBlock?.type === "paired" ? (seriesIndex === 0 ? -pairOffset : pairOffset) : 0;
+    graphData.forEach((series) => {
+      const firstPoint = series.points[0];
+      if (!firstPoint) return;
+
+      const slot = firstPoint.slot;
+      const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(firstPoint.date) || 0) : firstPoint.sessionNumber;
+      const current = baselineBySlot.get(slot);
+      if (current == null || baseX < current) {
+        baselineBySlot.set(slot, baseX);
+      }
+    });
+
+    return graphData.map((series) => {
+      const firstPoint = series.points[0];
+      const slot: 1 | 2 = firstPoint?.slot ?? 1;
+      const firstBaseX =
+        graphAxis === "date"
+          ? Number(dateAxisMeta.positionMap.get(firstPoint?.date || "") || 0)
+          : Number(firstPoint?.sessionNumber || 0);
+      const isChangedMidRoutine =
+        selectedBlock?.type === "paired" && firstPoint
+          ? firstBaseX > Number(baselineBySlot.get(slot) ?? firstBaseX)
+          : false;
+
+      const shape =
+        selectedBlock?.type === "single"
+          ? "triangle"
+          : isChangedMidRoutine
+            ? "diamond"
+            : slot === 2
+              ? "square"
+              : "circle";
+
+      const dash = selectedBlock?.type === "paired" && slot === 2 ? "6 4" : undefined;
+      const offset = selectedBlock?.type === "paired" ? (slot === 1 ? -pairOffset : pairOffset) : 0;
+      const stroke = selectedBlock?.type === "paired" && slot === 2 ? "#52525b" : "#111111";
 
       const points: ChartPoint[] = series.points.map((point) => {
         const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(point.date) || 0) : point.sessionNumber;
@@ -1517,8 +1571,11 @@ export default function App() {
 
       return {
         ...series,
+        slot,
         shape,
         dash,
+        stroke,
+        isChangedMidRoutine,
         points,
       };
     });
@@ -1568,8 +1625,11 @@ export default function App() {
       chartSeries.map((series) => ({
         exerciseId: series.exerciseId,
         exerciseName: series.exerciseName,
-        shape: series.shape as "circle" | "square" | "triangle",
+        shape: series.shape as "circle" | "square" | "triangle" | "diamond",
         dash: series.dash,
+        stroke: series.stroke,
+        slot: series.slot,
+        isChangedMidRoutine: series.isChangedMidRoutine,
       })),
     [chartSeries]
   );
@@ -1594,6 +1654,8 @@ export default function App() {
       color: getStableWeightColor(weight),
     }));
   }, [graphData]);
+
+  const tooltipPosition = useMemo(() => getSmartTooltipPosition(lastHoveredGraphPoint, 320), [lastHoveredGraphPoint]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2452,108 +2514,12 @@ export default function App() {
                       <ToggleButton active={graphAxis === "session"} onClick={() => setGraphAxis("session")}>By Session #</ToggleButton>
                     </div>
 
-                    {chartSeries.length ? (
-                      <div className="relative rounded-2xl border border-zinc-200 bg-white p-2 sm:p-3">
-                        <div className="h-[320px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart margin={{ top: 12, right: 8, left: 0, bottom: 52 }}>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                              <XAxis
-                                type="number"
-                                dataKey="chartX"
-                                ticks={xAxisTicks}
-                                domain={xAxisDomain}
-                                tickFormatter={(value) => xAxisLabelMap.get(Number(value)) || ""}
-                                angle={0}
-                                textAnchor="middle"
-                                height={40}
-                                tick={{ fontSize: graphAxis === "date" ? 10 : 11 }}
-                                tickMargin={8}
-                                allowDecimals={false}
-                              />
-                              <YAxis
-                                type="number"
-                                domain={yDomain}
-                                tickCount={Math.max(4, Math.min(8, yDomain[1] - yDomain[0] + 1))}
-                                allowDecimals={selectedBlock?.type === "single"}
-                                width={42}
-                                tick={{ fontSize: 10 }}
-                                tickMargin={4}
-                                label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -2 }}
-                              />
-                              <Tooltip content={<GraphTooltip />} />
-                              {chartSeries.map((series, seriesIndex) => (
-                                <Line
-                                  key={series.exerciseId}
-                                  type="linear"
-                                  data={series.points}
-                                  dataKey="y"
-                                  name={series.exerciseName}
-                                  xAxisId={0}
-                                  yAxisId={0}
-                                  stroke={seriesIndex === 1 ? "#52525b" : "#111111"}
-                                  strokeWidth={2}
-                                  strokeDasharray={series.dash}
-                                  dot={(props) => <ExerciseDot {...props} payload={props.payload as GraphPoint} shape={series.shape as "circle" | "square" | "triangle"} />}
-                                  activeDot={(props) => <ExerciseDot {...props} payload={props.payload as GraphPoint} shape={series.shape as "circle" | "square" | "triangle"} />}
-                                  isAnimationActive={false}
-                                />
-                              ))}
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-
-                        {selectedRoutine.blocks.length > 1 ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => stepGraphBlock("previous")}
-                              disabled={!canGoToPreviousBlock}
-                              aria-label="Previous graph"
-                              className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
-                            >
-                              ‹
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => stepGraphBlock("next")}
-                              disabled={!canGoToNextBlock}
-                              aria-label="Next graph"
-                              className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
-                            >
-                              ›
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-zinc-500">
-                        No graph data yet for this block.
-                      </div>
-                    )}
-
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="mb-2 text-sm font-semibold text-zinc-900">Phase 3 Graph Pipeline</div>
-                      <div className="text-sm text-zinc-600">Series Count: {graphData.length}</div>
-                      <div className="mt-3 space-y-1 text-sm text-zinc-500">
-                        {graphData.length > 0 ? (
-                          graphData.map((series) => (
-                            <div key={series.exerciseId}>
-                              {series.exerciseName}: {series.points.length} {series.points.length === 1 ? "point" : "points"}
-                            </div>
-                          ))
-                        ) : (
-                          <div>No scoped graph data yet for this block.</div>
-                        )}
-                      </div>
-                    </div>
-
                     <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
                       <div>
                         <div className="mb-2 text-sm font-semibold text-zinc-900">Exercise Key</div>
                         {graphLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
-                            {graphLegendItems.map((item, index) => (
+                            {graphLegendItems.map((item) => (
                               <div key={item.exerciseId} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
                                 <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
                                   <line
@@ -2561,12 +2527,14 @@ export default function App() {
                                     y1="10"
                                     x2="18"
                                     y2="10"
-                                    stroke={index === 1 ? "#52525b" : "#111111"}
+                                    stroke={item.stroke}
                                     strokeWidth="2"
                                     strokeDasharray={item.dash}
                                   />
                                   {item.shape === "triangle" ? (
                                     <polygon points="10,4 5,14 15,14" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                  ) : item.shape === "diamond" ? (
+                                    <polygon points="10,3 17,10 10,17 3,10" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
                                   ) : item.shape === "square" ? (
                                     <rect x="6" y="6" width="8" height="8" rx="1.5" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
                                   ) : (
@@ -2574,6 +2542,7 @@ export default function App() {
                                   )}
                                 </svg>
                                 <span>{item.exerciseName}</span>
+                                {item.isChangedMidRoutine ? <span className="text-xs text-zinc-500">(changed)</span> : null}
                               </div>
                             ))}
                           </div>
@@ -2581,6 +2550,93 @@ export default function App() {
                           <div className="text-sm text-zinc-500">No exercise key data yet.</div>
                         )}
                       </div>
+
+                      {chartSeries.length ? (
+                        <div className="relative rounded-2xl border border-zinc-200 bg-white p-2 sm:p-3">
+                          <div className="h-[320px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart
+                                margin={{ top: 48, right: 8, left: 0, bottom: 52 }}
+                                onMouseMove={(state) => {
+                                  const point = state?.activePayload?.[0]?.payload as ChartPoint | undefined;
+                                  if (point) setLastHoveredGraphPoint(point);
+                                }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis
+                                  type="number"
+                                  dataKey="chartX"
+                                  ticks={xAxisTicks}
+                                  domain={xAxisDomain}
+                                  tickFormatter={(value) => xAxisLabelMap.get(Number(value)) || ""}
+                                  angle={0}
+                                  textAnchor="middle"
+                                  height={40}
+                                  tick={{ fontSize: graphAxis === "date" ? 10 : 11 }}
+                                  tickMargin={8}
+                                  allowDecimals={false}
+                                />
+                                <YAxis
+                                  type="number"
+                                  domain={yDomain}
+                                  tickCount={Math.max(4, Math.min(8, yDomain[1] - yDomain[0] + 1))}
+                                  allowDecimals={selectedBlock?.type === "single"}
+                                  width={42}
+                                  tick={{ fontSize: 10 }}
+                                  tickMargin={4}
+                                  label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -2 }}
+                                />
+                                <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} />
+                                {chartSeries.map((series) => (
+                                  <Line
+                                    key={series.exerciseId}
+                                    type="linear"
+                                    data={series.points}
+                                    dataKey="y"
+                                    name={series.exerciseName}
+                                    xAxisId={0}
+                                    yAxisId={0}
+                                    stroke={series.stroke}
+                                    strokeWidth={2}
+                                    strokeDasharray={series.dash}
+                                    dot={(props) => <ExerciseDot {...props} payload={props.payload as GraphPoint} shape={series.shape as "circle" | "square" | "triangle" | "diamond"} />}
+                                    activeDot={(props) => <ExerciseDot {...props} payload={props.payload as GraphPoint} shape={series.shape as "circle" | "square" | "triangle" | "diamond"} />}
+                                    isAnimationActive={false}
+                                    connectNulls={false}
+                                  />
+                                ))}
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {selectedRoutine.blocks.length > 1 ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => stepGraphBlock("previous")}
+                                disabled={!canGoToPreviousBlock}
+                                aria-label="Previous graph"
+                                className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
+                              >
+                                ‹
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => stepGraphBlock("next")}
+                                disabled={!canGoToNextBlock}
+                                aria-label="Next graph"
+                                className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
+                              >
+                                ›
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-8 text-center text-sm text-zinc-500">
+                          No graph data yet for this block.
+                        </div>
+                      )}
 
                       <div>
                         <div className="mb-2 text-sm font-semibold text-zinc-900">Weight Key</div>
@@ -2595,6 +2651,22 @@ export default function App() {
                           </div>
                         ) : (
                           <div className="text-sm text-zinc-500">No weight key data yet.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div className="mb-2 text-sm font-semibold text-zinc-900">Phase 3 Graph Pipeline</div>
+                      <div className="text-sm text-zinc-600">Series Count: {graphData.length}</div>
+                      <div className="mt-3 space-y-1 text-sm text-zinc-500">
+                        {graphData.length > 0 ? (
+                          graphData.map((series) => (
+                            <div key={series.exerciseId}>
+                              {series.exerciseName}: {series.points.length} {series.points.length === 1 ? "point" : "points"}
+                            </div>
+                          ))
+                        ) : (
+                          <div>No scoped graph data yet for this block.</div>
                         )}
                       </div>
                     </div>
