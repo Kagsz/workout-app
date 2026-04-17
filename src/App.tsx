@@ -2045,11 +2045,6 @@ export default function App() {
     setScreen("members");
   };
 
-  const goProgramBuilder = () => {
-    setRole("admin");
-    setScreen("builder");
-  };
-
   const openMemberOverview = (memberId: string) => {
     setSelectedMemberId(memberId);
     setRole("admin");
@@ -2098,10 +2093,6 @@ export default function App() {
 
   const restoreMember = (memberId: string) => {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
-  };
-
-  const toggleProgramClosed = (memberId: string) => {
-    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, programClosed: !member.programClosed } : member)));
   };
 
   const goAdminInput = () => {
