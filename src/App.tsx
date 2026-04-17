@@ -45,6 +45,7 @@ type Program = {
   startedAt: string;
   status: "active" | "paused" | "closed";
   routines: Routine[];
+  notes?: string;
   memberId?: string;
 };
 
@@ -188,22 +189,23 @@ function ExerciseDot({
   if (cx == null || cy == null || !payload) return null;
 
   const fill = getStableWeightColor(payload.weight);
-  const stroke = "#111827";
+  const stroke = fill;
   const size = shape === "diamond" ? 10 : 8;
+  const strokeWidth = 1.5;
 
   if (shape === "square") {
-    return <rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} rx={2} fill={fill} stroke={stroke} strokeWidth={1} />;
+    return <rect x={cx - size / 2} y={cy - size / 2} width={size} height={size} rx={2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />;
   }
 
   if (shape === "triangle") {
-    return <polygon points={buildTrianglePath(cx, cy, size)} fill={fill} stroke={stroke} strokeWidth={1} />;
+    return <polygon points={buildTrianglePath(cx, cy, size)} fill={fill} stroke={stroke} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />;
   }
 
   if (shape === "diamond") {
-    return <polygon points={`${cx},${cy - size / 2} ${cx + size / 2},${cy} ${cx},${cy + size / 2} ${cx - size / 2},${cy}`} fill={fill} stroke={stroke} strokeWidth={1} />;
+    return <polygon points={`${cx},${cy - size / 2} ${cx + size / 2},${cy} ${cx},${cy + size / 2} ${cx - size / 2},${cy}`} fill={fill} stroke={stroke} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />;
   }
 
-  return <circle cx={cx} cy={cy} r={size / 2} fill={fill} stroke={stroke} strokeWidth={1} />;
+  return <circle cx={cx} cy={cy} r={size / 2} fill={fill} stroke={stroke} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />;
 }
 
 function GraphTooltip({
@@ -335,6 +337,8 @@ const GRAPH_UI_LOCK_CSS = `
   }
 `;
 
+const getProgramBlockCount = (program: Program | null | undefined) =>
+  program?.routines.reduce((total, routine) => total + routine.blocks.length, 0) || 0;
 
 // ===== HELPERS =====
 
@@ -2056,6 +2060,60 @@ export default function App() {
     setScreen("adminPrograms");
   };
 
+  const goBack = () => {
+    if (role === "admin") {
+      if (screen === "memberOverview") {
+        goAdminMembers();
+        return;
+      }
+      if (screen === "adminPrograms") {
+        setScreen("memberOverview");
+        return;
+      }
+      if (screen === "builder") {
+        if (builderSource === "memberOverview") {
+          setScreen("memberOverview");
+        } else {
+          goAdminPrograms();
+        }
+        return;
+      }
+      if (screen === "input") {
+        goAdminMembers();
+      }
+      return;
+    }
+
+    if (screen === "routines") {
+      goMemberPrograms();
+      return;
+    }
+    if (screen === "routine") {
+      setScreen("routines");
+      return;
+    }
+    if (screen === "graph") {
+      setScreen("routine");
+    }
+  };
+
+  const backLabel = useMemo(() => {
+    if (role === "admin") {
+      if (screen === "memberOverview") return "Back to Clients";
+      if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
+      if (screen === "builder") {
+        if (builderSource === "memberOverview") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
+        return "Back to All Programs";
+      }
+      if (screen === "input") return "Back to Clients";
+      return "";
+    }
+    if (screen === "routines") return "Back to My Programs";
+    if (screen === "routine") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to My Programs";
+    if (screen === "graph") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
+    return "";
+  }, [role, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
+
   const addMember = () => {
     const nextMemberNumber = members.length + 1;
     const newMember: Member = {
@@ -2219,16 +2277,16 @@ export default function App() {
 
   const pathItems = useMemo(() => {
     if (role === "admin" && screen === "members") {
-      return [{ label: "Admin" }, { label: "Members" }];
+      return [{ label: "Admin" }, { label: "Clients" }];
     }
     if (role === "admin" && screen === "memberOverview") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Members", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Clients", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
     if (role === "admin" && screen === "adminPrograms") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Members", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Clients", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
     if (role === "admin" && screen === "builder") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Members", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: builderSource === "memberOverview" ? (() => setScreen("memberOverview")) : goAdminPrograms }] : [{ label: "Build a Program" }]), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Clients", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: builderSource === "memberOverview" ? (() => setScreen("memberOverview")) : goAdminPrograms }] : [{ label: "Build a Program" }]), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "admin" && screen === "input") {
       return [{ label: "Admin" }, { label: "Data Input" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
@@ -2273,21 +2331,24 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <ToggleButton active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Members</ToggleButton>
+                    <ToggleButton active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Clients</ToggleButton>
                     <ToggleButton active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
                     <ToggleButton active={role === "member" && (screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
                 </div>
               </div>
 
-              {!!pathItems.length && <PathBar items={pathItems} />}
+              <div className="flex items-center justify-between gap-3">
+                {!!pathItems.length && <PathBar items={pathItems} />}
+                {backLabel ? <SmallButton onClick={goBack} className="shrink-0">← {backLabel}</SmallButton> : null}
+              </div>
 
               {role === "admin" && screen === "members" && (
-                <SectionCard title="Members" collapsible>
+                <SectionCard title="Clients" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
                       <div>
-                        <Label>Search Members</Label>
+                        <Label>Search Clients</Label>
                         <TextInput value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search by name or ID" />
                       </div>
                       <div className="flex gap-2 text-sm">
@@ -2312,7 +2373,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="self-end flex gap-2">
-                      <PrimaryButton onClick={addMember}>+ Add Member</PrimaryButton>
+                      <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
                     </div>
                   </div>
 
@@ -2328,7 +2389,7 @@ export default function App() {
                           ) : (
                             <>
                               <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton>
-                              <SmallButton onClick={() => removeMember(member.id)}>Delete</SmallButton>
+                              <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100">Delete</SmallButton>
                             </>
                           )}
                         </div>
@@ -2338,7 +2399,7 @@ export default function App() {
 
                   {!memberSearch.trim() && !showAllMembers && members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
                     <div className="mt-4">
-                      <SmallButton onClick={() => setShowAllMembers(true)}>Show All Members</SmallButton>
+                      <SmallButton onClick={() => setShowAllMembers(true)}>Show All Clients</SmallButton>
                     </div>
                   ) : null}
                 </SectionCard>
@@ -2346,7 +2407,7 @@ export default function App() {
 
               {role === "admin" && screen === "memberOverview" && selectedMember && (
                 <div className="space-y-6">
-                  <SectionCard title="Member Overview" collapsible>
+                  <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
                       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                         <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
@@ -2358,7 +2419,20 @@ export default function App() {
                           <div className="text-sm font-semibold text-zinc-900">Active Program</div>
                           {activeAdminProgram ? (
                             <>
-                              <div className="mt-2 text-sm text-zinc-600">{activeAdminProgram.name}</div>
+                              <div className="mt-2 text-sm font-medium text-zinc-700">{activeAdminProgram.name}</div>
+                              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-600">
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                  <div className="font-semibold text-zinc-900">{activeAdminProgram.routines.length}</div>
+                                  <div>Routines</div>
+                                </div>
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                  <div className="font-semibold text-zinc-900">{getProgramBlockCount(activeAdminProgram)}</div>
+                                  <div>Total Blocks</div>
+                                </div>
+                              </div>
+                              <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
+                                {String(activeAdminProgram.notes || "").trim() || "No program notes yet."}
+                              </div>
                               <PrimaryButton
                                 onClick={() => {
                                   setSelectedProgramId(activeAdminProgram.id);
@@ -2402,6 +2476,7 @@ export default function App() {
                             startedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
                             status: "active",
                             routines: [createRoutine(0)],
+                            notes: "",
                             memberId: selectedMember?.id,
                           };
                           setPrograms((prev) => [...prev, newProgram]);
@@ -2466,7 +2541,7 @@ export default function App() {
                                   if (!confirmClose) return;
                                   setPrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
                                 }}
-                                className="bg-red-600 hover:bg-red-700 text-white"
+                                className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                               >
                                 Close
                               </SmallButton>
@@ -2480,7 +2555,7 @@ export default function App() {
                                     setSelectedProgramId(null);
                                   }
                                 }}
-                                className="bg-red-600 hover:bg-red-700 text-white"
+                                className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                               >
                                 Delete
                               </SmallButton>
@@ -2496,7 +2571,25 @@ export default function App() {
               {role === "admin" && screen === "builder" && (
                 <div className="space-y-6">
                   <SectionCard title="Build a Program" collapsible>
-                    <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Build the selected program's routine loop here. Add day routines, then stack paired or single blocks inside each routine.</div>
+                    <div className="space-y-3">
+                      <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Program Structure creates and manages routines. Routine Builder organizes block order. Program Details holds the overall program info and notes.</div>
+                      {selectedProgram ? (
+                        <div className="grid gap-3">
+                          <div>
+                            <Label>Program Name</Label>
+                            <TextInput value={selectedProgram.name} onChange={(e) => updateProgram(selectedProgram.id, { name: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label>Program Started Date</Label>
+                            <TextInput value={selectedProgram.startedAt} onChange={(e) => updateProgram(selectedProgram.id, { startedAt: e.target.value })} />
+                          </div>
+                          <div>
+                            <Label>Program Notes</Label>
+                            <TextArea value={selectedProgram.notes || ""} onChange={(e) => updateProgram(selectedProgram.id, { notes: e.target.value })} rows={3} placeholder="Program focuses upper body, conditioning, etc." />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   </SectionCard>
 
                   <SectionCard title="Program Structure" collapsible defaultOpen={false}>
@@ -2510,7 +2603,7 @@ export default function App() {
                               <div className={`text-xs ${selectedRoutine?.id === routine.id ? "text-zinc-300" : "text-zinc-500"}`}>{routine.blocks.length} blocks</div>
                             </button>
                             <div className="mt-2 flex justify-end">
-                              <SmallButton onClick={() => deleteRoutine(routine.id)}>Delete Routine</SmallButton>
+                              <SmallButton onClick={() => deleteRoutine(routine.id)} className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100">Delete Routine</SmallButton>
                             </div>
                           </div>
                         ))}
@@ -2521,7 +2614,7 @@ export default function App() {
                   <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible defaultOpen={false}>
                     {selectedRoutine ? (
                       <div className="space-y-5">
-                        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
+                        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
                           <div>
                             <Label>Routine Label</Label>
                             <TextInput value={selectedRoutine.label} onChange={(e) => updateRoutine(selectedRoutine.id, { label: e.target.value })} />
@@ -2531,6 +2624,18 @@ export default function App() {
                           </div>
                           <div className="self-end">
                             <SmallButton onClick={() => addBlock(selectedRoutine.id, "single")}>+ Single Block</SmallButton>
+                          </div>
+                          <div className="self-end">
+                            <SmallButton
+                              onClick={() => {
+                                const confirmReset = window.confirm("Delete all blocks in this routine and start fresh?");
+                                if (!confirmReset) return;
+                                updateRoutine(selectedRoutine.id, { blocks: [] });
+                              }}
+                              className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                            >
+                              Clear Blocks
+                            </SmallButton>
                           </div>
                         </div>
 
@@ -2542,7 +2647,7 @@ export default function App() {
                                 <div className="flex flex-wrap gap-2">
                                   <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "up")} disabled={index === 0}>Move Up</SmallButton>
                                   <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "down")} disabled={index === selectedRoutine.blocks.length - 1}>Move Down</SmallButton>
-                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)}>Delete Block</SmallButton>
+                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100">Delete Block</SmallButton>
                                 </div>
                               </div>
 
@@ -2875,7 +2980,7 @@ export default function App() {
                     </div>
 
                     <div className="graph-ui-lock space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="graph-select-none">
+                      <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : 76 }}>
                         <style>{GRAPH_UI_LOCK_CSS}</style>
                         <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Exercise Key</div>
                         {graphLegendItems.length ? (
@@ -2901,13 +3006,13 @@ export default function App() {
                                     strokeDasharray={item.dash}
                                   />
                                   {item.shape === "triangle" ? (
-                                    <polygon points="10,4 5,14 15,14" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                    <polygon points="10,4 5,14 15,14" fill={item.stroke} stroke={item.stroke} strokeWidth="1.25" />
                                   ) : item.shape === "diamond" ? (
-                                    <polygon points="10,3 17,10 10,17 3,10" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                    <polygon points="10,3 17,10 10,17 3,10" fill={item.stroke} stroke={item.stroke} strokeWidth="1.25" />
                                   ) : item.shape === "square" ? (
-                                    <rect x="6" y="6" width="8" height="8" rx="1.5" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                    <rect x="6" y="6" width="8" height="8" rx="1.5" fill={item.stroke} stroke={item.stroke} strokeWidth="1.25" />
                                   ) : (
-                                    <circle cx="10" cy="10" r="4" fill="#9ca3af" stroke="#111827" strokeWidth="1" />
+                                    <circle cx="10" cy="10" r="4" fill={item.stroke} stroke={item.stroke} strokeWidth="1.25" />
                                   )}
                                 </svg>
                                 <span>{item.exerciseName}</span>
@@ -2923,10 +3028,10 @@ export default function App() {
 
                       {chartSeries.length ? (
                         <div className="graph-select-none relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5">
-                          <div className="graph-select-none h-[320px] w-full touch-manipulation" onTouchStartCapture={(event) => event.preventDefault()}>
+                          <div className="graph-select-none h-[320px] w-full touch-pan-x">
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
-                                margin={{ top: 36, right: 6, left: -6, bottom: 34 }}
+                                margin={{ top: 36, right: 6, left: -6, bottom: 18 }}
                                 onMouseMove={(state: any) => {
                                   const point = state?.activePayload?.[0]?.payload as ChartPoint | undefined;
                                   if (point) {
@@ -2934,6 +3039,7 @@ export default function App() {
                                     setActiveExerciseName(point.exerciseName);
                                   }
                                 }}
+                                onMouseLeave={() => setLastHoveredGraphPoint(null)}
                               >
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                                 <XAxis
@@ -2960,7 +3066,7 @@ export default function App() {
                                   tickMargin={2}
                                   label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -1 }}
                                 />
-                                <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} />
+                                <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} active={Boolean(lastHoveredGraphPoint)} />
                                 {displayChartSeries.map((series) => (
                                   <Line
                                     key={series.exerciseId}
@@ -2974,24 +3080,41 @@ export default function App() {
                                     strokeWidth={2}
                                     strokeDasharray={series.dash}
                                     style={{ pointerEvents: "none" }}
-                                    dot={(props) => (
-                                      <g data-graph-dot="true" style={{ pointerEvents: "auto" }}>
-                                        <ExerciseDot
-                                          {...props}
-                                          payload={props.payload as GraphPoint}
-                                          shape={series.shape as "circle" | "square" | "triangle" | "diamond"}
-                                        />
-                                      </g>
-                                    )}
-                                    activeDot={(props) => (
-                                      <g data-graph-dot="true" style={{ pointerEvents: "auto" }}>
-                                        <ExerciseDot
-                                          {...props}
-                                          payload={props.payload as GraphPoint}
-                                          shape={series.shape as "circle" | "square" | "triangle" | "diamond"}
-                                        />
-                                      </g>
-                                    )}
+                                    dot={(props) => {
+                                      const point = props.payload as ChartPoint;
+                                      return (
+                                        <g
+                                          data-graph-dot="true"
+                                          style={{ pointerEvents: "auto", cursor: "pointer" }}
+                                          onMouseEnter={() => {
+                                            setLastHoveredGraphPoint(point);
+                                            setActiveExerciseName(point.exerciseName);
+                                          }}
+                                          onTouchStart={() => {
+                                            setLastHoveredGraphPoint(point);
+                                            setActiveExerciseName(point.exerciseName);
+                                          }}
+                                        >
+                                          <ExerciseDot
+                                            {...props}
+                                            payload={point}
+                                            shape={series.shape as "circle" | "square" | "triangle" | "diamond"}
+                                          />
+                                        </g>
+                                      );
+                                    }}
+                                    activeDot={(props) => {
+                                      const point = props.payload as ChartPoint;
+                                      return (
+                                        <g data-graph-dot="true" style={{ pointerEvents: "auto" }}>
+                                          <ExerciseDot
+                                            {...props}
+                                            payload={point}
+                                            shape={series.shape as "circle" | "square" | "triangle" | "diamond"}
+                                          />
+                                        </g>
+                                      );
+                                    }}
                                     isAnimationActive={false}
                                     connectNulls={false}
                                   />
@@ -3029,7 +3152,7 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className="graph-select-none">
+                      <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : 76 }}>
                         <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Weight Key</div>
                         {weightLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
