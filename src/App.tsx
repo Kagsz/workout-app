@@ -2577,15 +2577,44 @@ export default function App() {
                         <div className="grid gap-3">
                           <div>
                             <Label>Program Name</Label>
-                            <TextInput value={selectedProgram.name} onChange={(e) => updateProgram(selectedProgram.id, { name: e.target.value })} />
+                            <TextInput
+  value={selectedProgram.name}
+  onChange={(e) =>
+    updatePrograms((current) =>
+      current.map((p) =>
+        p.id === selectedProgram.id ? { ...p, name: e.target.value } : p
+      )
+    )
+  }
+/>
                           </div>
                           <div>
                             <Label>Program Started Date</Label>
-                            <TextInput value={selectedProgram.startedAt} onChange={(e) => updateProgram(selectedProgram.id, { startedAt: e.target.value })} />
+                            <TextInput
+  value={selectedProgram.startedAt}
+  onChange={(e) =>
+    updatePrograms((current) =>
+      current.map((p) =>
+        p.id === selectedProgram.id ? { ...p, startedAt: e.target.value } : p
+      )
+    )
+  }
+/>
                           </div>
                           <div>
                             <Label>Program Notes</Label>
-                            <TextArea value={selectedProgram.notes || ""} onChange={(e) => updateProgram(selectedProgram.id, { notes: e.target.value })} rows={3} placeholder="Program focuses upper body, conditioning, etc." />
+                            <TextArea
+  value={selectedProgram.notes || ""}
+  onChange={(e) =>
+    updatePrograms((current) =>
+      current.map((p) =>
+        p.id === selectedProgram.id ? { ...p, notes: e.target.value } : p
+      )
+    )
+  }
+  rows={3}
+  placeholder="Program focuses upper body, conditioning, etc."
+/>
                           </div>
                         </div>
                       ) : null}
