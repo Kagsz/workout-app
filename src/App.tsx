@@ -12,7 +12,8 @@ import {
 // ===== TYPES =====
 
 type Role = "admin" | "member";
-type Screen = "builder" | "input" | "programs" | "routines" | "routine" | "graph";
+type Screen = "members" | "memberOverview" | "adminPrograms" | "builder" | "input" | "programs" | "routines" | "routine" | "graph";
+type BuilderSource = "memberOverview" | "adminPrograms";
 type BlockType = "paired" | "single";
 type GraphAxis = "date" | "session";
 
@@ -42,8 +43,9 @@ type Program = {
   id: string;
   name: string;
   startedAt: string;
-  status: "active" | "closed";
+  status: "active" | "paused" | "closed";
   routines: Routine[];
+  memberId?: string;
 };
 
 type Member = {
@@ -51,6 +53,7 @@ type Member = {
   clientId: string;
   name: string;
   programClosed?: boolean;
+  archived?: boolean;
 };
 
 type SessionExerciseInput = {
@@ -151,22 +154,6 @@ const getStableWeightColor = (weight: string) => {
   return flatPalette[hash % flatPalette.length];
 };
 
-
-const getDarkerStrokeColor = (fill: string) => {
-  const normalized = String(fill || "").trim();
-  if (!/^#([0-9a-f]{6})$/i.test(normalized)) return "#111827";
-
-  const value = normalized.slice(1);
-  const r = parseInt(value.slice(0, 2), 16);
-  const g = parseInt(value.slice(2, 4), 16);
-  const b = parseInt(value.slice(4, 6), 16);
-
-  const darken = (channel: number) => Math.max(0, Math.round(channel * 0.78));
-  const toHex = (channel: number) => darken(channel).toString(16).padStart(2, "0");
-
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-};
-
 const buildTrianglePath = (cx: number, cy: number, size: number) => {
   const half = size / 2;
   const height = size * 0.9;
@@ -201,7 +188,7 @@ function ExerciseDot({
   if (cx == null || cy == null || !payload) return null;
 
   const fill = getStableWeightColor(payload.weight);
-  const stroke = getDarkerStrokeColor(fill);
+  const stroke = "#111827";
   const size = shape === "diamond" ? 10 : 8;
 
   if (shape === "square") {
@@ -1466,18 +1453,22 @@ export default function App() {
     return stored ? JSON.parse(stored) : [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
   });
   const [memberSearch, setMemberSearch] = useState("");
+  const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
+  const [showAllMembers, setShowAllMembers] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>("member-1");
   const [role, setRole] = useState<Role>("admin");
-  const [screen, setScreen] = useState<Screen>("input");
+  const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms();
     const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
     return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms();
   });
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
+  const [builderSource, setBuilderSource] = useState<BuilderSource>("adminPrograms");
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(BLOCK_IDS.day1A);
   const [graphAxis, setGraphAxis] = useState<GraphAxis>("date");
+  const [activeExerciseName, setActiveExerciseName] = useState<string | null>(null);
   const [lastHoveredGraphPoint, setLastHoveredGraphPoint] = useState<ChartPoint | null>(null);
   const [sessionDraft, setSessionDraft] = useState<SessionDraft | null>(null);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
@@ -1489,9 +1480,13 @@ export default function App() {
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
-    if (!query) return members;
-    return members.filter((member) => member.name.toLowerCase().includes(query));
-  }, [members, memberSearch]);
+    const scopedMembers = members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived));
+
+    if (!query) return showAllMembers ? scopedMembers : scopedMembers.slice(0, 10);
+    return scopedMembers.filter((member) =>
+      member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query)
+    );
+  }, [members, memberSearch, viewArchivedMembers, showAllMembers]);
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
@@ -1503,9 +1498,28 @@ export default function App() {
     [programs]
   );
 
+  const adminPrograms = useMemo(() => {
+    if (!selectedMember) return [];
+    return programs.filter((program) => (program.memberId || members[0]?.id || null) === selectedMember.id);
+  }, [programs, selectedMember, members]);
+
+  const adminSortedPrograms = useMemo(
+    () => [...adminPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
+    [adminPrograms]
+  );
+
+  const activeAdminProgram = useMemo(
+    () => adminSortedPrograms.find((program) => program.status === "active") || null,
+    [adminSortedPrograms]
+  );
+
   const selectedProgram = useMemo(
-    () => programs.find((program) => program.id === selectedProgramId) || sortedPrograms[0] || null,
-    [programs, selectedProgramId, sortedPrograms]
+    () =>
+      programs.find((program) => program.id === selectedProgramId) ||
+      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")
+        ? adminSortedPrograms[0] || null
+        : sortedPrograms[0] || null),
+    [programs, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
   );
 
   const selectedRoutine = useMemo(
@@ -1717,6 +1731,19 @@ export default function App() {
     });
   }, [dateAxisMeta.labelMap, dateAxisMeta.positionMap, graphData, graphAxis, selectedBlock]);
 
+  useEffect(() => {
+    if (!chartSeries.length) {
+      setActiveExerciseName(null);
+      return;
+    }
+
+    if (activeExerciseName && chartSeries.some((series) => series.exerciseName === activeExerciseName)) {
+      return;
+    }
+
+    setActiveExerciseName(chartSeries[0]?.exerciseName ?? null);
+  }, [activeExerciseName, chartSeries]);
+
   const xAxisTicks = useMemo<number[]>(() => {
     if (graphAxis === "date") {
       return dateAxisMeta.tickValues;
@@ -1765,6 +1792,16 @@ export default function App() {
     }
     return ticks;
   }, [selectedBlock?.type, yDomain]);
+
+  const displayChartSeries = useMemo(() => {
+    if (!activeExerciseName) return chartSeries;
+
+    return [...chartSeries].sort((a, b) => {
+      const aActive = a.exerciseName === activeExerciseName ? 1 : 0;
+      const bActive = b.exerciseName === activeExerciseName ? 1 : 0;
+      return aActive - bActive;
+    });
+  }, [activeExerciseName, chartSeries]);
 
   const graphLegendItems = useMemo(
     () =>
@@ -2003,9 +2040,25 @@ export default function App() {
     );
   };
 
+  const goAdminMembers = () => {
+    setRole("admin");
+    setScreen("members");
+  };
+
   const goProgramBuilder = () => {
     setRole("admin");
     setScreen("builder");
+  };
+
+  const openMemberOverview = (memberId: string) => {
+    setSelectedMemberId(memberId);
+    setRole("admin");
+    setScreen("memberOverview");
+  };
+
+  const goAdminPrograms = () => {
+    setRole("admin");
+    setScreen("adminPrograms");
   };
 
   const addMember = () => {
@@ -2015,16 +2068,36 @@ export default function App() {
       clientId: String(100000 + nextMemberNumber),
       name: `New Member ${nextMemberNumber}`,
       programClosed: false,
+      archived: false,
     };
 
     setMembers((prev) => [...prev, newMember]);
     setSelectedMemberId(newMember.id);
     setMemberSearch("");
+    setViewArchivedMembers(false);
+    setShowAllMembers(false);
   };
 
   const removeMember = (memberId: string) => {
+    const confirmDelete = window.confirm("Are you sure? This action cannot be undone.");
+    if (!confirmDelete) return;
     setMembers((prev) => prev.filter((member) => member.id !== memberId));
-    if (selectedMemberId === memberId) setSelectedMemberId(null);
+    if (selectedMemberId === memberId) {
+      setSelectedMemberId(null);
+      setScreen("members");
+    }
+  };
+
+  const archiveMember = (memberId: string) => {
+    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
+    if (selectedMemberId === memberId) {
+      setSelectedMemberId(null);
+      setScreen("members");
+    }
+  };
+
+  const restoreMember = (memberId: string) => {
+    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
   };
 
   const toggleProgramClosed = (memberId: string) => {
@@ -2045,7 +2118,7 @@ export default function App() {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen("routines");
+    setScreen(role === "admin" ? "builder" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -2154,8 +2227,17 @@ export default function App() {
   };
 
   const pathItems = useMemo(() => {
+    if (role === "admin" && screen === "members") {
+      return [{ label: "Admin" }, { label: "Members" }];
+    }
+    if (role === "admin" && screen === "memberOverview") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Members", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+    }
+    if (role === "admin" && screen === "adminPrograms") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Members", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+    }
     if (role === "admin" && screen === "builder") {
-      return [{ label: "Admin" }, { label: "Program Builder" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Members", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: builderSource === "memberOverview" ? (() => setScreen("memberOverview")) : goAdminPrograms }] : [{ label: "Build a Program" }]), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "admin" && screen === "input") {
       return [{ label: "Admin" }, { label: "Data Input" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
@@ -2173,7 +2255,7 @@ export default function App() {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
     }
     return [];
-  }, [role, screen, selectedProgram, selectedRoutine, selectedBlock]);
+  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms]);
 
   return (
     <div className="min-h-screen bg-zinc-100 p-6 text-zinc-900">
@@ -2200,7 +2282,7 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <ToggleButton active={role === "admin" && screen === "builder"} onClick={goProgramBuilder}>Program Builder</ToggleButton>
+                    <ToggleButton active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Members</ToggleButton>
                     <ToggleButton active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
                     <ToggleButton active={role === "member" && (screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
@@ -2209,62 +2291,226 @@ export default function App() {
 
               {!!pathItems.length && <PathBar items={pathItems} />}
 
-              {role === "admin" && screen === "builder" && (
-                <div className="space-y-6">
-                  <SectionCard title="Member Workspace" collapsible>
-                    <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-                      <div className="space-y-3">
-                        <div>
-                          <Label>Search Member</Label>
-                          <TextInput value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search for a member" />
-                        </div>
-                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
-                          <div className="mb-2 text-sm font-semibold text-zinc-900">Selected Member</div>
-                          <div className="text-sm text-zinc-600">{selectedMember?.name || "No member selected"}</div>
-                          <div className="mt-3 flex gap-2">
-                            <SmallButton onClick={() => selectedMember && toggleProgramClosed(selectedMember.id)}>
-                              {selectedMember?.programClosed ? "Reopen Program" : "Close Program"}
-                            </SmallButton>
-                            <div className="self-center text-xs text-zinc-500">Status: {selectedMember?.programClosed ? "Closed" : "Active"}</div>
-                          </div>
-                        </div>
+              {role === "admin" && screen === "members" && (
+                <SectionCard title="Members" collapsible>
+                  <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+                    <div className="space-y-3">
+                      <div>
+                        <Label>Search Members</Label>
+                        <TextInput value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search by name or ID" />
                       </div>
-                      <div className="self-end flex gap-2">
-                        <PrimaryButton onClick={addMember}>+ Add Member</PrimaryButton>
-                        <PrimaryButton onClick={() => selectedMember && removeMember(selectedMember.id)} className="bg-red-600 hover:bg-red-700">Remove Member</PrimaryButton>
+                      <div className="flex gap-2 text-sm">
+                        <button
+                          onClick={() => {
+                            setViewArchivedMembers(false);
+                            setShowAllMembers(false);
+                          }}
+                          className={`rounded-full border px-3 py-1 ${!viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+                        >
+                          Active
+                        </button>
+                        <button
+                          onClick={() => {
+                            setViewArchivedMembers(true);
+                            setShowAllMembers(false);
+                          }}
+                          className={`rounded-full border px-3 py-1 ${viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+                        >
+                          Archived
+                        </button>
                       </div>
                     </div>
+                    <div className="self-end flex gap-2">
+                      <PrimaryButton onClick={addMember}>+ Add Member</PrimaryButton>
+                    </div>
+                  </div>
 
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      {filteredMembers.map((member) => (
-                        <button key={member.id} onClick={() => setSelectedMemberId(member.id)} className={`rounded-2xl border p-4 text-left transition ${selectedMember?.id === member.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"}`}>
-                          <div className="font-semibold">{member.name}</div>
-                          <div className={`text-sm ${selectedMember?.id === member.id ? "text-zinc-300" : "text-zinc-500"}`}>Program workspace</div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {filteredMembers.map((member) => (
+                      <div key={member.id} className="rounded-2xl border border-zinc-200 bg-white p-4 text-left transition">
+                        <button onClick={() => openMemberOverview(member.id)} className="w-full text-left">
+                          <div className="font-semibold text-zinc-900">{member.name}</div>
                         </button>
+                        <div className="mt-3 flex gap-2">
+                          {member.archived ? (
+                            <SmallButton onClick={() => restoreMember(member.id)}>Restore</SmallButton>
+                          ) : (
+                            <>
+                              <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton>
+                              <SmallButton onClick={() => removeMember(member.id)}>Delete</SmallButton>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {!memberSearch.trim() && !showAllMembers && members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
+                    <div className="mt-4">
+                      <SmallButton onClick={() => setShowAllMembers(true)}>Show All Members</SmallButton>
+                    </div>
+                  ) : null}
+                </SectionCard>
+              )}
+
+              {role === "admin" && screen === "memberOverview" && selectedMember && (
+                <div className="space-y-6">
+                  <SectionCard title="Member Overview" collapsible>
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
+                        <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="text-sm font-semibold text-zinc-900">Active Program</div>
+                          {activeAdminProgram ? (
+                            <>
+                              <div className="mt-2 text-sm text-zinc-600">{activeAdminProgram.name}</div>
+                              <PrimaryButton
+                                onClick={() => {
+                                  setSelectedProgramId(activeAdminProgram.id);
+                                  setSelectedRoutineId(activeAdminProgram.routines[0]?.id || null);
+                                  setBuilderSource("memberOverview");
+                                  setScreen("builder");
+                                }}
+                                className="mt-3 w-full"
+                              >
+                                Open Active Program
+                              </PrimaryButton>
+                            </>
+                          ) : (
+                            <div className="mt-2 text-sm text-zinc-500">No Active Program</div>
+                          )}
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="text-sm font-semibold text-zinc-900">All Programs</div>
+                          <div className="mt-2 text-sm text-zinc-600">View every program for this member and start a new one.</div>
+                          <PrimaryButton onClick={goAdminPrograms} className="mt-3 w-full">
+                            View All Programs
+                          </PrimaryButton>
+                        </div>
+                      </div>
+                    </div>
+                  </SectionCard>
+                </div>
+              )}
+
+              {role === "admin" && screen === "adminPrograms" && selectedMember && (
+                <div className="space-y-6">
+                  <SectionCard title="All Programs" collapsible>
+                    <div className="space-y-3">
+                      <PrimaryButton
+                        onClick={() => {
+                          const nextProgramIndex = programs.length + 1;
+                          const newProgram: Program = {
+                            id: uid(),
+                            name: `Program ${nextProgramIndex}`,
+                            startedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+                            status: "active",
+                            routines: [createRoutine(0)],
+                            memberId: selectedMember?.id,
+                          };
+                          setPrograms((prev) => [...prev, newProgram]);
+                          setSelectedProgramId(newProgram.id);
+                          setSelectedRoutineId(newProgram.routines[0]?.id || null);
+                          setSelectedBlockId(newProgram.routines[0]?.blocks[0]?.id || null);
+                          setBuilderSource("adminPrograms");
+                          setScreen("builder");
+                        }}
+                        className="w-full"
+                      >
+                        + New Program
+                      </PrimaryButton>
+
+                      {adminSortedPrograms.map((program) => (
+                        <div key={program.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <button
+                              onClick={() => {
+                                setSelectedProgramId(program.id);
+                                setSelectedRoutineId(program.routines[0]?.id || null);
+                                setSelectedBlockId(program.routines[0]?.blocks[0]?.id || null);
+                                setBuilderSource("adminPrograms");
+                                setScreen("builder");
+                              }}
+                              className="text-left"
+                            >
+                              <div className="font-semibold text-zinc-900">{program.name}</div>
+                              <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
+                            </button>
+                            <div className={`text-xs font-semibold uppercase tracking-wide ${
+                              program.status === "active"
+                                ? "text-blue-600"
+                                : program.status === "paused"
+                                  ? "text-amber-600"
+                                  : "text-zinc-400"
+                            }`}>
+                              {program.status === "active" ? "Active" : program.status === "paused" ? "Paused" : "Completed"}
+                            </div>
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            {program.status !== "closed" ? (
+                              <SmallButton
+                                onClick={() => {
+                                  setPrograms((prev) =>
+                                    prev.map((item) =>
+                                      item.id === program.id
+                                        ? { ...item, status: item.status === "paused" ? "active" : "paused" }
+                                        : item
+                                    )
+                                  );
+                                }}
+                              >
+                                {program.status === "paused" ? "Resume" : "Pause"}
+                              </SmallButton>
+                            ) : null}
+
+                            {program.status === "active" ? (
+                              <SmallButton
+                                onClick={() => {
+                                  const confirmClose = window.confirm("Are you sure you want to close this program? This action cannot be undone.");
+                                  if (!confirmClose) return;
+                                  setPrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
+                                }}
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                              >
+                                Close
+                              </SmallButton>
+                            ) : (
+                              <SmallButton
+                                onClick={() => {
+                                  const confirmDelete = window.confirm("Are you sure you want to delete this program? This action cannot be undone.");
+                                  if (!confirmDelete) return;
+                                  setPrograms((prev) => prev.filter((item) => item.id !== program.id));
+                                  if (selectedProgramId === program.id) {
+                                    setSelectedProgramId(null);
+                                  }
+                                }}
+                                className="bg-red-600 hover:bg-red-700 text-white"
+                              >
+                                Delete
+                              </SmallButton>
+                            )}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </SectionCard>
+                </div>
+              )}
 
-                  <SectionCard title="Program Library" collapsible defaultOpen={false}>
-                    <div className="space-y-2">
-                      {sortedPrograms.map((program) => (
-                        <button key={program.id} onClick={() => setSelectedProgramId(program.id)} className={`w-full rounded-2xl border p-4 text-left transition ${selectedProgram?.id === program.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"}`}>
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="font-semibold">{program.name}</div>
-                              <div className={`text-sm ${selectedProgram?.id === program.id ? "text-zinc-300" : "text-zinc-500"}`}>Started {program.startedAt}</div>
-                            </div>
-                            <div className={`text-xs font-semibold uppercase tracking-wide ${selectedProgram?.id === program.id ? "text-zinc-300" : "text-zinc-400"}`}>{program.status}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+              {role === "admin" && screen === "builder" && (
+                <div className="space-y-6">
+                  <SectionCard title="Build a Program" collapsible>
+                    <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Build the selected program's routine loop here. Add day routines, then stack paired or single blocks inside each routine.</div>
                   </SectionCard>
 
                   <SectionCard title="Program Structure" collapsible defaultOpen={false}>
                     <div className="space-y-3">
-                      <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Build the selected program's routine loop here. Add Day A, Day B, and so on, then stack paired or single blocks inside each routine.</div>
-                      <PrimaryButton onClick={addRoutine} className="w-full">+ Add Routine</PrimaryButton>
+                      <PrimaryButton onClick={addRoutine} className="w-full">+ Routine</PrimaryButton>
                       <div className="space-y-2">
                         {selectedProgram?.routines.map((routine) => (
                           <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-2">
@@ -2354,29 +2600,6 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-
-                        {selectedRoutine.blocks.length > 1 ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => stepGraphBlock("previous")}
-                              disabled={!canGoToPreviousBlock}
-                              aria-label="Previous graph"
-                              className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
-                            >
-                              ‹
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => stepGraphBlock("next")}
-                              disabled={!canGoToNextBlock}
-                              aria-label="Next graph"
-                              className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
-                            >
-                              ›
-                            </button>
-                          </>
-                        ) : null}
                       </div>
                     ) : (
                       <div className="text-sm text-zinc-500">Select a routine to begin editing.</div>
@@ -2585,7 +2808,7 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members start here and open the most recent program first.</div>
                     <div className="space-y-3">
-                      {sortedPrograms.map((program) => (
+                      {adminSortedPrograms.map((program) => (
                         <button key={program.id} onClick={() => openProgram(program.id)} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
                           <div className="flex items-center justify-between gap-3">
                             <div>
@@ -2666,8 +2889,16 @@ export default function App() {
                         <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Exercise Key</div>
                         {graphLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
-                            {graphLegendItems.map((item) => (
-                              <div key={item.exerciseId} className="graph-select-none inline-flex select-none items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            {graphLegendItems.map((item) => {
+                              const isActive = item.exerciseName === activeExerciseName;
+
+                              return (
+                              <button
+                                type="button"
+                                key={item.exerciseId}
+                                onClick={() => setActiveExerciseName(item.exerciseName)}
+                                className={`graph-select-none inline-flex select-none items-center gap-2 rounded-full border px-3 py-1.5 text-left transition ${isActive ? "border-zinc-400 bg-zinc-100 shadow-sm" : "border-zinc-200 bg-zinc-50"}`}
+                              >
                                 <svg width="20" height="20" viewBox="0 0 20 20" className="shrink-0">
                                   <line
                                     x1="2"
@@ -2690,8 +2921,9 @@ export default function App() {
                                 </svg>
                                 <span>{item.exerciseName}</span>
                                 {item.isChangedMidRoutine ? <span className="text-xs text-zinc-500">(changed)</span> : null}
-                              </div>
-                            ))}
+                              </button>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="text-sm text-zinc-500 select-none">No exercise key data yet.</div>
@@ -2706,7 +2938,10 @@ export default function App() {
                                 margin={{ top: 36, right: 6, left: -6, bottom: 34 }}
                                 onMouseMove={(state: any) => {
                                   const point = state?.activePayload?.[0]?.payload as ChartPoint | undefined;
-                                  if (point) setLastHoveredGraphPoint(point);
+                                  if (point) {
+                                    setLastHoveredGraphPoint(point);
+                                    setActiveExerciseName(point.exerciseName);
+                                  }
                                 }}
                               >
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -2735,7 +2970,7 @@ export default function App() {
                                   label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -1 }}
                                 />
                                 <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} />
-                                {chartSeries.map((series) => (
+                                {displayChartSeries.map((series) => (
                                   <Line
                                     key={series.exerciseId}
                                     type="linear"
