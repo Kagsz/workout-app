@@ -1697,7 +1697,7 @@ export default function App() {
               : "circle";
 
       const dash = selectedBlock?.type === "paired" && slot === 2 ? "6 4" : undefined;
-      const stroke = selectedBlock?.type === "paired" && slot === 2 ? "#52525b" : "#111111";
+      const stroke = firstPoint ? getStableWeightColor(firstPoint.weight) : (selectedBlock?.type === "paired" && slot === 2 ? "#52525b" : "#111111");
 
       const points: ChartPoint[] = series.points.map((point) => {
         const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(point.date) || 0) : point.sessionNumber;
@@ -2338,9 +2338,13 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-3">
+              <div className="space-y-3">
                 {!!pathItems.length && <PathBar items={pathItems} />}
-                {backLabel ? <SmallButton onClick={goBack} className="shrink-0">← {backLabel}</SmallButton> : null}
+                {backLabel ? (
+                  <div>
+                    <SmallButton onClick={goBack} className="shrink-0">← {backLabel}</SmallButton>
+                  </div>
+                ) : null}
               </div>
 
               {role === "admin" && screen === "members" && (
@@ -2389,7 +2393,7 @@ export default function App() {
                           ) : (
                             <>
                               <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton>
-                              <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100">Delete</SmallButton>
+                              <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton>
                             </>
                           )}
                         </div>
@@ -2570,6 +2574,27 @@ export default function App() {
 
               {role === "admin" && screen === "builder" && (
                 <div className="space-y-6">
+                  {selectedProgram ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Summary</div>
+                      <div className="mt-2 text-lg font-semibold text-zinc-900">{selectedProgram.name}</div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-zinc-600">
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <div className="text-base font-semibold text-zinc-900">{selectedProgram.routines.length}</div>
+                          <div>Routines</div>
+                        </div>
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <div className="text-base font-semibold text-zinc-900">{getProgramBlockCount(selectedProgram)}</div>
+                          <div>Total Blocks</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
+                        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Notes</div>
+                        <div>{String(selectedProgram.notes || "").trim() || "No program notes yet."}</div>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <SectionCard title="Build a Program" collapsible>
                     <div className="space-y-3">
                       <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Program Structure creates and manages routines. Routine Builder organizes block order. Program Details holds the overall program info and notes.</div>
@@ -2632,7 +2657,7 @@ export default function App() {
                               <div className={`text-xs ${selectedRoutine?.id === routine.id ? "text-zinc-300" : "text-zinc-500"}`}>{routine.blocks.length} blocks</div>
                             </button>
                             <div className="mt-2 flex justify-end">
-                              <SmallButton onClick={() => deleteRoutine(routine.id)} className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100">Delete Routine</SmallButton>
+                              <SmallButton onClick={() => deleteRoutine(routine.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete Routine</SmallButton>
                             </div>
                           </div>
                         ))}
@@ -2661,7 +2686,7 @@ export default function App() {
                                 if (!confirmReset) return;
                                 updateRoutine(selectedRoutine.id, { blocks: [] });
                               }}
-                              className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                             >
                               Clear Blocks
                             </SmallButton>
@@ -2676,7 +2701,7 @@ export default function App() {
                                 <div className="flex flex-wrap gap-2">
                                   <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "up")} disabled={index === 0}>Move Up</SmallButton>
                                   <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "down")} disabled={index === selectedRoutine.blocks.length - 1}>Move Down</SmallButton>
-                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100">Delete Block</SmallButton>
+                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete Block</SmallButton>
                                 </div>
                               </div>
 
@@ -3009,7 +3034,7 @@ export default function App() {
                     </div>
 
                     <div className="graph-ui-lock space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : 76 }}>
+                      <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : graphLegendItems.length === 1 ? 96 : 76 }}>
                         <style>{GRAPH_UI_LOCK_CSS}</style>
                         <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Exercise Key</div>
                         {graphLegendItems.length ? (
@@ -3060,8 +3085,9 @@ export default function App() {
                           <div className="graph-select-none h-[320px] w-full touch-pan-x">
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
-                                margin={{ top: 36, right: 6, left: -6, bottom: 18 }}
+                                margin={{ top: 36, right: 6, left: -4, bottom: 8 }}
                                 onMouseMove={(state: any) => {
+                                  if (!state?.isTooltipActive) return;
                                   const point = state?.activePayload?.[0]?.payload as ChartPoint | undefined;
                                   if (point) {
                                     setLastHoveredGraphPoint(point);
@@ -3095,7 +3121,7 @@ export default function App() {
                                   tickMargin={2}
                                   label={{ value: "Completed Output", angle: -90, position: "insideLeft", style: { fontSize: 11 }, dx: -1 }}
                                 />
-                                <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} active={Boolean(lastHoveredGraphPoint)} />
+                                <Tooltip content={<GraphTooltip />} position={tooltipPosition} cursor={false} shared={false} />
                                 {displayChartSeries.map((series) => (
                                   <Line
                                     key={series.exerciseId}
@@ -3120,6 +3146,10 @@ export default function App() {
                                             setActiveExerciseName(point.exerciseName);
                                           }}
                                           onTouchStart={() => {
+                                            setLastHoveredGraphPoint(point);
+                                            setActiveExerciseName(point.exerciseName);
+                                          }}
+                                          onTouchMove={() => {
                                             setLastHoveredGraphPoint(point);
                                             setActiveExerciseName(point.exerciseName);
                                           }}
@@ -3181,7 +3211,7 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : 76 }}>
+                      <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : graphLegendItems.length === 1 ? 96 : 76 }}>
                         <div className="mb-2 text-sm font-semibold text-zinc-900 select-none">Weight Key</div>
                         {weightLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
