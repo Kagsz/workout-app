@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import appBanner from "./assets/appbanner1.png";
 
 // ===== TYPES =====
 
@@ -2099,13 +2100,13 @@ export default function App() {
 
   const backLabel = useMemo(() => {
     if (role === "admin") {
-      if (screen === "memberOverview") return "Back to Clients";
+      if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
       if (screen === "builder") {
         if (builderSource === "memberOverview") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
         return "Back to All Programs";
       }
-      if (screen === "input") return "Back to Clients";
+      if (screen === "input") return "Back to Client List";
       return "";
     }
     if (screen === "routines") return "Back to My Programs";
@@ -2277,16 +2278,16 @@ export default function App() {
 
   const pathItems = useMemo(() => {
     if (role === "admin" && screen === "members") {
-      return [{ label: "Admin" }, { label: "Clients" }];
+      return [{ label: "Admin" }, { label: "Client List" }];
     }
     if (role === "admin" && screen === "memberOverview") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Clients", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
     if (role === "admin" && screen === "adminPrograms") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Clients", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
     if (role === "admin" && screen === "builder") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Clients", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: builderSource === "memberOverview" ? (() => setScreen("memberOverview")) : goAdminPrograms }] : [{ label: "Build a Program" }]), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: builderSource === "memberOverview" ? (() => setScreen("memberOverview")) : goAdminPrograms }] : [{ label: "Build a Program" }]), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "admin" && screen === "input") {
       return [{ label: "Admin" }, { label: "Data Input" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
@@ -2309,10 +2310,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-100 p-6 text-zinc-900">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-6 text-center">
-          <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Prototype</div>
-          <h1 className="mt-1 text-3xl font-bold">Workout App V2</h1>
-          <p className="mt-1 text-sm text-zinc-600">Phase 5 with persistent storage, bulk import, and collapsible sections.</p>
+        <div className="mb-6 space-y-4 text-center">
+          <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-black shadow-sm">
+            <img src={appBanner} alt="Pratt Report banner" className="h-24 w-full object-cover sm:h-28" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Prototype</div>
+            <h1 className="mt-1 text-3xl font-bold">Workout App V2</h1>
+            <p className="mt-1 text-sm text-zinc-600">Phase 5 with persistent storage, bulk import, and collapsible sections.</p>
+          </div>
         </div>
 
         <div className="mx-auto w-full max-w-[430px] overflow-hidden rounded-[32px] border border-zinc-300 bg-white shadow-2xl">
@@ -2331,7 +2337,7 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <ToggleButton active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Clients</ToggleButton>
+                    <ToggleButton active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
                     <ToggleButton active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
                     <ToggleButton active={role === "member" && (screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
@@ -2348,11 +2354,11 @@ export default function App() {
               </div>
 
               {role === "admin" && screen === "members" && (
-                <SectionCard title="Clients" collapsible>
+                <SectionCard title="Client List" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
                       <div>
-                        <Label>Search Clients</Label>
+                        <Label>Search Client List</Label>
                         <TextInput value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search by name or ID" />
                       </div>
                       <div className="flex gap-2 text-sm">
