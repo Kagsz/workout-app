@@ -1698,7 +1698,7 @@ export default function App() {
               : "circle";
 
       const dash = selectedBlock?.type === "paired" && slot === 2 ? "6 4" : undefined;
-      const stroke = selectedBlock?.type === "paired" && slot === 2 ? "#6b7280" : "#111111";
+      const stroke = firstPoint ? getStableWeightColor(firstPoint.weight) : (selectedBlock?.type === "paired" && slot === 2 ? "#52525b" : "#111111");
 
       const points: ChartPoint[] = series.points.map((point) => {
         const baseX = graphAxis === "date" ? Number(dateAxisMeta.positionMap.get(point.date) || 0) : point.sessionNumber;
@@ -2310,7 +2310,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
       <div className="bg-black">
-        <div className="mx-auto flex h-[156px] w-full max-w-[430px] items-center justify-center overflow-hidden">
+        <div className="mx-auto flex h-[240px] w-full max-w-[430px] items-center justify-center overflow-hidden">
           <img
             src={appBanner}
             alt="Pratt Report banner"
@@ -2325,12 +2325,14 @@ export default function App() {
                 <div className="flex flex-col gap-4">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
+                    <h1 className="text-2xl font-bold">Workout App V2</h1>
+                    <p className="mt-1 text-sm text-zinc-600">Mobile shell preview for structure testing.</p>
                   </div>
 
-                  <div className="flex flex-nowrap gap-2">
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                  <div className="flex flex-wrap gap-2">
+                    <ToggleButton active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
+                    <ToggleButton active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
+                    <ToggleButton active={role === "member" && (screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
                 </div>
               </div>
