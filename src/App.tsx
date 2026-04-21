@@ -2308,23 +2308,19 @@ export default function App() {
   }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms]);
 
   return (
-    <div className="min-h-screen bg-zinc-100 p-6 text-zinc-900">
-      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[430px] flex-col">
-        <div className="bg-black h-[240px] flex items-center justify-center overflow-hidden rounded-t-[32px]">
+    <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
+      <div className="bg-black">
+        <div className="mx-auto flex h-[240px] w-full max-w-[430px] items-center justify-center overflow-hidden">
           <img
             src={appBanner}
             alt="Pratt Report banner"
             className="w-[58%] max-w-[220px] object-contain -translate-y-8"
           />
         </div>
+      </div>
 
-        <div className="-mt-16 overflow-hidden rounded-[32px] border border-zinc-300 bg-white shadow-2xl">
-          <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-3">
-            <div className="mx-auto h-1.5 w-20 rounded-full bg-zinc-300" />
-          </div>
-
-          <div className="max-h-[85vh] overflow-y-auto bg-zinc-100 p-4">
-            <div className="space-y-6">
+      <div className="mx-auto -mt-16 w-full max-w-[430px] flex-1 px-4">
+        <div className="space-y-6 pb-10">
               <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-4">
                   <div>
@@ -3249,13 +3245,11 @@ export default function App() {
                   </div>
                 </SectionCard>
               )}
-            </div>
           </div>
-        </div>
+      </div>
 
-        <div className="mt-auto pt-6 text-center text-xs text-zinc-500">
-          Prototype v2 • Phase 5 — persistent storage, bulk import, collapsible sections
-        </div>
+      <div className="mt-auto px-4 pb-6 text-center text-xs text-zinc-500">
+        Prototype v2 • Phase 5 — persistent storage, bulk import, collapsible sections
       </div>
     </div>
   );
