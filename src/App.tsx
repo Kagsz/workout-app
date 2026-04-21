@@ -2309,19 +2309,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-100 p-6 text-zinc-900">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-6 space-y-4 text-center">
-          <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-black shadow-sm">
-            <img src={appBanner} alt="Pratt Report banner" className="h-24 w-full object-cover sm:h-28" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Prototype</div>
-            <h1 className="mt-1 text-3xl font-bold">Workout App V2</h1>
-            <p className="mt-1 text-sm text-zinc-600">Phase 5 with persistent storage, bulk import, and collapsible sections.</p>
-          </div>
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[430px] flex-col">
+        <div className="bg-black h-[240px] flex items-center justify-center overflow-hidden rounded-t-[32px]">
+          <img
+            src={appBanner}
+            alt="Pratt Report banner"
+            className="w-[58%] max-w-[220px] object-contain -translate-y-8"
+          />
         </div>
 
-        <div className="mx-auto w-full max-w-[430px] overflow-hidden rounded-[32px] border border-zinc-300 bg-white shadow-2xl">
+        <div className="-mt-16 overflow-hidden rounded-[32px] border border-zinc-300 bg-white shadow-2xl">
           <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-3">
             <div className="mx-auto h-1.5 w-20 rounded-full bg-zinc-300" />
           </div>
@@ -3254,6 +3251,10 @@ export default function App() {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="mt-auto pt-6 text-center text-xs text-zinc-500">
+          Prototype v2 • Phase 5 — persistent storage, bulk import, collapsible sections
         </div>
       </div>
     </div>
