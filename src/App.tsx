@@ -2314,7 +2314,7 @@ export default function App() {
           <img
             src={appBanner}
             alt="Pratt Report banner"
-            className="w-[58%] max-w-[220px] translate-y-[-12px] object-contain"
+            className="w-[58%] max-w-[220px] translate-y-[-20px] object-contain"
           />
         </div>
       </div>
