@@ -2308,17 +2308,15 @@ export default function App() {
   }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms]);
 
   return (
-    <div className="relative w-full bg-black flex items-center justify-center" style={{ height: "140px" }}>
-  <img
-    src={appBanner}
-    alt="Pratt Report"
-    className="object-contain"
-    style={{
-      height: "70%",
-      marginTop: "2px",   // micro-adjust if needed
-    }}
-  />
-</div>
+    <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
+      <div className="relative z-0 bg-black">
+        <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-start justify-center overflow-visible pt-3">
+          <img
+            src={appBanner}
+            alt="Pratt Report banner"
+            className="w-[50%] max-w-[190px] object-contain"
+          />
+        </div>
       </div>
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
