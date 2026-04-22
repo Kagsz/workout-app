@@ -2319,6 +2319,7 @@ export default function App() {
     }}
   />
 </div>
+      </div>
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
