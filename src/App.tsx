@@ -2310,11 +2310,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
       <div className="relative z-0 bg-black">
-        <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-start justify-center overflow-visible pt-3">
+        <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-center justify-center overflow-visible">
           <img
             src={appBanner}
             alt="Pratt Report banner"
-            className="w-[50%] max-w-[190px] object-contain"
+            className="w-[58%] max-w-[220px] translate-y-[16px] object-contain"
           />
         </div>
       </div>
