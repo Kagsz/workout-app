@@ -1461,6 +1461,9 @@ export default function App() {
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>("member-1");
+  const [isEditingMember, setIsEditingMember] = useState(false);
+  const [editedMemberName, setEditedMemberName] = useState("");
+  const [editedMemberClientId, setEditedMemberClientId] = useState("");
   const [role, setRole] = useState<Role>("admin");
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
@@ -1497,6 +1500,19 @@ export default function App() {
     () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
     [members, selectedMemberId]
   );
+
+  useEffect(() => {
+    if (!selectedMember) {
+      setIsEditingMember(false);
+      setEditedMemberName("");
+      setEditedMemberClientId("");
+      return;
+    }
+
+    setEditedMemberName(selectedMember.name);
+    setEditedMemberClientId(selectedMember.clientId);
+    setIsEditingMember(false);
+  }, [selectedMember?.id]);
 
   const sortedPrograms = useMemo(
     () => [...programs].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
@@ -2411,8 +2427,71 @@ export default function App() {
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
                       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
-                        <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1 space-y-3">
+                            {isEditingMember ? (
+                              <>
+                                <div>
+                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
+                                  <input
+                                    value={editedMemberName}
+                                    onChange={(event) => setEditedMemberName(event.target.value)}
+                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                  />
+                                </div>
+                                <div>
+                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
+                                  <input
+                                    value={editedMemberClientId}
+                                    onChange={(event) => setEditedMemberClientId(event.target.value)}
+                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
+                                <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="flex shrink-0 gap-2">
+                            {isEditingMember ? (
+                              <>
+                                <SmallButton
+                                  onClick={() => {
+                                    const nextName = editedMemberName.trim();
+                                    const nextClientId = editedMemberClientId.trim();
+                                    if (!nextName || !nextClientId) return;
+
+                                    setMembers((current) =>
+                                      current.map((member) =>
+                                        member.id === selectedMember.id
+                                          ? { ...member, name: nextName, clientId: nextClientId }
+                                          : member
+                                      )
+                                    );
+                                    setIsEditingMember(false);
+                                  }}
+                                >
+                                  Save
+                                </SmallButton>
+                                <SmallButton
+                                  onClick={() => {
+                                    setEditedMemberName(selectedMember.name);
+                                    setEditedMemberClientId(selectedMember.clientId);
+                                    setIsEditingMember(false);
+                                  }}
+                                >
+                                  Cancel
+                                </SmallButton>
+                              </>
+                            ) : (
+                              <SmallButton onClick={() => setIsEditingMember(true)}>Edit</SmallButton>
+                            )}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2">

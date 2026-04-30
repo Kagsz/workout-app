@@ -1,0 +1,448 @@
+Program: 3
+
+Session #: 1
+Date: October 7, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 25
+Target: 10
+Sets Complete: 3
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 30.3
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 3
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 2.55
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 70
+Target: 5 up by 1
+Sets Complete: 8
+
+Exercise 2: Goblet Squat
+Weight: 45
+Target: 5 up by 1
+Sets Complete: 8
+
+
+Session #: 5
+Date: October 18, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 25
+Target: 10
+Sets Complete: 3
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 2
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 22.2
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 4
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 3.01
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 80
+Target: 5 up by 1
+Sets Complete: 8
+
+Exercise 2: Goblet Squat
+Weight: 45
+Target: 5 up by 1
+Sets Complete: 7
+
+
+Session #: 9
+Date: October 29, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 25
+Target: 10
+Sets Complete: 4
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 20.8
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 4
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 3.13
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 80
+Target: 5 up by 1
+Sets Complete: 9
+
+Exercise 2: Goblet Squat
+Weight: 50
+Target: 5 up by 1
+Sets Complete: 8
+
+
+Session #: 13
+Date: November 5, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 25
+Target: 10
+Sets Complete: 4
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 25.6
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 3
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 3.00
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 80
+Target: 5 up by 1
+Sets Complete: 9
+
+Exercise 2: Goblet Squat
+Weight: 50
+Target: 5 up by 1
+Sets Complete: 9
+
+
+Session #: 17
+Date: November 14, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 25
+Target: 10
+Sets Complete: 4
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 30.3
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 4
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 4
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 2.50
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 80
+Target: 5 up by 1
+Sets Complete: 9
+
+Exercise 2: Goblet Squat
+Weight: 55
+Target: 5 up by 1
+Sets Complete: 9
+
+
+Session #: 21
+Date: November 30, 2025
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 25
+Target: 10
+Sets Complete: 3
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 34.7
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 3
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 2
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 2.48
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 80
+Target: 5 up by 1
+Sets Complete: 9
+
+Exercise 2: Goblet Squat
+Weight: 55
+Target: 5 up by 1
+Sets Complete: 9
+
+
+Session #: 25
+Date: January 14, 2026
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 27
+Target: 10
+Sets Complete: 4
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 3
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 24.5
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 3
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 3.29
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 80
+Target: 5 up by 1
+Sets Complete: 9
+
+Exercise 2: Goblet Squat
+Weight: 50
+Target: 5 up by 1
+Sets Complete: 8
+
+
+Session #: 29
+Date: February 1, 2026
+Routine: Day 1
+
+Paired Block A 
+Time (minutes): 10
+
+Exercise 1: PAUSE CS DB Row
+Weight: 27
+Target: 10
+Sets Complete: 4
+
+Exercise 2: SL Alt. TGU
+Weight: BW
+Target: 10
+Sets Complete: 4
+
+Single Block 
+Exercise: Bike
+Time (minutes): 3
+Target: Calories
+Performance: 27.6
+
+Paired Block B 
+Time (minutes): 10
+
+Exercise 1: ECC. DB Bench Press
+Weight: 35
+Target: 8
+Sets Complete: 3
+
+Exercise 2: ECC. SL Situps
+Weight: BW
+Target: 8
+Sets Complete: 3
+
+Single Block 
+Exercise: Rower
+Time (minutes): 3
+Target: 50 Calories
+Performance: 3.00
+
+Paired Block C 
+Time (minutes): 10
+
+Exercise 1: KBDL
+Weight: 88
+Target: 5 up by 1
+Sets Complete: 9
+
+Exercise 2: Goblet Squat
+Weight: 55
+Target: 5 up by 1
+Sets Complete: 9
