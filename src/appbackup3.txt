@@ -405,6 +405,7 @@ const STORAGE_KEYS = {
   savedSessions: "workout-app-saved-sessions-v1",
   seeded: "workout-app-seeded-program1-v1",
   seededProgram2: "workout-app-seeded-program2-v1",
+  seededProgram3: "workout-app-seeded-program3-v1",
 };
 
 const ROUTINE_IDS = {
@@ -714,6 +715,7 @@ const parsePairedBlocks = (chunk: string) => {
     };
   });
 };
+const PROGRAM_3_RELAY_TEMPLATE = "Program: 3\n\nSession #: 1\nDate: October 7, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 25\nTarget: 10\nSets Complete: 3\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 30.3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 3\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 2.55\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 70\nTarget: 5 up by 1\nSets Complete: 8\n\nExercise 2: Goblet Squat\nWeight: 45\nTarget: 5 up by 1\nSets Complete: 8\n\n\nSession #: 5\nDate: October 18, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 25\nTarget: 10\nSets Complete: 3\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 2\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 22.2\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 4\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 3.01\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 80\nTarget: 5 up by 1\nSets Complete: 8\n\nExercise 2: Goblet Squat\nWeight: 45\nTarget: 5 up by 1\nSets Complete: 7\n\n\nSession #: 9\nDate: October 29, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 25\nTarget: 10\nSets Complete: 4\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 20.8\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 4\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 3.13\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 80\nTarget: 5 up by 1\nSets Complete: 9\n\nExercise 2: Goblet Squat\nWeight: 50\nTarget: 5 up by 1\nSets Complete: 8\n\n\nSession #: 13\nDate: November 5, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 25\nTarget: 10\nSets Complete: 4\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 25.6\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 3\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 3.00\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 80\nTarget: 5 up by 1\nSets Complete: 9\n\nExercise 2: Goblet Squat\nWeight: 50\nTarget: 5 up by 1\nSets Complete: 9\n\n\nSession #: 17\nDate: November 14, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 25\nTarget: 10\nSets Complete: 4\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 30.3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 4\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 2.50\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 80\nTarget: 5 up by 1\nSets Complete: 9\n\nExercise 2: Goblet Squat\nWeight: 55\nTarget: 5 up by 1\nSets Complete: 9\n\n\nSession #: 21\nDate: November 30, 2025\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 25\nTarget: 10\nSets Complete: 3\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 34.7\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 3\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 2\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 2.48\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 80\nTarget: 5 up by 1\nSets Complete: 9\n\nExercise 2: Goblet Squat\nWeight: 55\nTarget: 5 up by 1\nSets Complete: 9\n\n\nSession #: 25\nDate: January 14, 2026\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 27\nTarget: 10\nSets Complete: 4\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 24.5\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 3\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 3.29\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 80\nTarget: 5 up by 1\nSets Complete: 9\n\nExercise 2: Goblet Squat\nWeight: 50\nTarget: 5 up by 1\nSets Complete: 8\n\n\nSession #: 29\nDate: February 1, 2026\nRoutine: Day 1\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE CS DB Row\nWeight: 27\nTarget: 10\nSets Complete: 4\n\nExercise 2: SL Alt. TGU\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Bike\nTime (minutes): 3\nTarget: Calories\nPerformance: 27.6\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: ECC. DB Bench Press\nWeight: 35\nTarget: 8\nSets Complete: 3\n\nExercise 2: ECC. SL Situps\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Rower\nTime (minutes): 3\nTarget: 50 Calories\nPerformance: 3.00\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: KBDL\nWeight: 88\nTarget: 5 up by 1\nSets Complete: 9\n\nExercise 2: Goblet Squat\nWeight: 55\nTarget: 5 up by 1\nSets Complete: 9\n\nProgram: 3\n\nSession #: 2\nDate: October 8, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 20\nTarget: 5\nSets Complete: 4\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 20\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .05\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 20\nTarget: 20\nSets Complete: 4\n\nExercise 2: 1 Arm Farmer's March\nWeight: 50\nTarget: 10\nSets Complete:3\n\n\nSession #: 6\nDate: October 22, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 20\nTarget: 5\nSets Complete: 4\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 22\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .07\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 20\nTarget: 20\nSets Complete: 3\n\nExercise 2: 1 Arm Farmer's March\nWeight: 50 \nTarget: 10\nSets Complete: 3\n\n\nSession #: 10\nDate: October 30, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 20\nTarget: 5\nSets Complete: 4\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 22\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .09\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 2\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 20\nTarget: 20\nSets Complete: 4\n\nExercise 2: 1 Arm Farmer's March\nWeight: 50\nTarget: 10\nSets Complete: 3\n\n\nSession #: 14\nDate: November 7, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 22\nTarget: 5\nSets Complete: 4\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 22\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .09\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 20\nTarget: 20\nSets Complete: 3\n\nExercise 2: 1 Arm Farmer's March\nWeight: 50 \nTarget: 10\nSets Complete: 3\n\n\nSession #: 18\nDate: November 19, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 22\nTarget: 5\nSets Complete: 4\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 22\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .09\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 20\nTarget: 20\nSets Complete: 4\n\nExercise 2: 1 Arm Farmer's March\nWeight: 50\nTarget: 10\nSets Complete: 3\n\n\nSession #: 22\nDate: December 3, 2025\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 22\nTarget: 5\nSets Complete: 4\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 22\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .11\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 22\nTarget: 20\nSets Complete: 3\n\nExercise 2: 1 Arm Farmer's March\nWeight: 55\nTarget: 10\nSets Complete: 3\n\n\nSession #: 26\nDate: January 18, 2026\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 25\nTarget: 5\nSets Complete: 3\n\nExercise 2: Alt. DB Bicep Curls\nWeight: 30\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .09\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 3\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 22\nTarget: 20\nSets Complete: 4\n\nExercise 2: 1 Arm Farmer's March\nWeight: 55\nTarget: 10\nSets Complete: 3\n\n\nSession #: 30\nDate: February 4, 2026\nRoutine: Day 2 \n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: PAUSE FFE Contra. Split Squat\nWeight: 25\nTarget: 5\nSets Complete:3 \n\nExercise 2: Alt. DB Bicep Curls\nWeight: 30\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R8 Distance\nPerformance: .10\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: PAUSE FOB Glute Bridge\nWeight: BW\nTarget: 15\nSets Complete: 4\n\nExercise 2: Bear to Pushup\nWeight: BW\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slam \nTime (minutes): 3\nTarget: 30/30\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Tricep Pushdown\nWeight: 25\nTarget: 20\nSets Complete: 4\n\nExercise 2: 1 Arm Farmer's March\nWeight: 55\nTarget: 10\nSets Complete: 3\n\nProgram: 3\n\nSession #: 3\nDate: October 9, 2025\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 40\nTarget: 8\nSets Complete: 4\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 35\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 25\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 2\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .23\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 40\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Pullover\nWeight: 12\nTarget: 12 down by 1 \nSets Complete: 4\n\n\nSession #: 7\nDate: October 24, 2025\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 40\nTarget: 8\nSets Complete: 4\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 3\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 38\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 25\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 2\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .24\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 40 \nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Pullover\nWeight: 12\nTarget: 12 down by 1 \nSets Complete: 4\n\n\nSession #: 11\nDate: October 31, 2025\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 40\nTarget: 8\nSets Complete: 3\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 2\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 39\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 25\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 2\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .25\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 50\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Pullover\nWeight: 12\nTarget: 12 down by 1 \nSets Complete: 4\n\n\nSession #: 15\nDate: November 10, 2025\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 40\nTarget: 8\nSets Complete: 5\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 4\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 39\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 25\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .24\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 50\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Pullover\nWeight: 12\nTarget: 12 down by 1 \nSets Complete: 4\n\n\nSession #: 19\nDate: November 23, 2025\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 45\nTarget: 8\nSets Complete: 5\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 5\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 38\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 27\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .23\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 60\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Pullover\nWeight: 15\nTarget: 12 down by 1 \nSets Complete: 4\n\n\nSession #: 23\nDate: December 7, 2025\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 45\nTarget: 8\nSets Complete: 5\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 5\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 39\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 27\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .26\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 60\nTarget: 12 down by 1\nSets Complete: 6\n\nExercise 2: DB Pullover\nWeight: 15\nTarget: 12 down by 1 \nSets Complete: 5\n\n\nSession #: 27\nDate: January 23, 2026\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 45\nTarget: 8\nSets Complete: 5\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 5\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 32\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 27\nTarget: 6\nSets Complete: 3\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .25\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 70\nTarget: 12 down by 1\nSets Complete: 4\n\nExercise 2: DB Pullover\nWeight: 15\nTarget: 12 down by 1 \nSets Complete: 3\n\n\nSession #: 31\nDate: February 8, 2026\nRoutine: Day 3\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: DB RDL\nWeight: 45\nTarget: 8\nSets Complete: 5\n\nExercise 2: HE Pushups- ECC, Only\nWeight: BW\nTarget: 8\nSets Complete: 5\n\nSingle Block \nExercise: Skiier\nTime (minutes): 3\nTarget: Calories\nPerformance: 40\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: 1 Arm DB Rack Squat\nWeight: 30\nTarget: 6\nSets Complete: 4\n\nExercise 2: MB Deadbug - Legs Only\nWeight: 10\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: Skillmill\nTime (minutes): 3\nTarget: R3 Distance\nPerformance: .25\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: Bar Bent Over Row\nWeight: 70\nTarget: 12 down by 1\nSets Complete: 5\n\nExercise 2: DB Pullover\nWeight: 17\nTarget: 12 down by 1 \nSets Complete: 5\n\nProgram: 3\n\nSession #: 4\nDate: October 11, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 50\nTarget: 5\nSets Complete: 5\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 2\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 15\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 15\nTarget: 10\nSets Complete: 5\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 7.5\nTarget: 6\nSets Complete: 3\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 25\nTarget: 6\nSets Complete: 3\n\n\nSession #: 8\nDate: October 25, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 50\nTarget: 5\nSets Complete: 5\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 15\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 15\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 7.5\nTarget: 6\nSets Complete: 3\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 25\nTarget: 6\nSets Complete: 4\n\n\nSession #: 12\nDate: November 3, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 50\nTarget: 5\nSets Complete: 5\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 17\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 7.5\nTarget: 6\nSets Complete: 4\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 25\nTarget: 6\nSets Complete:4\n\n\nSession #: 16\nDate: November 12, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 50\nTarget: 5\nSets Complete: 4\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 2.5\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 20\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 10\nTarget: 6\nSets Complete: 4\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 25\nTarget: 6\nSets Complete: 4\n\n\nSession #: 20\nDate: November 26, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 50\nTarget: 5\nSets Complete: 5\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 25\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 10\nTarget: 6\nSets Complete: 4\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 27\nTarget: 6\nSets Complete: 4\n\n\nSession #: 24\nDate: December 10, 2025\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 50\nTarget: 5\nSets Complete: 5\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 5\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 2.5\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 25\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 17\nTarget: 10\nSets Complete: 5\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 10\nTarget: 6\nSets Complete: 5\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 30\nTarget: 6\nSets Complete: 5\n\n\nSession #: 28\nDate: January 28, 2026\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 55\nTarget: 5\nSets Complete: 5\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 25\nTarget: 5\nSets Complete: 4\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 10\nTarget: 6\nSets Complete: 4\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 30\nTarget: 6\nSets Complete: 4\n\n\nSession #: 32\nDate: February 11, 2026\nRoutine: Day 4\n\nPaired Block A \nTime (minutes): 10\n\nExercise 1: ECC. Sumo Squat\nWeight: 55\nTarget: 5\nSets Complete: 4\n\nExercise 2: PAUSE Seated Bent Over Rev. Fly\nWeight: 5\nTarget: 10\nSets Complete: 3\n\nSingle Block \nExercise: MB Slams/Wideout Squats\nTime (minutes): 3\nTarget: 15/5\nPerformance: 3\n\nPaired Block B \nTime (minutes): 10\n\nExercise 1: DB 1 Leg RDL\nWeight: 25\nTarget: 5\nSets Complete: 5\n\nExercise 2: \u00bd Kn. Seesaw OHP\nWeight: 17\nTarget: 10\nSets Complete: 4\n\nSingle Block \nExercise: MB Alt Rot Slam\nTime (minutes): 3\nTarget: 40/20\nPerformance: NA\n\nPaired Block C \nTime (minutes): 10\n\nExercise 1: TGU - elbow\nWeight: 10\nTarget: 6\nSets Complete: 6\n\nExercise 2: PAUSE Goblet Rotational March\nWeight: 30\nTarget: 6\nSets Complete: 5";
 
 const createProgramOne = (): Program => ({
   id: "program-1",
@@ -1064,8 +1066,237 @@ const createProgramTwo = (): Program => ({
   ],
 });
 
+const createProgramThree = (): Program => ({
+  id: "program-3",
+  name: "Program 3",
+  startedAt: "2025-10-07",
+  status: "active",
+  routines: [
+    {
+      id: ROUTINE_IDS.day1,
+      label: "Day 1",
+      blocks: [
+        {
+          id: BLOCK_IDS.day1A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-pause-cs-db-row", name: "PAUSE CS DB Row", target: "10", metric: "reps" },
+            { id: "exercise-p3-sl-alt-tgu", name: "SL Alt. TGU", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-bike", name: "Bike", target: "Calories", metric: "calories" }],
+        },
+        {
+          id: BLOCK_IDS.day1B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-ecc-db-bench-press", name: "ECC. DB Bench Press", target: "8", metric: "reps" },
+            { id: "exercise-p3-ecc-sl-situps", name: "ECC. SL Situps", target: "8", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-rower-50-calories", name: "Rower", target: "50 Calories", metric: "calories" }],
+        },
+        {
+          id: BLOCK_IDS.day1C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-kbdl", name: "KBDL", target: "5 up by 1", metric: "reps" },
+            { id: "exercise-p3-goblet-squat", name: "Goblet Squat", target: "5 up by 1", metric: "reps" },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day2,
+      label: "Day 2",
+      blocks: [
+        {
+          id: BLOCK_IDS.day2A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-pause-ffe-contra-split-squat", name: "PAUSE FFE Contra. Split Squat", target: "5", metric: "reps" },
+            { id: "exercise-p3-alt-db-bicep-curls", name: "Alt. DB Bicep Curls", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-skillmill-r8", name: "Skillmill", target: "R8 Distance", metric: "distance" }],
+        },
+        {
+          id: BLOCK_IDS.day2B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-pause-fob-glute-bridge", name: "PAUSE FOB Glute Bridge", target: "15", metric: "reps" },
+            { id: "exercise-p3-bear-to-pushup", name: "Bear to Pushup", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-mb-slam", name: "MB Slam", target: "30/30", metric: "reps" }],
+        },
+        {
+          id: BLOCK_IDS.day2C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-tricep-pushdown", name: "Tricep Pushdown", target: "20", metric: "reps" },
+            { id: "exercise-p3-one-arm-farmers-march", name: "1 Arm Farmer's March", target: "10", metric: "reps" },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day3,
+      label: "Day 3",
+      blocks: [
+        {
+          id: BLOCK_IDS.day3A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-db-rdl", name: "DB RDL", target: "8", metric: "reps" },
+            { id: "exercise-p3-he-pushups-ecc-only", name: "HE Pushups- ECC, Only", target: "8", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-skiier", name: "Skiier", target: "Calories", metric: "calories" }],
+        },
+        {
+          id: BLOCK_IDS.day3B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-one-arm-db-rack-squat", name: "1 Arm DB Rack Squat", target: "6", metric: "reps" },
+            { id: "exercise-p3-mb-deadbug-legs-only", name: "MB Deadbug - Legs Only", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-skillmill-r3", name: "Skillmill", target: "R3 Distance", metric: "distance" }],
+        },
+        {
+          id: BLOCK_IDS.day3C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-bar-bent-over-row", name: "Bar Bent Over Row", target: "12 down by 1", metric: "reps" },
+            { id: "exercise-p3-db-pullover", name: "DB Pullover", target: "12 down by 1", metric: "reps" },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day4,
+      label: "Day 4",
+      blocks: [
+        {
+          id: BLOCK_IDS.day4A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-ecc-sumo-squat", name: "ECC. Sumo Squat", target: "5", metric: "reps" },
+            { id: "exercise-p3-pause-seated-bent-over-rev-fly", name: "PAUSE Seated Bent Over Rev. Fly", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-mb-slams-wideout-squats", name: "MB Slams/Wideout Squats", target: "15/5", metric: "rounds" }],
+        },
+        {
+          id: BLOCK_IDS.day4B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-db-one-leg-rdl", name: "DB 1 Leg RDL", target: "5", metric: "reps" },
+            { id: "exercise-p3-half-kn-seesaw-ohp", name: "½ Kn. Seesaw OHP", target: "10", metric: "reps" },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          exercises: [{ id: "exercise-p3-mb-alt-rot-slam", name: "MB Alt Rot Slam", target: "40/20", metric: "reps" }],
+        },
+        {
+          id: BLOCK_IDS.day4C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          exercises: [
+            { id: "exercise-p3-tgu-elbow", name: "TGU - elbow", target: "6", metric: "reps" },
+            { id: "exercise-p3-pause-goblet-rotational-march", name: "PAUSE Goblet Rotational March", target: "6", metric: "reps" },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
 function buildInitialPrograms(): Program[] {
-  return [createProgramOne(), createProgramTwo()];
+  return [createProgramOne(), createProgramTwo(), createProgramThree()];
 }
 
 const mergeProgramsWithBase = (storedPrograms: Program[]) => {
@@ -1274,7 +1505,8 @@ const parseRelaySessionChunk = (chunk: string): RelayParsedBlock[] => {
 
 const parseRelayImportedSessions = (raw: string, program: Program, memberId: string) => {
   const sections = String(raw || "")
-    .split(/(?=^\s*Program:\s*\d+)/gm)
+    .replace(/^\s*Program:\s*\d+\s*$/gim, "")
+    .split(/(?=^\s*Session #:\s*\d+)/gm)
     .map((section) => section.trim())
     .filter((section) => section && /Session #:/i.test(section));
 
@@ -1910,6 +2142,23 @@ export default function App() {
     }
   }, [members, programs]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const alreadySeededProgram3 = window.localStorage.getItem(STORAGE_KEYS.seededProgram3);
+    if (!alreadySeededProgram3 && members[0] && programs.find((program) => program.id === "program-3")) {
+      const programThree = programs.find((program) => program.id === "program-3");
+      if (!programThree) return;
+
+      const seededSessions = parseRelayImportedSessions(PROGRAM_3_RELAY_TEMPLATE, programThree, members[0].id);
+      setSavedSessions((prev) => {
+        const hasProgramThree = prev.some((session) => session.programId === programThree.id && session.memberId === members[0].id);
+        return hasProgramThree ? prev : [...prev, ...seededSessions];
+      });
+      window.localStorage.setItem(STORAGE_KEYS.seededProgram3, "true");
+    }
+  }, [members, programs]);
+
 
   useEffect(() => {
     if (!selectedProgram || !selectedRoutine || !selectedMember) {
@@ -2280,6 +2529,9 @@ export default function App() {
       if (selectedProgram.id === "program-2") {
         window.localStorage.setItem(STORAGE_KEYS.seededProgram2, "true");
       }
+      if (selectedProgram.id === "program-3") {
+        window.localStorage.setItem(STORAGE_KEYS.seededProgram3, "true");
+      }
     }
   };
 
@@ -2289,6 +2541,7 @@ export default function App() {
       window.localStorage.removeItem(STORAGE_KEYS.savedSessions);
       window.localStorage.removeItem(STORAGE_KEYS.seeded);
       window.localStorage.removeItem(STORAGE_KEYS.seededProgram2);
+      window.localStorage.removeItem(STORAGE_KEYS.seededProgram3);
     }
   };
 

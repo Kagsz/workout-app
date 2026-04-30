@@ -287,10 +287,14 @@ function GraphYAxisTick({
 const GRAPH_UI_LOCK_CSS = `
   .graph-ui-lock,
   .graph-ui-lock * {
-    -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
   }
 
+  .graph-ui-lock,
+  .graph-ui-lock svg,
+  .graph-ui-lock text,
+  .graph-ui-lock tspan,
   .graph-ui-lock .graph-select-none,
   .graph-ui-lock .graph-select-none *,
   .graph-ui-lock .recharts-wrapper,
@@ -303,28 +307,23 @@ const GRAPH_UI_LOCK_CSS = `
   .graph-ui-lock .recharts-cartesian-grid *,
   .graph-ui-lock .recharts-label,
   .graph-ui-lock .recharts-label *,
-  .graph-ui-lock .recharts-tooltip-wrapper,
-  .graph-ui-lock text,
-  .graph-ui-lock tspan {
+  .graph-ui-lock .recharts-tooltip-wrapper {
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
   }
 
+  .graph-ui-lock .recharts-line-curve,
+  .graph-ui-lock .recharts-curve.recharts-line-curve,
   .graph-ui-lock .recharts-cartesian-axis,
   .graph-ui-lock .recharts-cartesian-axis *,
   .graph-ui-lock .recharts-cartesian-grid,
   .graph-ui-lock .recharts-cartesian-grid *,
   .graph-ui-lock .recharts-label,
   .graph-ui-lock .recharts-label *,
-  .graph-ui-lock text,
-  .graph-ui-lock tspan,
-  .graph-ui-lock .recharts-line-curve,
-  .graph-ui-lock .recharts-curve.recharts-line-curve,
-  .graph-ui-lock .recharts-layer.recharts-line,
   .graph-ui-lock .recharts-reference-line,
   .graph-ui-lock .recharts-reference-line * {
-    pointer-events: none;
+    pointer-events: none !important;
   }
 
   .graph-ui-lock .recharts-tooltip-wrapper {
@@ -334,7 +333,11 @@ const GRAPH_UI_LOCK_CSS = `
   .graph-ui-lock .recharts-active-dot,
   .graph-ui-lock .recharts-dot,
   .graph-ui-lock [data-graph-dot="true"] {
-    pointer-events: auto;
+    pointer-events: auto !important;
+  }
+
+  .graph-ui-lock *:focus {
+    outline: none !important;
   }
 `;
 
@@ -3410,7 +3413,15 @@ export default function App() {
                       </div>
 
                       {chartSeries.length ? (
-                        <div className="graph-select-none relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5">
+                        <div
+                          className="graph-select-none relative select-none rounded-2xl border border-zinc-200 bg-white p-2 sm:p-2.5"
+                          onMouseDown={(event) => {
+                            if (event.target instanceof HTMLElement || event.target instanceof SVGElement) {
+                              event.preventDefault();
+                            }
+                          }}
+                          onDragStart={(event) => event.preventDefault()}
+                        >
                           <div className="graph-select-none h-[320px] w-full touch-pan-x">
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
