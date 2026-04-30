@@ -1505,7 +1505,8 @@ const parseRelaySessionChunk = (chunk: string): RelayParsedBlock[] => {
 
 const parseRelayImportedSessions = (raw: string, program: Program, memberId: string) => {
   const sections = String(raw || "")
-    .split(/(?=^\s*Program:\s*\d+)/gm)
+    .replace(/^\s*Program:\s*\d+\s*$/gim, "")
+    .split(/(?=^\s*Session #:\s*\d+)/gm)
     .map((section) => section.trim())
     .filter((section) => section && /Session #:/i.test(section));
 
