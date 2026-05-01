@@ -1695,7 +1695,6 @@ type ClosingTone = "positive" | "positiveContext" | "steady" | "contextual" | "l
 const PRIMARY_FACTOR_COUNT = 2;
 const SECONDARY_FACTOR_THRESHOLD = 0.1;
 const MAX_SECONDARY_FACTORS = 4;
-const MAX_TOTAL_FACTOR_CARDS = PRIMARY_FACTOR_COUNT + MAX_SECONDARY_FACTORS;
 
 type WorkoutSummaryFactor = {
   symbol: string;
