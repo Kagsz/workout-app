@@ -1687,86 +1687,323 @@ function PathBar({ items }: { items: { label: string; onClick?: () => void }[] }
 }
 
 
-type InsightConfidence = "Low" | "Moderate" | "High";
+type ReportAccuracy = "Low" | "Moderate" | "High";
+type WorkoutSummaryTrend = "Upward" | "Flat" | "Downward" | "Irregular";
+type WorkoutSummaryTone = "positive" | "positive-context" | "steady" | "contextual" | "neutral";
+type ClosingTone = "positive" | "positiveContext" | "steady" | "contextual" | "lowAccuracy" | "neutral";
+
+const PRIMARY_FACTOR_COUNT = 2;
+const SECONDARY_FACTOR_THRESHOLD = 0.1;
+const MAX_SECONDARY_FACTORS = 4;
+const MAX_TOTAL_FACTOR_CARDS = PRIMARY_FACTOR_COUNT + MAX_SECONDARY_FACTORS;
 
 type WorkoutSummaryFactor = {
   symbol: string;
   title: string;
   text: string;
+  impact: number;
 };
 
 type WorkoutSummaryInsight = {
+  id: string;
   isExperimental: boolean;
   baseLabel: string;
   headline: string;
   summary: string;
-  confidence: InsightConfidence;
-  trend: string;
+  achievement?: string;
+  reportAccuracy: ReportAccuracy;
+  accuracyReason: string;
+  trend: WorkoutSummaryTrend;
   factors: WorkoutSummaryFactor[];
   limitation: string;
 };
 
-const mockWorkoutSummaryInsight: WorkoutSummaryInsight = {
-  isExperimental: true,
-  baseLabel: "Workout Summary",
-  headline: "Performance is improving steadily.",
-  summary:
-    "Completed output is trending upward while maintaining consistent session frequency. Load has increased gradually, suggesting strong progression.",
-  confidence: "High",
-  trend: "Upward",
-  factors: [
-    {
-      symbol: "↗",
-      title: "Graph trend",
-      text: "Completed output increased across recent sessions.",
-    },
-    {
-      symbol: "◼",
-      title: "Load progression",
-      text: "Weight increased steadily while maintaining performance.",
-    },
-    {
-      symbol: "◷",
-      title: "Session consistency",
-      text: "Session spacing remained consistent, supporting progression.",
-    },
-    {
-      symbol: "▣",
-      title: "Capacity signal",
-      text: "Output is improving without drop-off, indicating strong maintenance and continued progress.",
-    },
+const mockWorkoutSummaryInsights: WorkoutSummaryInsight[] = [
+  {
+    id: "milestone_week",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Strong Growth",
+    summary:
+      "Current output is trending upward with consistent sessions and increasing load. As progress builds, gains become more gradual, which is a normal part of continued development.",
+    achievement:
+      "Week 6 stands out as a major milestone, with the largest increases in both weight and reps.",
+    reportAccuracy: "High",
+    accuracyReason: "consistent data",
+    trend: "Upward",
+    factors: [
+      { symbol: "↗", title: "Graph trend", text: "Output increased across sessions.", impact: 0.38 },
+      { symbol: "◼", title: "Load progression", text: "Weight increased steadily.", impact: 0.28 },
+      { symbol: "▣", title: "Capacity signal", text: "Higher output was maintained under load.", impact: 0.22 },
+      { symbol: "◷", title: "Consistency", text: "Sessions remained regular.", impact: 0.12 },
+    ],
+    limitation: "Milestone detection is based on observed peaks within the dataset.",
+  },
+  {
+    id: "recovery_after_spike",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Strong Growth",
+    summary:
+      "Current output shows a brief drop followed by a return to prior levels. Load increased around the dip, and performance recovered in the next session, which can indicate positive adaptation rather than a setback.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Irregular",
+    factors: [
+      { symbol: "↘↗", title: "Graph pattern", text: "A single-session drop was followed by a rebound.", impact: 0.34 },
+      { symbol: "◼", title: "Load context", text: "Load increased around the dip in output.", impact: 0.26 },
+      { symbol: "▣", title: "Recovery signal", text: "Output returned to or exceeded prior levels next session.", impact: 0.25 },
+      { symbol: "◷", title: "Session timing", text: "Session spacing remained consistent around the dip.", impact: 0.15 },
+    ],
+    limitation: "Single-session fluctuations should be interpreted cautiously without a longer pattern.",
+  },
+  {
+    id: "upward_strong",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Strong Growth",
+    summary:
+      "Current output is trending upward while maintaining consistent session frequency. Load has increased gradually, suggesting strong progression. As progress builds, improvements may appear less dramatic over time, which is expected with continued growth.",
+    reportAccuracy: "High",
+    accuracyReason: "consistent data",
+    trend: "Upward",
+    factors: [
+      { symbol: "↗", title: "Graph trend", text: "Current output increased across recent sessions.", impact: 0.4 },
+      { symbol: "◼", title: "Load progression", text: "Weight increased steadily while maintaining performance.", impact: 0.27 },
+      { symbol: "◷", title: "Session consistency", text: "Session spacing remained consistent.", impact: 0.18 },
+      { symbol: "▣", title: "Capacity signal", text: "Output is improving without drop-off.", impact: 0.15 },
+    ],
+    limitation: "Data is consistent and sufficient for confident interpretation.",
+  },
+  {
+    id: "upward_low_data",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Emerging Growth",
+    summary:
+      "Current output is trending upward, but there are limited sessions available to establish a reliable baseline.",
+    reportAccuracy: "Low",
+    accuracyReason: "insufficient data",
+    trend: "Upward",
+    factors: [
+      { symbol: "↗", title: "Graph trend", text: "Output is increasing across available sessions.", impact: 0.38 },
+      { symbol: "?", title: "Data volume", text: "Limited session history reduces report accuracy.", impact: 0.34 },
+      { symbol: "◷", title: "Session spacing", text: "Session pattern is still forming.", impact: 0.18 },
+      { symbol: "▣", title: "Baseline", text: "More data is needed for a stable trend.", impact: 0.1 },
+    ],
+    limitation: "More sessions are required before drawing strong conclusions.",
+  },
+  {
+    id: "flat_increased_load",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Positive Progress Under Load",
+    summary:
+      "Current output is relatively flat, but load has increased over time, indicating progress under higher difficulty. This reflects improved capability even if reps or output remain steady. Slower visible change occurs as progress becomes harder to achieve at higher levels.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Flat",
+    factors: [
+      { symbol: "◼", title: "Load progression", text: "Weight increased while output remained stable.", impact: 0.36 },
+      { symbol: "▣", title: "Capability signal", text: "Maintaining output at higher load indicates improved capacity.", impact: 0.28 },
+      { symbol: "→", title: "Graph trend", text: "Output remains consistent across sessions.", impact: 0.24 },
+      { symbol: "◷", title: "Session consistency", text: "Sessions remain reasonably consistent.", impact: 0.12 },
+    ],
+    limitation: "Flat output should be interpreted alongside load changes.",
+  },
+  {
+    id: "flat_long_breaks",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Sustained Capacity",
+    summary:
+      "Current output remains stable despite longer gaps between sessions, suggesting maintained capacity over time. Maintaining performance under reduced frequency reflects a solid foundation to build from.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Flat",
+    factors: [
+      { symbol: "→", title: "Graph trend", text: "Output remains consistent.", impact: 0.32 },
+      { symbol: "◷", title: "Session spacing", text: "Longer breaks between sessions are present.", impact: 0.28 },
+      { symbol: "▣", title: "Foundation signal", text: "Stable performance suggests a strong baseline capacity.", impact: 0.26 },
+      { symbol: "◼", title: "Load", text: "Load remains stable.", impact: 0.14 },
+    ],
+    limitation: "Session gaps influence interpretation of consistency.",
+  },
+  {
+    id: "downward_increased_load",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Contextual Decline – Positive Signal",
+    summary:
+      "Current output is trending downward while load has increased. This can indicate that the exercise has become more demanding, and the lower output reflects increased difficulty rather than a negative trend.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Downward",
+    factors: [
+      { symbol: "◼", title: "Load increase", text: "Weight increased during the same period.", impact: 0.36 },
+      { symbol: "▣", title: "Positive difficulty signal", text: "Higher load can naturally reduce output while still indicating progress.", impact: 0.29 },
+      { symbol: "↘", title: "Graph trend", text: "Output decreased across sessions.", impact: 0.27 },
+      { symbol: "◷", title: "Session spacing", text: "Session timing varies slightly.", impact: 0.08 },
+    ],
+    limitation: "Decreased output should be interpreted alongside increased load.",
+  },
+  {
+    id: "downward_fatigue",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Fatigue Impact",
+    summary:
+      "Current output is trending downward and may be influenced by increased workload earlier in the session, contributing to accumulated fatigue.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Downward",
+    factors: [
+      { symbol: "▦", title: "Preceding workload", text: "Earlier blocks increased in intensity.", impact: 0.34 },
+      { symbol: "▣", title: "Fatigue signal", text: "Accumulated fatigue may reduce performance.", impact: 0.29 },
+      { symbol: "↘", title: "Graph trend", text: "Output decreased across sessions.", impact: 0.25 },
+      { symbol: "◷", title: "Session structure", text: "Exercise occurs later in session.", impact: 0.12 },
+    ],
+    limitation: "Session order and prior workload influence performance.",
+  },
+  {
+    id: "external_conditions_decline",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Contextual Decline",
+    summary:
+      "Current output opened strong, declined through the middle of the program, then improved again near the end. This kind of pattern can happen when training conditions change over time, especially for cardio or outdoor work where heat, humidity, terrain, or other outside factors may affect performance.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "outside factors unknown",
+    trend: "Irregular",
+    factors: [
+      { symbol: "↘↗", title: "Graph pattern", text: "Early highs were followed by decline and late recovery.", impact: 0.34 },
+      { symbol: "▣", title: "Late recovery", text: "Recent sessions improved after the decline.", impact: 0.26 },
+      { symbol: "☁", title: "External context", text: "Outdoor or environmental conditions may affect output.", impact: 0.24 },
+      { symbol: "?", title: "Unknown variables", text: "The report cannot confirm outside conditions from graph data alone.", impact: 0.16 },
+    ],
+    limitation:
+      "Real-world conditions can influence performance, but this report can only flag that context may matter unless those details are recorded.",
+  },
+  {
+    id: "genuine_regression",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Temporary Decline",
+    summary:
+      "Current output is trending downward with longer gaps between sessions. This pattern can be influenced by time away, illness, or changes in routine, and may not reflect your typical performance level.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Downward",
+    factors: [
+      { symbol: "↘", title: "Graph trend", text: "Output has decreased across recent sessions.", impact: 0.38 },
+      { symbol: "◷", title: "Session spacing", text: "Longer gaps between sessions are present.", impact: 0.3 },
+      { symbol: "▣", title: "Context signal", text: "External factors can impact short-term performance.", impact: 0.2 },
+      { symbol: "◼", title: "Load", text: "Load has not increased significantly.", impact: 0.12 },
+    ],
+    limitation: "Short-term declines should be interpreted within broader context and over more sessions.",
+  },
+];
+
+const mockWorkoutSummaryInsight = mockWorkoutSummaryInsights[0];
+
+const sortWorkoutSummaryFactorsByImpact = (factors: WorkoutSummaryFactor[]) =>
+  [...factors].sort((a, b) => Number(b.impact || 0) - Number(a.impact || 0));
+
+const getWorkoutSummaryPrimaryFactors = (insight: WorkoutSummaryInsight) =>
+  sortWorkoutSummaryFactorsByImpact(insight.factors).slice(0, PRIMARY_FACTOR_COUNT);
+
+const getWorkoutSummarySecondaryFactors = (insight: WorkoutSummaryInsight) =>
+  sortWorkoutSummaryFactorsByImpact(insight.factors)
+    .slice(PRIMARY_FACTOR_COUNT)
+    .filter((factor) => Number(factor.impact || 0) >= SECONDARY_FACTOR_THRESHOLD)
+    .slice(0, MAX_SECONDARY_FACTORS);
+
+const getWorkoutSummaryTone = (insight: WorkoutSummaryInsight): WorkoutSummaryTone => {
+  if (["Strong Growth", "Positive Progress Under Load"].includes(insight.headline)) return "positive";
+  if (["Emerging Growth", "Sustained Capacity"].includes(insight.headline)) return "steady";
+  if (insight.headline.includes("Positive Signal")) return "positive-context";
+  if (["Fatigue Impact", "Contextual Decline", "Temporary Decline"].includes(insight.headline)) return "contextual";
+  return "neutral";
+};
+
+const getWorkoutSummaryToneDotClass = (tone: WorkoutSummaryTone) => {
+  if (tone === "positive") return "bg-emerald-200 ring-emerald-100";
+  if (tone === "positive-context") return "bg-teal-200 ring-teal-100";
+  if (tone === "steady") return "bg-sky-200 ring-sky-100";
+  if (tone === "contextual") return "bg-amber-200 ring-amber-100";
+  return "bg-slate-400 ring-slate-300";
+};
+
+const buildWorkoutSummaryLabel = (insight: WorkoutSummaryInsight) =>
+  `${insight.isExperimental ? "Experimental " : ""}${insight.baseLabel}`;
+
+const getWorkoutSummaryClosingTone = (insight: WorkoutSummaryInsight): ClosingTone => {
+  const tone = getWorkoutSummaryTone(insight);
+
+  if (insight.reportAccuracy === "Low") return "lowAccuracy";
+  if (tone === "positive") return "positive";
+  if (tone === "positive-context") return "positiveContext";
+  if (tone === "steady") return "steady";
+  if (tone === "contextual") return "contextual";
+  return "neutral";
+};
+
+const workoutSummaryClosingStatementPools: Record<ClosingTone, string[]> = {
+  positive: [
+    "You are in a strong position to continue building and maintaining your current progress.",
+    "This reflects solid development over time and a strong foundation for continued progress.",
+    "Your current trajectory supports continued progress while maintaining a steady approach.",
   ],
-  limitation:
-    "This shell uses mock insight data. Later, the app should generate this from graph history, weight changes, session spacing, target changes, exercise replacements, and preceding block workload.",
+  positiveContext: [
+    "The overall picture remains encouraging when the added difficulty is considered.",
+    "This still reflects meaningful progress when the increased demand is included in the interpretation.",
+    "The context suggests this is better read as adaptation under higher difficulty than as a setback.",
+  ],
+  steady: [
+    "Maintaining this level provides a strong foundation moving forward.",
+    "Consistency here supports continued development over time.",
+    "This pattern reflects a stable base that can support future progress.",
+  ],
+  contextual: [
+    "This pattern is best understood within the broader context of your training.",
+    "Short-term variation does not define the full picture of progress.",
+    "This report points to context worth watching rather than a fixed conclusion.",
+  ],
+  lowAccuracy: [
+    "More data will help refine this picture.",
+    "As more sessions are recorded, clearer patterns will emerge.",
+    "This is an early read, and future sessions will make the trend more reliable.",
+  ],
+  neutral: ["This report should be viewed as a helpful snapshot rather than a final conclusion."],
+};
+
+const getWorkoutSummaryClosingStatement = (insight: WorkoutSummaryInsight) => {
+  const pool = workoutSummaryClosingStatementPools[getWorkoutSummaryClosingTone(insight)] || workoutSummaryClosingStatementPools.neutral;
+  const hashSource = String(insight.id || insight.headline || "neutral");
+  let hash = 0;
+
+  for (let index = 0; index < hashSource.length; index += 1) {
+    hash = (hash * 31 + hashSource.charCodeAt(index)) >>> 0;
+  }
+
+  return pool[hash % pool.length];
+};
+
+const buildWorkoutSummaryText = (insight: WorkoutSummaryInsight) => {
+  const baseSummary = String(insight.summary || "").trim();
+  const closingStatement = getWorkoutSummaryClosingStatement(insight);
+  const achievement = insight.achievement ? ` ${insight.achievement}` : "";
+  return `${baseSummary}${achievement} ${closingStatement}`.trim();
 };
 
 // Future feature queue for the workout summary system:
 // - Motivation mode toggle (supportive vs. direct tone)
 // - User goal awareness (strength, endurance, fat loss, etc.)
 // - Factor weighting / importance scoring
-// - Confidence calculation engine
+// - Report accuracy calculation engine
 // - Session fatigue modeling across blocks
 // - AI insight engine (rules → interpretation → phrasing)
-const buildInsightLabel = (insight: WorkoutSummaryInsight) =>
-  `${insight.isExperimental ? "Experimental " : ""}${insight.baseLabel}`;
-
-const getSuggestionByConfidence = (confidence: InsightConfidence) => {
-  if (confidence === "High") {
-    return "You are in a strong position to continue building and maintaining your current progress.";
-  }
-
-  if (confidence === "Moderate") {
-    return "You appear to be progressing well, and continuing with your current approach is a solid option.";
-  }
-
-  return "Focus on maintaining consistency and building a stable routine.";
-};
-
-const buildComposedSummary = (insight: WorkoutSummaryInsight) => {
-  const baseSummary = String(insight.summary || "").trim();
-  const suggestion = getSuggestionByConfidence(insight.confidence);
-  return `${baseSummary} ${suggestion}`.trim();
-};
+// - Optional training context notes (weather, travel, illness, stress, schedule changes)
 
 function WorkoutSummarySymbol({ symbol }: { symbol: string }) {
   return (
@@ -1776,7 +2013,7 @@ function WorkoutSummarySymbol({ symbol }: { symbol: string }) {
   );
 }
 
-function WorkoutSummaryConfidenceBadge({ value }: { value: InsightConfidence }) {
+function WorkoutSummaryReportAccuracyBadge({ value, reason }: { value: ReportAccuracy; reason: string }) {
   const tone =
     value === "High"
       ? "bg-emerald-100 text-emerald-800"
@@ -1784,16 +2021,15 @@ function WorkoutSummaryConfidenceBadge({ value }: { value: InsightConfidence }) 
         ? "bg-amber-100 text-amber-800"
         : "bg-blue-100 text-blue-800";
 
-  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>{value} confidence</span>;
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>
+      Report Accuracy: {value}
+      {reason ? ` · ${reason}` : ""}
+    </span>
+  );
 }
 
-function WorkoutSummaryFactorCard({
-  factor,
-  muted = false,
-}: {
-  factor: WorkoutSummaryFactor;
-  muted?: boolean;
-}) {
+function WorkoutSummaryFactorCard({ factor, muted = false }: { factor: WorkoutSummaryFactor; muted?: boolean }) {
   return (
     <div className={muted ? "rounded-xl bg-zinc-50 p-3" : "rounded-xl border border-zinc-100 p-3"}>
       <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
@@ -1807,10 +2043,11 @@ function WorkoutSummaryFactorCard({
 
 function GraphInsightCard({ insight = mockWorkoutSummaryInsight }: { insight?: WorkoutSummaryInsight }) {
   const [open, setOpen] = useState(false);
-  const label = buildInsightLabel(insight);
-  const composedSummary = buildComposedSummary(insight);
-  const factorPreview = useMemo(() => insight.factors.slice(0, 2), [insight.factors]);
-  const remainingFactors = useMemo(() => insight.factors.slice(2), [insight.factors]);
+  const label = buildWorkoutSummaryLabel(insight);
+  const composedSummary = buildWorkoutSummaryText(insight);
+  const factorPreview = useMemo(() => getWorkoutSummaryPrimaryFactors(insight), [insight]);
+  const remainingFactors = useMemo(() => getWorkoutSummarySecondaryFactors(insight), [insight]);
+  const tone = getWorkoutSummaryTone(insight);
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -1820,10 +2057,13 @@ function GraphInsightCard({ insight = mockWorkoutSummaryInsight }: { insight?: W
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-bold uppercase tracking-wide text-zinc-700">{label}</h3>
-            <WorkoutSummaryConfidenceBadge value={insight.confidence} />
+            <WorkoutSummaryReportAccuracyBadge value={insight.reportAccuracy} reason={insight.accuracyReason} />
           </div>
 
-          <p className="mt-2 text-lg font-semibold leading-snug text-zinc-950">{insight.headline}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <span aria-hidden="true" className={`h-3 w-3 shrink-0 rounded-full ring-4 ${getWorkoutSummaryToneDotClass(tone)}`} />
+            <p className="text-lg font-semibold leading-snug text-zinc-950">{insight.headline}</p>
+          </div>
           <p className="mt-2 text-sm leading-6 text-zinc-700">{composedSummary}</p>
 
           <div className="mt-3">
@@ -1853,7 +2093,11 @@ function GraphInsightCard({ insight = mockWorkoutSummaryInsight }: { insight?: W
                 <WorkoutSummaryFactorCard key={factor.title} factor={factor} />
               ))}
             </div>
-          ) : null}
+          ) : (
+            <p className="rounded-xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-600">
+              No additional factors met the current display threshold. The main factors carry most of this report.
+            </p>
+          )}
 
           <div className="mt-4 flex gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">
             <span className="mt-0.5 shrink-0 font-bold">!</span>
@@ -1892,6 +2136,8 @@ export default function App() {
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(BLOCK_IDS.day1A);
   const [graphAxis, setGraphAxis] = useState<GraphAxis>("date");
+  const [workoutSummaryScenarioIndex, setWorkoutSummaryScenarioIndex] = useState(0);
+  const activeWorkoutSummaryInsight = mockWorkoutSummaryInsights[workoutSummaryScenarioIndex] || mockWorkoutSummaryInsight;
   const [activeExerciseName, setActiveExerciseName] = useState<string | null>(null);
   const [lastHoveredGraphPoint, setLastHoveredGraphPoint] = useState<ChartPoint | null>(null);
   const [sessionDraft, setSessionDraft] = useState<SessionDraft | null>(null);
@@ -3749,7 +3995,43 @@ export default function App() {
                       </div>
                     </div>
 
-                    <GraphInsightCard />
+                    <GraphInsightCard insight={activeWorkoutSummaryInsight} />
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">Dev Scenario Toggle</p>
+                          <p className="mt-1 text-sm font-semibold text-zinc-900">{activeWorkoutSummaryInsight.headline}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setWorkoutSummaryScenarioIndex((index) =>
+                                (index - 1 + mockWorkoutSummaryInsights.length) % mockWorkoutSummaryInsights.length
+                              )
+                            }
+                            className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setWorkoutSummaryScenarioIndex((index) =>
+                                (index + 1) % mockWorkoutSummaryInsights.length
+                              )
+                            }
+                            className="rounded-full bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Scenario {workoutSummaryScenarioIndex + 1} of {mockWorkoutSummaryInsights.length}: {activeWorkoutSummaryInsight.id}
+                      </p>
+                    </div>
                   </div>
                 </SectionCard>
               )}
