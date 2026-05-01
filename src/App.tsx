@@ -1686,6 +1686,187 @@ function PathBar({ items }: { items: { label: string; onClick?: () => void }[] }
   );
 }
 
+
+type InsightConfidence = "Low" | "Moderate" | "High";
+
+type WorkoutSummaryFactor = {
+  symbol: string;
+  title: string;
+  text: string;
+};
+
+type WorkoutSummaryInsight = {
+  isExperimental: boolean;
+  baseLabel: string;
+  headline: string;
+  summary: string;
+  confidence: InsightConfidence;
+  trend: string;
+  factors: WorkoutSummaryFactor[];
+  limitation: string;
+};
+
+const mockWorkoutSummaryInsight: WorkoutSummaryInsight = {
+  isExperimental: true,
+  baseLabel: "Workout Summary",
+  headline: "Performance is improving steadily.",
+  summary:
+    "Completed output is trending upward while maintaining consistent session frequency. Load has increased gradually, suggesting strong progression.",
+  confidence: "High",
+  trend: "Upward",
+  factors: [
+    {
+      symbol: "↗",
+      title: "Graph trend",
+      text: "Completed output increased across recent sessions.",
+    },
+    {
+      symbol: "◼",
+      title: "Load progression",
+      text: "Weight increased steadily while maintaining performance.",
+    },
+    {
+      symbol: "◷",
+      title: "Session consistency",
+      text: "Session spacing remained consistent, supporting progression.",
+    },
+    {
+      symbol: "▣",
+      title: "Capacity signal",
+      text: "Output is improving without drop-off, indicating strong maintenance and continued progress.",
+    },
+  ],
+  limitation:
+    "This shell uses mock insight data. Later, the app should generate this from graph history, weight changes, session spacing, target changes, exercise replacements, and preceding block workload.",
+};
+
+// Future feature queue for the workout summary system:
+// - Motivation mode toggle (supportive vs. direct tone)
+// - User goal awareness (strength, endurance, fat loss, etc.)
+// - Factor weighting / importance scoring
+// - Confidence calculation engine
+// - Session fatigue modeling across blocks
+// - AI insight engine (rules → interpretation → phrasing)
+const buildInsightLabel = (insight: WorkoutSummaryInsight) =>
+  `${insight.isExperimental ? "Experimental " : ""}${insight.baseLabel}`;
+
+const getSuggestionByConfidence = (confidence: InsightConfidence) => {
+  if (confidence === "High") {
+    return "You are in a strong position to continue building and maintaining your current progress.";
+  }
+
+  if (confidence === "Moderate") {
+    return "You appear to be progressing well, and continuing with your current approach is a solid option.";
+  }
+
+  return "Focus on maintaining consistency and building a stable routine.";
+};
+
+const buildComposedSummary = (insight: WorkoutSummaryInsight) => {
+  const baseSummary = String(insight.summary || "").trim();
+  const suggestion = getSuggestionByConfidence(insight.confidence);
+  return `${baseSummary} ${suggestion}`.trim();
+};
+
+function WorkoutSummarySymbol({ symbol }: { symbol: string }) {
+  return (
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-bold text-zinc-800">
+      {symbol}
+    </span>
+  );
+}
+
+function WorkoutSummaryConfidenceBadge({ value }: { value: InsightConfidence }) {
+  const tone =
+    value === "High"
+      ? "bg-emerald-100 text-emerald-800"
+      : value === "Low"
+        ? "bg-amber-100 text-amber-800"
+        : "bg-blue-100 text-blue-800";
+
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>{value} confidence</span>;
+}
+
+function WorkoutSummaryFactorCard({
+  factor,
+  muted = false,
+}: {
+  factor: WorkoutSummaryFactor;
+  muted?: boolean;
+}) {
+  return (
+    <div className={muted ? "rounded-xl bg-zinc-50 p-3" : "rounded-xl border border-zinc-100 p-3"}>
+      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+        <WorkoutSummarySymbol symbol={factor.symbol} />
+        {factor.title}
+      </div>
+      <p className="mt-1 text-xs leading-5 text-zinc-600">{factor.text}</p>
+    </div>
+  );
+}
+
+function GraphInsightCard({ insight = mockWorkoutSummaryInsight }: { insight?: WorkoutSummaryInsight }) {
+  const [open, setOpen] = useState(false);
+  const label = buildInsightLabel(insight);
+  const composedSummary = buildComposedSummary(insight);
+  const factorPreview = useMemo(() => insight.factors.slice(0, 2), [insight.factors]);
+  const remainingFactors = useMemo(() => insight.factors.slice(2), [insight.factors]);
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="rounded-2xl bg-zinc-950 px-3 py-2 text-sm font-bold text-white shadow-sm">AI</div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wide text-zinc-700">{label}</h3>
+            <WorkoutSummaryConfidenceBadge value={insight.confidence} />
+          </div>
+
+          <p className="mt-2 text-lg font-semibold leading-snug text-zinc-950">{insight.headline}</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{composedSummary}</p>
+
+          <div className="mt-3">
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-zinc-500">Key Factors</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {factorPreview.map((factor) => (
+                <WorkoutSummaryFactorCard key={factor.title} factor={factor} muted />
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="mt-3 inline-flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+          >
+            {open ? "Hide Full Summary ▲" : "Full Summary ▼"}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-4 border-t border-zinc-100 pt-4">
+          {remainingFactors.length ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {remainingFactors.map((factor) => (
+                <WorkoutSummaryFactorCard key={factor.title} factor={factor} />
+              ))}
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex gap-2 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+            <span className="mt-0.5 shrink-0 font-bold">!</span>
+            <p>{insight.limitation}</p>
+          </div>
+
+          <p className="mt-3 text-right text-[11px] font-semibold text-zinc-400">– AI Generated</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [members, setMembers] = useState<Member[]>(() => {
     if (typeof window === "undefined") return [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
@@ -3568,21 +3749,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="mb-2 text-sm font-semibold text-zinc-900">Phase 3 Graph Pipeline</div>
-                      <div className="text-sm text-zinc-600">Series Count: {graphData.length}</div>
-                      <div className="mt-3 space-y-1 text-sm text-zinc-500">
-                        {graphData.length > 0 ? (
-                          graphData.map((series) => (
-                            <div key={series.exerciseId}>
-                              {series.exerciseName}: {series.points.length} {series.points.length === 1 ? "point" : "points"}
-                            </div>
-                          ))
-                        ) : (
-                          <div>No scoped graph data yet for this block.</div>
-                        )}
-                      </div>
-                    </div>
+                    <GraphInsightCard />
                   </div>
                 </SectionCard>
               )}
