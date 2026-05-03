@@ -2104,7 +2104,15 @@ const generateWorkoutSummaryInsightFromSeries = (
   const finishesNearHigh = finalPosition >= 0.72 || lastOutput >= stats.maxOutput - Math.max(1, outputRange * 0.18);
   const mostlyUpward = nonDecreaseRatio >= 0.55 || outputIncreaseCount >= Math.max(2, Math.floor((points.length - 1) * 0.35));
   const mostlyDownward = decreaseCount >= Math.ceil((points.length - 1) * 0.55);
-  const clearDecline = outputChange <= -Math.max(1, outputScale * 0.12) && mostlyDownward && finalPosition <= 0.35;
+  const downwardDominance = lastOutput < firstOutput && decreaseCount >= outputIncreaseCount;
+  const singleClearDecline =
+    isSingleBlock &&
+    lastOutput < firstOutput &&
+    lateAverage < earlyAverage &&
+    (downwardDominance || finalPosition <= 0.45);
+  const clearDecline =
+    singleClearDecline ||
+    (outputChange <= -Math.max(1, outputScale * 0.12) && mostlyDownward && finalPosition <= 0.35);
   const recoveryDominance = recoveryAfterLow >= outputRange * 0.45 && finalPosition >= 0.35;
 
   const singleStrongGrowth =
@@ -2302,9 +2310,7 @@ const generateWorkoutSummaryInsightFromSeries = (
     factors,
     limitation: "Generated from the selected graph series. The report summarizes the main pattern rather than every point on the graph.",
   };
-};
-
-const getWorkoutSummarySeverityRank = (headline: string) => {
+};const getWorkoutSummarySeverityRank = (headline: string) => {
   if (headline.includes("Contextual")) return 5;
   if (headline.includes("Trade-Off")) return 4;
   if (headline.includes("Strong Growth")) return 3;
@@ -2366,6 +2372,22 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     insight: generateWorkoutSummaryInsightFromSeries(series, series.exerciseName || contextLabel),
   }));
 
+  const pairedStats = usableSeries.map((series) => getWorkoutSummaryTrendStats(series.points));
+  const pairedMaintainedOutput = pairedStats.every((stats) => stats.lastOutput >= stats.firstOutput - 1);
+  const pairedHigherOutput = pairedStats.some((stats) => stats.lastOutput >= stats.firstOutput + 1 || stats.lateAverage >= stats.earlyAverage + 1);
+  const pairedRepeatedWeightIncrease = pairedStats.some((stats) => stats.weightIncreaseCount >= 2);
+  const pairedAnyWeightIncrease = pairedStats.some((stats) => stats.weightChange > 0 || stats.weightIncreaseCount >= 1);
+  const pairedAllAboveBaseline = pairedStats.every((stats) => stats.lastOutput >= stats.firstOutput || stats.lateAverage >= stats.earlyAverage);
+  const pairedHigherPlateau = pairedStats.every((stats) => stats.lateAverage >= stats.earlyAverage - 0.25) && pairedHigherOutput;
+  const pairedCleanStrongTier =
+    pairedMaintainedOutput &&
+    pairedAllAboveBaseline &&
+    (
+      (pairedRepeatedWeightIncrease && (pairedHigherOutput || pairedHigherPlateau)) ||
+      (pairedAnyWeightIncrease && pairedHigherOutput && pairedHigherPlateau) ||
+      pairedStats.every((stats) => stats.lastOutput >= stats.firstOutput + 1 || stats.lateAverage >= stats.earlyAverage + 1)
+    );
+
   const strongCount = childInsights.filter(({ insight }) => insight.headline.includes("Strong Growth")).length;
   const moderateCount = childInsights.filter(({ insight }) => insight.headline.includes("Moderate Growth")).length;
   const positiveCount = strongCount + moderateCount;
@@ -2374,7 +2396,7 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
   const baselineCount = childInsights.filter(({ insight }) => insight.headline.includes("Baseline")).length;
 
   let headline = "Neutral";
-  if (strongCount === childInsights.length || (strongCount >= 1 && positiveCount === childInsights.length)) {
+  if (pairedCleanStrongTier || strongCount === childInsights.length || (strongCount >= 1 && positiveCount === childInsights.length)) {
     headline = "Strong Growth";
   } else if (positiveCount > 0) {
     headline = "Moderate Growth";
@@ -2395,7 +2417,9 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
   let summary = `Across this block, ${summaryPieces.join(" and ")}.`;
 
   if (headline === "Strong Growth") {
-    summary += " Together, the block points to strong growth because the main pattern shows higher output, heavier weight, or a higher plateau being sustained.";
+    summary += pairedCleanStrongTier
+      ? " Together, the block points to strong growth because the set levels held or improved while the weight pattern moved up."
+      : " Together, the block points to strong growth because the main pattern shows higher output, heavier weight, or a higher plateau being sustained.";
   } else if (headline === "Moderate Growth") {
     summary += " The block is positive overall, but the signals are mixed enough to keep it in moderate growth.";
   } else if (headline === "Fatigue Trade-Off") {
