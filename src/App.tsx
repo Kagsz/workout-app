@@ -2031,11 +2031,15 @@ const generateWorkoutSummaryInsightFromSeries = (
   const outputScale = Math.max(1, Math.abs(firstOutput));
   const meaningfulOutputGain = outputChange >= Math.max(1, outputScale * 0.15);
   const isOutputStable = outputRange <= Math.max(1, Math.abs(firstOutput) * 0.1);
+  const isOutputMaintained = lastOutput >= firstOutput - Math.max(1, outputScale * 0.12);
   const isOutputDown = outputChange < 0;
   const relativeWeightJump = firstWeight > 0 ? weightChange / firstWeight : 0;
   const hasSuccessiveWeightProgression = weightIncreaseCount >= 3;
+  const hasRepeatedWeightProgression = weightIncreaseCount >= 2;
   const hasLargeRelativeWeightJump = relativeWeightJump >= 0.5;
   const hasMultiVariableImprovement = hasWeightIncrease && hasOutputIncrease && outputIncreaseCount >= 2;
+  const strongOutputGain = outputChange >= Math.max(2, outputScale * 0.3);
+  const moderateOutputGain = outputChange >= Math.max(1, outputScale * 0.08);
 
   const firstWindow = outputs.slice(0, Math.min(2, outputs.length));
   const lastWindow = outputs.slice(Math.max(0, outputs.length - Math.min(3, outputs.length)));
@@ -2059,6 +2063,28 @@ const generateWorkoutSummaryInsightFromSeries = (
   const hasRecoveryDominance = lowIndex > 0 && recoveryAfterLow >= outputSpan * 0.45 && finalPosition >= 0.35;
   const sustainedDownCount = outputs.slice(1).filter((value, index) => value < outputs[index]).length;
   const hasSustainedDecline = sustainedDownCount >= Math.ceil((outputs.length - 1) * 0.55);
+  const endingTrendWindow = outputs.slice(Math.max(0, outputs.length - Math.min(3, outputs.length)));
+  const endingTrendPositive = endingTrendWindow.length >= 2 && endingTrendWindow[endingTrendWindow.length - 1] >= endingTrendWindow[0];
+  const dominantUpwardOutcome =
+    strongOutputGain &&
+    finalPosition >= 0.55 &&
+    (endingTrendPositive || outputIncreaseCount >= 2 || maxUpwardRun >= 2) &&
+    !hasSustainedDecline;
+  const singleMetricStrongGrowth =
+    isSingleBlock &&
+    strongOutputGain &&
+    finalPosition >= 0.6 &&
+    outputIncreaseCount >= Math.max(2, Math.floor((outputs.length - 1) * 0.35));
+  const volatilePositiveNetShift =
+    isSingleBlock &&
+    moderateOutputGain &&
+    finalPosition >= 0.45 &&
+    !hasSustainedDecline;
+  const sustainedOutputUnderRisingWeight =
+    hasRepeatedWeightProgression &&
+    isOutputMaintained &&
+    (isOutputStable || outputRange <= Math.max(1.5, outputScale * 0.35) || lastOutput >= firstOutput) &&
+    !hasSustainedDecline;
 
   const datedPoints = points
     .map((point, index) => ({ point, index, time: getWorkoutSummaryPointTime(point.date) }))
@@ -2088,10 +2114,14 @@ const generateWorkoutSummaryInsightFromSeries = (
   const constraintAdjustedTradeoff =
     isControlledConstraint && hasWeightIncrease && outputChange < -Math.max(1, outputScale * 0.25);
   const qualifiesStrongGrowth =
+    dominantUpwardOutcome ||
+    singleMetricStrongGrowth ||
+    sustainedOutputUnderRisingWeight ||
     hasMultiVariableImprovement ||
-    (hasSuccessiveWeightProgression && (isOutputStable || hasElevatedPlateau || isControlledConstraint)) ||
+    (hasSuccessiveWeightProgression && (isOutputStable || isOutputMaintained || hasElevatedPlateau || isControlledConstraint)) ||
     (hasLargeRelativeWeightJump && !constraintAdjustedTradeoff);
   const qualifiesModerateGrowth =
+    volatilePositiveNetShift ||
     constraintAdjustedPositive ||
     (hasWeightIncrease && !isOutputDown) ||
     hasStepwiseGrowth ||
@@ -2114,18 +2144,24 @@ const generateWorkoutSummaryInsightFromSeries = (
 
   if (qualifiesStrongGrowth) {
     headline = "Strong Growth";
-    summary = hasMultiVariableImprovement
-      ? "Output and weight both improve across the program, indicating strong multi-variable growth."
-      : isControlledConstraint
-        ? "Weight progression stands out while output is maintained under a controlled tempo constraint, indicating strong growth through added difficulty."
-        : "Output remains consistent while weight increases sharply across the program, indicating strong growth through increased difficulty.";
+    summary = singleMetricStrongGrowth || (isSingleBlock && dominantUpwardOutcome)
+      ? "Output rises strongly from the starting point and finishes in a much higher range, indicating strong growth."
+      : sustainedOutputUnderRisingWeight
+        ? "Repeated weight increases were paired with maintained output, indicating strong growth through increased difficulty."
+        : hasMultiVariableImprovement
+          ? "Output and weight both improve across the program, indicating strong multi-variable growth."
+          : isControlledConstraint
+            ? "Weight progression stands out while output is maintained under a controlled tempo constraint, indicating strong growth through added difficulty."
+            : "Output finishes much higher than it started, indicating strong growth despite normal fluctuations.";
   } else if (qualifiesModerateGrowth) {
     headline = "Moderate Growth";
-    summary = isControlledConstraint && hasWeightIncrease
-      ? "Sets may be limited by the controlled tempo variation, but the weight increase changes the context and points toward positive progression."
-      : hasStepwiseGrowth || hasElevatedPlateau || isSingleBlock
-        ? "Output rises into a higher working range and holds enough of that gain to indicate moderate growth."
-        : "Output remains consistent while weight increases across the program, indicating growth is primarily driven by increased weight without loss of endurance.";
+    summary = volatilePositiveNetShift
+      ? "Output moves unevenly, but the final level sits meaningfully above the starting point, indicating moderate growth."
+      : isControlledConstraint && hasWeightIncrease
+        ? "Sets may be limited by the controlled tempo variation, but the weight increase changes the context and points toward positive progression."
+        : hasStepwiseGrowth || hasElevatedPlateau || isSingleBlock
+          ? "Output rises into a higher working range and holds enough of that gain to indicate moderate growth."
+          : "Output remains consistent while weight increases across the program, indicating growth is primarily driven by increased weight without loss of endurance.";
   } else if (qualifiesTradeoff) {
     headline = "Fatigue Trade-Off";
     summary = isControlledConstraint
@@ -2148,7 +2184,7 @@ const generateWorkoutSummaryInsightFromSeries = (
 
   const contextNotes: string[] = [];
   if (isControlledConstraint && hasWeightIncrease && outputChange <= 0) {
-    contextNotes.push("Because PAUSE, TEMPO, and ECC work increase time under tension, lower set output can still pair with real progression when load rises.");
+    contextNotes.push("Because PAUSE, TEMPO, and ECC work increase time under tension, lower set output can still pair with real progression when weight rises.");
   }
   if (hasSignificantGap) {
     contextNotes.push("A significant session gap is present, so the return pattern is weighted with extra context.");
@@ -2165,15 +2201,17 @@ const generateWorkoutSummaryInsightFromSeries = (
     summary += ` ${contextNotes[0]}`;
   }
 
-  const outputPatternText = isOutputStable
-    ? "Output remained consistent across the program."
-    : hasStepwiseGrowth
-      ? "Output follows a stepwise growth pattern rather than a straight-line climb."
-      : hasOutputIncrease
-        ? "Output increased across the program."
-        : qualifiesContextualDecline
-          ? "Output decreased without enough recovery to neutralize the decline signal."
-          : "Output moved unevenly across the program.";
+  const outputPatternText = sustainedOutputUnderRisingWeight
+    ? "Output was maintained while weight increased repeatedly."
+    : isOutputStable
+      ? "Output remained consistent across the program."
+      : hasStepwiseGrowth
+        ? "Output follows a stepwise growth pattern rather than a straight-line climb."
+        : hasOutputIncrease
+          ? "Output increased across the program."
+          : qualifiesContextualDecline
+            ? "Output decreased without enough recovery to neutralize the decline signal."
+            : "Output moved unevenly across the program.";
 
   const factors: WorkoutSummaryFactor[] = [
     {
@@ -2188,14 +2226,14 @@ const generateWorkoutSummaryInsightFromSeries = (
       symbol: hasStepwiseGrowth || hasOutputIncrease ? "↗" : qualifiesContextualDecline ? "↘" : "→",
       title: "Output pattern",
       text: outputPatternText,
-      impact: hasStepwiseGrowth || (isSingleBlock && meaningfulOutputGain) ? 0.38 : 0.28,
+      impact: sustainedOutputUnderRisingWeight || hasStepwiseGrowth || (isSingleBlock && meaningfulOutputGain) ? 0.38 : 0.28,
     },
     ...(isControlledConstraint
       ? [
           {
             symbol: "⏱",
             title: "Controlled tempo",
-            text: "PAUSE, TEMPO, or ECC work can suppress completed-set output while still showing growth through load progression.",
+            text: "PAUSE, TEMPO, or ECC work can suppress completed-set output while still showing growth through weight progression.",
             impact: 0.24,
           },
         ]
@@ -2377,7 +2415,6 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
       "Generated from all visible series in this block graph. The highlighted exercise controls visual layering only, not summary scope.",
   };
 };
-
 
 const sortWorkoutSummaryFactorsByImpact = (factors: WorkoutSummaryFactor[]) =>
   [...factors].sort((a, b) => Number(b.impact || 0) - Number(a.impact || 0));
