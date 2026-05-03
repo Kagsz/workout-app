@@ -1918,11 +1918,6 @@ const countWorkoutSummaryIncreases = (values: number[]) => {
   return count;
 };
 
-const getWorkoutSummaryRange = (values: number[]) => {
-  if (!values.length) return 0;
-  return Math.max(...values) - Math.min(...values);
-};
-
 const getWorkoutSummaryPointTime = (date: string) => {
   const time = getSafeDateTime(date);
   return Number.isFinite(time) ? time : NaN;
@@ -2053,7 +2048,6 @@ const generateWorkoutSummaryInsightFromSeries = (
   const points = [...series.points].sort((a, b) => a.sessionNumber - b.sessionNumber);
 
   if (points.length < 2) {
-    const point = points[0];
     return {
       id: `generated-${series.exerciseId}-baseline`,
       isExperimental: true,
