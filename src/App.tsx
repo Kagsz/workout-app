@@ -1979,6 +1979,69 @@ const getWorkoutSummaryMaxUpwardRun = (values: number[]) => {
   return best;
 };
 
+const getWorkoutSummaryEndLabel = (point: GraphPoint, weightValue: number) => {
+  const weightLabel = point.weight || (weightValue > 0 ? `${weightValue}` : "BW");
+  return point.blockType === "paired" ? `${weightLabel} for ${point.y} sets` : `${point.y} output`;
+};
+
+const getWorkoutSummaryTrendStats = (points: GraphPoint[]) => {
+  const outputs = points.map((point) => Number(point.y || 0));
+  const weights = points.map((point) => parseWorkoutSummaryWeight(point.weight));
+  const firstOutput = outputs[0] ?? 0;
+  const lastOutput = outputs[outputs.length - 1] ?? 0;
+  const firstWeight = weights[0] ?? 0;
+  const lastWeight = weights[weights.length - 1] ?? 0;
+  const minOutput = outputs.length ? Math.min(...outputs) : 0;
+  const maxOutput = outputs.length ? Math.max(...outputs) : 0;
+  const outputRange = Math.max(1, maxOutput - minOutput);
+  const outputChange = lastOutput - firstOutput;
+  const outputScale = Math.max(1, Math.abs(firstOutput));
+  const weightChange = lastWeight - firstWeight;
+  const outputIncreaseCount = countWorkoutSummaryIncreases(outputs);
+  const weightIncreaseCount = countWorkoutSummaryIncreases(weights);
+  const decreaseCount = outputs.slice(1).filter((value, index) => value < outputs[index]).length;
+  const nonDecreaseRatio = outputs.length > 1 ? (outputs.length - 1 - decreaseCount) / (outputs.length - 1) : 1;
+  const firstWindow = outputs.slice(0, Math.min(2, outputs.length));
+  const lastWindow = outputs.slice(Math.max(0, outputs.length - Math.min(3, outputs.length)));
+  const earlyAverage = getWorkoutSummaryAverage(firstWindow);
+  const lateAverage = getWorkoutSummaryAverage(lastWindow);
+  const finalPosition = (lastOutput - minOutput) / outputRange;
+  const maxUpwardRun = getWorkoutSummaryMaxUpwardRun(outputs);
+  const peakIndex = outputs.indexOf(maxOutput);
+  const lowIndex = outputs.indexOf(minOutput);
+  const recoveryAfterLow = lowIndex < outputs.length - 1 ? Math.max(...outputs.slice(lowIndex + 1)) - minOutput : 0;
+  const hasDateData = points.filter((point) => Number.isFinite(getWorkoutSummaryPointTime(point.date))).length >= 2;
+  const isSingleBlock = points[0]?.blockType === "single";
+
+  return {
+    outputs,
+    weights,
+    firstOutput,
+    lastOutput,
+    firstWeight,
+    lastWeight,
+    minOutput,
+    maxOutput,
+    outputRange,
+    outputChange,
+    outputScale,
+    weightChange,
+    outputIncreaseCount,
+    weightIncreaseCount,
+    decreaseCount,
+    nonDecreaseRatio,
+    earlyAverage,
+    lateAverage,
+    finalPosition,
+    maxUpwardRun,
+    peakIndex,
+    lowIndex,
+    recoveryAfterLow,
+    hasDateData,
+    isSingleBlock,
+  };
+};
+
 const generateWorkoutSummaryInsightFromSeries = (
   series: GraphSeries | null | undefined,
   contextLabel = "this graph"
@@ -1996,274 +2059,240 @@ const generateWorkoutSummaryInsightFromSeries = (
       isExperimental: true,
       baseLabel: "Workout Summary",
       headline: "Baseline Established",
-      summary:
-        "This graph has a starting point, but more recorded sessions are needed before the report can identify a reliable trend.",
+      summary: "This graph has a starting point. More recorded sessions are needed before it can show a reliable trend.",
       reportAccuracy: "Low",
       accuracyReason: "single session",
       trend: "Baseline",
       factors: [
-        { symbol: "▣", title: "Baseline", text: `${series.exerciseName} has one recorded data point.`, impact: 0.42 },
-        { symbol: "?", title: "Data volume", text: "More sessions are needed before identifying a pattern.", impact: 0.34 },
-        { symbol: "◼", title: "Weight reference", text: `Current recorded weight is ${point.weight || "not listed"}.`, impact: 0.24 },
+        { symbol: "▣", title: "Baseline", text: `${series.exerciseName} has one recorded data point.`, impact: 0.48 },
+        { symbol: "?", title: "More sessions needed", text: "Additional sessions will make the trend clearer.", impact: 0.34 },
       ],
       limitation: "This report is based on one session, so it should be treated as a starting point rather than a performance trend.",
     };
   }
 
-  const outputs = points.map((point) => Number(point.y || 0));
-  const weights = points.map((point) => parseWorkoutSummaryWeight(point.weight));
+  const stats = getWorkoutSummaryTrendStats(points);
+  const {
+    firstOutput,
+    lastOutput,
+    firstWeight,
+    lastWeight,
+    outputRange,
+    outputChange,
+    outputScale,
+    weightChange,
+    outputIncreaseCount,
+    weightIncreaseCount,
+    decreaseCount,
+    nonDecreaseRatio,
+    earlyAverage,
+    lateAverage,
+    finalPosition,
+    maxUpwardRun,
+    recoveryAfterLow,
+    hasDateData,
+    isSingleBlock,
+  } = stats;
+
   const first = points[0];
   const last = points[points.length - 1];
-  const firstOutput = outputs[0];
-  const lastOutput = outputs[outputs.length - 1];
-  const firstWeight = weights[0];
-  const lastWeight = weights[weights.length - 1];
-  const outputChange = lastOutput - firstOutput;
-  const weightChange = lastWeight - firstWeight;
-  const outputRange = getWorkoutSummaryRange(outputs);
-  const outputIncreaseCount = countWorkoutSummaryIncreases(outputs);
-  const weightIncreaseCount = countWorkoutSummaryIncreases(weights);
-  const maxUpwardRun = getWorkoutSummaryMaxUpwardRun(outputs);
-  const hasWeightIncrease = weightChange > 0;
-  const hasOutputIncrease = outputChange > 0;
-  const isSingleBlock = first.blockType === "single";
   const isControlledConstraint = isControlledWorkoutSummarySeries(series);
-  const outputScale = Math.max(1, Math.abs(firstOutput));
-  const meaningfulOutputGain = outputChange >= Math.max(1, outputScale * 0.15);
-  const isOutputStable = outputRange <= Math.max(1, Math.abs(firstOutput) * 0.1);
-  const isOutputMaintained = lastOutput >= firstOutput - Math.max(1, outputScale * 0.12);
-  const isOutputDown = outputChange < 0;
-  const relativeWeightJump = firstWeight > 0 ? weightChange / firstWeight : 0;
-  const hasSuccessiveWeightProgression = weightIncreaseCount >= 3;
-  const hasRepeatedWeightProgression = weightIncreaseCount >= 2;
-  const hasLargeRelativeWeightJump = relativeWeightJump >= 0.5;
-  const hasMultiVariableImprovement = hasWeightIncrease && hasOutputIncrease && outputIncreaseCount >= 2;
-  const strongOutputGain = outputChange >= Math.max(2, outputScale * 0.3);
-  const moderateOutputGain = outputChange >= Math.max(1, outputScale * 0.08);
+  const hasWeightData = Math.max(...stats.weights) > 0;
+  const hasWeightIncrease = weightChange > 0 || weightIncreaseCount >= 1;
+  const repeatedWeightIncrease = weightIncreaseCount >= 2;
+  const maintainedOutput = lastOutput >= firstOutput - 1;
+  const higherOutput = lastOutput >= firstOutput + 1;
+  const highPlateau = lateAverage >= earlyAverage + 1;
+  const stepUpAndHold = highPlateau && finalPosition >= 0.45;
+  const strongNetOutputGain = outputChange >= Math.max(2, outputScale * 0.2);
+  const hugeNetOutputGain = outputChange >= Math.max(4, outputScale * 0.3);
+  const meaningfulOutputGain = outputChange >= Math.max(1, outputScale * 0.08);
+  const finishesNearHigh = finalPosition >= 0.72 || lastOutput >= stats.maxOutput - Math.max(1, outputRange * 0.18);
+  const mostlyUpward = nonDecreaseRatio >= 0.55 || outputIncreaseCount >= Math.max(2, Math.floor((points.length - 1) * 0.35));
+  const mostlyDownward = decreaseCount >= Math.ceil((points.length - 1) * 0.55);
+  const clearDecline = outputChange <= -Math.max(1, outputScale * 0.12) && mostlyDownward && finalPosition <= 0.35;
+  const recoveryDominance = recoveryAfterLow >= outputRange * 0.45 && finalPosition >= 0.35;
 
-  const firstWindow = outputs.slice(0, Math.min(2, outputs.length));
-  const lastWindow = outputs.slice(Math.max(0, outputs.length - Math.min(3, outputs.length)));
-  const earlyAverage = getWorkoutSummaryAverage(firstWindow);
-  const lateAverage = getWorkoutSummaryAverage(lastWindow);
-  const averageLift = lateAverage - earlyAverage;
-  const hasElevatedPlateau = averageLift >= Math.max(1, outputScale * 0.12) && lastOutput >= earlyAverage;
-  const hasStepwiseGrowth =
-    meaningfulOutputGain &&
-    (maxUpwardRun >= 2 || outputIncreaseCount >= Math.ceil((outputs.length - 1) * 0.35) || hasElevatedPlateau);
-
-  const peak = Math.max(...outputs);
-  const low = Math.min(...outputs);
-  const outputSpan = Math.max(1, peak - low);
-  const finalPosition = (lastOutput - low) / outputSpan;
-  const peakIndex = outputs.indexOf(peak);
-  const lowIndex = outputs.indexOf(low);
-  const finalBelowPeak = peak - lastOutput;
-  const latePeakDip = peakIndex >= Math.max(0, outputs.length - 3) && finalBelowPeak >= Math.max(1, outputSpan * 0.25);
-  const recoveryAfterLow = lowIndex < outputs.length - 1 ? Math.max(...outputs.slice(lowIndex + 1)) - low : 0;
-  const hasRecoveryDominance = lowIndex > 0 && recoveryAfterLow >= outputSpan * 0.45 && finalPosition >= 0.35;
-  const sustainedDownCount = outputs.slice(1).filter((value, index) => value < outputs[index]).length;
-  const hasSustainedDecline = sustainedDownCount >= Math.ceil((outputs.length - 1) * 0.55);
-  const endingTrendWindow = outputs.slice(Math.max(0, outputs.length - Math.min(3, outputs.length)));
-  const endingTrendPositive = endingTrendWindow.length >= 2 && endingTrendWindow[endingTrendWindow.length - 1] >= endingTrendWindow[0];
-  const dominantUpwardOutcome =
-    strongOutputGain &&
-    finalPosition >= 0.55 &&
-    (endingTrendPositive || outputIncreaseCount >= 2 || maxUpwardRun >= 2) &&
-    !hasSustainedDecline;
-  const singleMetricStrongGrowth =
+  const singleStrongGrowth =
     isSingleBlock &&
-    strongOutputGain &&
-    finalPosition >= 0.6 &&
-    outputIncreaseCount >= Math.max(2, Math.floor((outputs.length - 1) * 0.35));
-  const volatilePositiveNetShift =
-    isSingleBlock &&
-    moderateOutputGain &&
-    finalPosition >= 0.45 &&
-    !hasSustainedDecline;
-  const sustainedOutputUnderRisingWeight =
-    hasRepeatedWeightProgression &&
-    isOutputMaintained &&
-    (isOutputStable || outputRange <= Math.max(1.5, outputScale * 0.35) || lastOutput >= firstOutput) &&
-    !hasSustainedDecline;
+    (hugeNetOutputGain || (strongNetOutputGain && finishesNearHigh && mostlyUpward) || (stepUpAndHold && strongNetOutputGain));
 
-  const datedPoints = points
-    .map((point, index) => ({ point, index, time: getWorkoutSummaryPointTime(point.date) }))
-    .filter((item) => Number.isFinite(item.time));
-  const hasDateData = datedPoints.length >= 2;
-  const significantGapThresholdMs = 21 * 24 * 60 * 60 * 1000;
-  let hasSignificantGap = false;
+  const singleModerateGrowth =
+    isSingleBlock && !singleStrongGrowth && meaningfulOutputGain && finalPosition >= 0.42 && !clearDecline;
 
-  for (let index = 1; index < datedPoints.length; index += 1) {
-    if (datedPoints[index].time - datedPoints[index - 1].time > significantGapThresholdMs) {
-      hasSignificantGap = true;
-      break;
-    }
-  }
+  const risingWeightWithMaintainedOutput =
+    !isSingleBlock &&
+    hasWeightIncrease &&
+    maintainedOutput &&
+    (repeatedWeightIncrease || weightChange >= 5 || isControlledConstraint);
 
-  let hasDip = false;
-  let recovered = false;
-  for (let index = 1; index < outputs.length - 1; index += 1) {
-    if (outputs[index] < outputs[index - 1]) {
-      hasDip = true;
-      if (Math.max(...outputs.slice(index + 1)) >= outputs[index - 1] || hasRecoveryDominance) recovered = true;
-    }
-  }
+  const pairedStrongGrowth =
+    !isSingleBlock &&
+    (
+      (risingWeightWithMaintainedOutput && (higherOutput || highPlateau || repeatedWeightIncrease || isControlledConstraint)) ||
+      (strongNetOutputGain && (finishesNearHigh || stepUpAndHold || maxUpwardRun >= 2)) ||
+      (hasWeightIncrease && higherOutput && outputIncreaseCount >= 1)
+    );
 
-  const constraintAdjustedPositive =
-    isControlledConstraint && hasWeightIncrease && (isOutputStable || outputChange >= -Math.max(1, outputScale * 0.25));
-  const constraintAdjustedTradeoff =
-    isControlledConstraint && hasWeightIncrease && outputChange < -Math.max(1, outputScale * 0.25);
-  const qualifiesStrongGrowth =
-    dominantUpwardOutcome ||
-    singleMetricStrongGrowth ||
-    sustainedOutputUnderRisingWeight ||
-    hasMultiVariableImprovement ||
-    (hasSuccessiveWeightProgression && (isOutputStable || isOutputMaintained || hasElevatedPlateau || isControlledConstraint)) ||
-    (hasLargeRelativeWeightJump && !constraintAdjustedTradeoff);
-  const qualifiesModerateGrowth =
-    volatilePositiveNetShift ||
-    constraintAdjustedPositive ||
-    (hasWeightIncrease && !isOutputDown) ||
-    hasStepwiseGrowth ||
-    (isSingleBlock && (meaningfulOutputGain || hasElevatedPlateau));
-  const qualifiesTradeoff =
-    constraintAdjustedTradeoff || (hasWeightIncrease && isOutputDown && !constraintAdjustedPositive && !hasRecoveryDominance);
-  const qualifiesContextualDecline =
-    isOutputDown &&
-    !qualifiesTradeoff &&
-    !hasStepwiseGrowth &&
-    !hasRecoveryDominance &&
-    !hasElevatedPlateau &&
-    (hasSustainedDecline || finalPosition <= 0.3) &&
-    !constraintAdjustedPositive;
+  const pairedModerateGrowth =
+    !isSingleBlock &&
+    !pairedStrongGrowth &&
+    (
+      (hasWeightIncrease && maintainedOutput) ||
+      meaningfulOutputGain ||
+      stepUpAndHold ||
+      recoveryDominance
+    ) &&
+    !clearDecline;
+
+  const fatigueTradeoff =
+    !isSingleBlock &&
+    hasWeightIncrease &&
+    outputChange <= -Math.max(2, outputScale * (isControlledConstraint ? 0.25 : 0.18)) &&
+    !maintainedOutput &&
+    !recoveryDominance;
 
   let headline = "Neutral";
-  let summary = "Output remains mostly unchanged across the program.";
+  let summary = "Output stays close to its starting level, so this reads as a neutral trend for now.";
+  let trend = "Neutral";
   let reportAccuracy: ReportAccuracy = hasDateData ? "High" : "Moderate";
   let accuracyReason = hasDateData ? "real data" : "real data · date data limited";
+  let primarySymbol = "→";
+  let primaryTitle = "Overall trend";
+  let primaryText = "Output stayed mostly steady across the recorded sessions.";
 
-  if (qualifiesStrongGrowth) {
+  if (singleStrongGrowth) {
     headline = "Strong Growth";
-    summary = singleMetricStrongGrowth || (isSingleBlock && dominantUpwardOutcome)
-      ? "Output rises strongly from the starting point and finishes in a much higher range, indicating strong growth."
-      : sustainedOutputUnderRisingWeight
-        ? "Repeated weight increases were paired with maintained output, indicating strong growth through increased difficulty."
-        : hasMultiVariableImprovement
-          ? "Output and weight both improve across the program, indicating strong multi-variable growth."
-          : isControlledConstraint
-            ? "Weight progression stands out while output is maintained under a controlled tempo constraint, indicating strong growth through added difficulty."
-            : "Output finishes much higher than it started, indicating strong growth despite normal fluctuations.";
-  } else if (qualifiesModerateGrowth) {
+    trend = "Strong single-metric growth";
+    primarySymbol = "↗";
+    primaryTitle = "Output trend";
+    primaryText = "Output climbed from the starting point and finished in a much higher range.";
+    summary = stepUpAndHold
+      ? "Output moved into a higher range and held that improvement, which points to strong growth."
+      : "Output climbed clearly from the starting point and finished near the top of the graph, which points to strong growth.";
+  } else if (pairedStrongGrowth) {
+    headline = "Strong Growth";
+    trend = "Strong paired-block growth";
+    primarySymbol = hasWeightIncrease ? "◼" : "↗";
+    primaryTitle = hasWeightIncrease ? "Weight and output" : "Output trend";
+    primaryText = risingWeightWithMaintainedOutput
+      ? "Weight increased while sets were maintained or improved."
+      : "Sets finished meaningfully higher than they started.";
+    summary = risingWeightWithMaintainedOutput
+      ? "Weight increased while sets were maintained or improved, which points to strong growth even when the graph is not a simple upward line."
+      : "Sets moved into a higher range and held enough of that gain to point to strong growth.";
+  } else if (singleModerateGrowth) {
     headline = "Moderate Growth";
-    summary = volatilePositiveNetShift
-      ? "Output moves unevenly, but the final level sits meaningfully above the starting point, indicating moderate growth."
-      : isControlledConstraint && hasWeightIncrease
-        ? "Sets may be limited by the controlled tempo variation, but the weight increase changes the context and points toward positive progression."
-        : hasStepwiseGrowth || hasElevatedPlateau || isSingleBlock
-          ? "Output rises into a higher working range and holds enough of that gain to indicate moderate growth."
-          : "Output remains consistent while weight increases across the program, indicating growth is primarily driven by increased weight without loss of endurance.";
-  } else if (qualifiesTradeoff) {
+    trend = "Moderate single-metric growth";
+    primarySymbol = "↗";
+    primaryTitle = "Positive shift";
+    primaryText = "Output finished meaningfully above its starting point, though the pattern was not strong enough for the top label.";
+    summary = "Output moves unevenly, but it still finishes meaningfully above the starting point, which points to moderate growth.";
+  } else if (pairedModerateGrowth) {
+    headline = "Moderate Growth";
+    trend = "Moderate paired-block growth";
+    primarySymbol = hasWeightIncrease ? "◼" : "↗";
+    primaryTitle = hasWeightIncrease ? "Weight context" : "Positive shift";
+    primaryText = hasWeightIncrease
+      ? "Weight increased while the set pattern stayed close to its starting level."
+      : "Sets improved enough to show a positive shift.";
+    summary = hasWeightIncrease
+      ? "Weight increased while sets stayed near their starting level, which points to moderate growth."
+      : "Sets finish above the starting point, though the pattern is mixed enough to keep this in moderate growth.";
+  } else if (fatigueTradeoff) {
     headline = "Fatigue Trade-Off";
+    trend = "Trade-off";
+    primarySymbol = "⚖";
+    primaryTitle = "Harder weight, lower sets";
+    primaryText = "Weight increased while sets dropped below the starting level.";
     summary = isControlledConstraint
-      ? "Weight increases while output drops more sharply under a controlled tempo variation, which may reflect a difficulty trade-off rather than a simple regression."
-      : "Output decreases while weight increases across the program, which may reflect a trade-off from increased difficulty rather than a simple regression.";
-    reportAccuracy = "Moderate";
-    accuracyReason = "real data · trade-off pattern";
-  } else if (qualifiesContextualDecline) {
+      ? "Weight increased while sets dropped under a controlled variation, which reads more like a difficulty trade-off than a simple decline."
+      : "Weight increased while sets dropped, which suggests a trade-off between heavier work and completed sets.";
+    reportAccuracy = reportAccuracy === "High" ? "Moderate" : reportAccuracy;
+    accuracyReason = `${accuracyReason} · trade-off pattern`;
+  } else if (clearDecline) {
     headline = "Contextual Decline";
-    summary =
-      "Output trends downward without enough recovery or weight-based explanation, so this pattern is best read with added context.";
-    reportAccuracy = "Moderate";
-    accuracyReason = "real data · decline pattern";
-  } else if (hasRecoveryDominance || hasElevatedPlateau) {
+    trend = "Downward";
+    primarySymbol = "↘";
+    primaryTitle = "Downward trend";
+    primaryText = "Output trended down and finished near the lower end of the graph.";
+    summary = "Output trends downward and finishes near the lower end of the graph, so this should be watched with context.";
+    reportAccuracy = reportAccuracy === "High" ? "Moderate" : reportAccuracy;
+    accuracyReason = `${accuracyReason} · decline pattern`;
+  } else if (recoveryDominance || stepUpAndHold) {
     headline = "Neutral";
-    summary = hasRecoveryDominance
-      ? "The graph shows volatility, but the recovery after the low point prevents this from reading as a clear decline."
-      : "Output holds much of an earlier gain, making the overall read more stable than stagnant.";
+    trend = "Mixed";
+    primarySymbol = recoveryDominance ? "↺" : "→";
+    primaryTitle = recoveryDominance ? "Recovery signal" : "Higher hold";
+    primaryText = recoveryDominance
+      ? "A recovery after the low point keeps this from reading as a clear decline."
+      : "Output held part of an earlier gain, but the full pattern remains mixed.";
+    summary = recoveryDominance
+      ? "The graph is mixed, but the recovery after the low point keeps this from reading as a clear decline."
+      : "Output held part of an earlier gain, but the full pattern remains mixed enough to stay neutral.";
   }
 
-  const contextNotes: string[] = [];
-  if (isControlledConstraint && hasWeightIncrease && outputChange <= 0) {
-    contextNotes.push("Because PAUSE, TEMPO, and ECC work increase time under tension, lower set output can still pair with real progression when weight rises.");
-  }
-  if (hasSignificantGap) {
-    contextNotes.push("A significant session gap is present, so the return pattern is weighted with extra context.");
-    if (reportAccuracy === "High") reportAccuracy = "Moderate";
+  const datedPoints = points
+    .map((point) => ({ point, time: getWorkoutSummaryPointTime(point.date) }))
+    .filter((item) => Number.isFinite(item.time));
+  const significantGapThresholdMs = 21 * 24 * 60 * 60 * 1000;
+  const hasSignificantGap = datedPoints.some((item, index) => index > 0 && item.time - datedPoints[index - 1].time > significantGapThresholdMs);
+
+  if (hasSignificantGap && reportAccuracy === "High") {
+    reportAccuracy = "Moderate";
     accuracyReason = `${accuracyReason} · gap present`;
   }
-  if (hasDip && recovered) {
-    contextNotes.push("A dip appears in the data, but later recovery softens the downside signal.");
-  } else if (latePeakDip && !qualifiesContextualDecline) {
-    contextNotes.push("The final point sits below a recent peak, but that alone is not enough to override the broader positive signal.");
-  }
 
-  if (contextNotes.length) {
-    summary += ` ${contextNotes[0]}`;
-  }
+  const secondaryFactors: WorkoutSummaryFactor[] = [];
 
-  const outputPatternText = sustainedOutputUnderRisingWeight
-    ? "Output was maintained while weight increased repeatedly."
-    : isOutputStable
-      ? "Output remained consistent across the program."
-      : hasStepwiseGrowth
-        ? "Output follows a stepwise growth pattern rather than a straight-line climb."
-        : hasOutputIncrease
-          ? "Output increased across the program."
-          : qualifiesContextualDecline
-            ? "Output decreased without enough recovery to neutralize the decline signal."
-            : "Output moved unevenly across the program.";
+  secondaryFactors.push({
+    symbol: primarySymbol,
+    title: primaryTitle,
+    text: primaryText,
+    impact: 0.42,
+  });
 
-  const factors: WorkoutSummaryFactor[] = [
-    {
+  if (hasWeightData) {
+    secondaryFactors.push({
       symbol: "◼",
-      title: "Weight progression",
+      title: "Weight changes",
       text: hasWeightIncrease
-        ? `Weight increased from ${firstWeight} to ${lastWeight}.`
-        : "Weight did not increase across the recorded sessions.",
-      impact: hasWeightIncrease ? (isControlledConstraint ? 0.42 : 0.34) : 0.14,
-    },
-    {
-      symbol: hasStepwiseGrowth || hasOutputIncrease ? "↗" : qualifiesContextualDecline ? "↘" : "→",
-      title: "Output pattern",
-      text: outputPatternText,
-      impact: sustainedOutputUnderRisingWeight || hasStepwiseGrowth || (isSingleBlock && meaningfulOutputGain) ? 0.38 : 0.28,
-    },
-    ...(isControlledConstraint
-      ? [
-          {
-            symbol: "⏱",
-            title: "Controlled tempo",
-            text: "PAUSE, TEMPO, or ECC work can suppress completed-set output while still showing growth through weight progression.",
-            impact: 0.24,
-          },
-        ]
-      : []),
-    ...(hasRecoveryDominance || (hasDip && recovered)
-      ? [
-          {
-            symbol: "↺",
-            title: "Recovery signal",
-            text: "A later recovery softens the impact of the earlier dip.",
-            impact: 0.2,
-          },
-        ]
-      : []),
-    ...(hasSignificantGap
-      ? [
-          {
-            symbol: "◷",
-            title: "Session spacing",
-            text: "A significant gap is present in the recorded sessions.",
-            impact: 0.16,
-          },
-        ]
-      : []),
-  ]
-    .sort((a, b) => b.impact - a.impact)
-    .slice(0, 4);
+        ? `Weight moved from ${firstWeight || "BW"} to ${lastWeight || "BW"}.`
+        : "Weight stayed mostly unchanged across the recorded sessions.",
+      impact: hasWeightIncrease ? 0.32 : 0.14,
+    });
+  }
 
-  const achievement = hasWeightIncrease || hasOutputIncrease
-    ? `Final session reached ${last.weight || lastWeight} for ${last.y} ${last.blockType === "paired" ? "sets" : "output"} after beginning at ${first.weight || firstWeight} for ${first.y} ${first.blockType === "paired" ? "sets" : "output"}!`
+  if (!isSingleBlock && isControlledConstraint) {
+    secondaryFactors.push({
+      symbol: "⏱",
+      title: "Controlled variation",
+      text: "PAUSE, TEMPO, or ECC work can limit completed sets, so maintained sets with heavier weight matter more.",
+      impact: 0.24,
+    });
+  }
+
+  if (recoveryDominance) {
+    secondaryFactors.push({
+      symbol: "↺",
+      title: "Recovery",
+      text: "A later recovery softens the impact of the earlier low point.",
+      impact: 0.2,
+    });
+  }
+
+  if (hasSignificantGap) {
+    secondaryFactors.push({
+      symbol: "◷",
+      title: "Session spacing",
+      text: "A larger gap appears between recorded sessions.",
+      impact: 0.14,
+    });
+  }
+
+  const factors = secondaryFactors.sort((a, b) => b.impact - a.impact).slice(0, 4);
+  const achievement = headline.includes("Growth")
+    ? `Final session reached ${getWorkoutSummaryEndLabel(last, lastWeight)} after beginning at ${getWorkoutSummaryEndLabel(first, firstWeight)}.`
     : undefined;
 
   return {
@@ -2275,12 +2304,11 @@ const generateWorkoutSummaryInsightFromSeries = (
     achievement,
     reportAccuracy,
     accuracyReason,
-    trend: "Generated",
+    trend,
     factors,
-    limitation: "Generated from the selected graph series. The report summarizes direction and meaning rather than every point on the graph.",
+    limitation: "Generated from the selected graph series. The report summarizes the main pattern rather than every point on the graph.",
   };
 };
-
 
 const getWorkoutSummarySeverityRank = (headline: string) => {
   if (headline.includes("Contextual")) return 5;
@@ -2303,26 +2331,26 @@ const getWorkoutSummarySentenceForSeries = (series: GraphSeries, insight: Workou
   const name = series.exerciseName || "This exercise";
 
   if (insight.headline.includes("Strong Growth")) {
-    return `${name} shows strong growth.`;
+    return `${name} shows strong growth`;
   }
 
   if (insight.headline.includes("Moderate Growth")) {
-    return `${name} shows moderate growth.`;
+    return `${name} shows moderate growth`;
   }
 
   if (insight.headline.includes("Trade-Off")) {
-    return `${name} shows a trade-off pattern.`;
+    return `${name} shows a trade-off pattern`;
   }
 
   if (insight.headline.includes("Contextual")) {
-    return `${name} shows a decline that should be read with context.`;
+    return `${name} trends down enough to watch with context`;
   }
 
   if (insight.headline.includes("Baseline")) {
-    return `${name} is still building a baseline.`;
+    return `${name} is still building a baseline`;
   }
 
-  return `${name} shows a mostly neutral pattern.`;
+  return `${name} is mostly neutral`;
 };
 
 const generateWorkoutSummaryInsightFromSeriesSet = (
@@ -2344,30 +2372,44 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     insight: generateWorkoutSummaryInsightFromSeries(series, series.exerciseName || contextLabel),
   }));
 
-  const hasContextualDecline = childInsights.some(({ insight }) => insight.headline.includes("Contextual"));
-  const hasTradeoff = childInsights.some(({ insight }) => insight.headline.includes("Trade-Off"));
   const strongCount = childInsights.filter(({ insight }) => insight.headline.includes("Strong Growth")).length;
-  const positiveCount = childInsights.filter(({ insight }) =>
-    insight.headline.includes("Strong Growth") || insight.headline.includes("Moderate Growth")
-  ).length;
+  const moderateCount = childInsights.filter(({ insight }) => insight.headline.includes("Moderate Growth")).length;
+  const positiveCount = strongCount + moderateCount;
+  const tradeoffCount = childInsights.filter(({ insight }) => insight.headline.includes("Trade-Off")).length;
+  const contextualCount = childInsights.filter(({ insight }) => insight.headline.includes("Contextual")).length;
   const baselineCount = childInsights.filter(({ insight }) => insight.headline.includes("Baseline")).length;
 
   let headline = "Neutral";
-  if (strongCount === childInsights.length) headline = "Strong Growth";
-  else if (positiveCount > 0) headline = "Moderate Growth";
-  else if (hasTradeoff) headline = "Fatigue Trade-Off";
-  else if (hasContextualDecline) headline = "Contextual Decline";
-  else if (baselineCount === childInsights.length) headline = "Baseline Established";
+  if (strongCount === childInsights.length || (strongCount >= 1 && positiveCount === childInsights.length)) {
+    headline = "Strong Growth";
+  } else if (positiveCount > 0) {
+    headline = "Moderate Growth";
+  } else if (tradeoffCount > 0) {
+    headline = "Fatigue Trade-Off";
+  } else if (contextualCount > 0) {
+    headline = "Contextual Decline";
+  } else if (baselineCount === childInsights.length) {
+    headline = "Baseline Established";
+  }
+
+  const sortedByImpact = childInsights
+    .slice()
+    .sort((a, b) => getWorkoutSummaryHeadlineRank(b.insight.headline) - getWorkoutSummaryHeadlineRank(a.insight.headline));
+  const strongestInsight = sortedByImpact[0]?.insight;
 
   const summaryPieces = childInsights.map(({ series, insight }) => getWorkoutSummarySentenceForSeries(series, insight));
-  let summary = `Across this block, ${summaryPieces.join(" ")}`;
+  let summary = `Across this block, ${summaryPieces.join(" and ")}.`;
 
-  if (positiveCount === childInsights.length && positiveCount > 0) {
-    summary += " Both visible exercise lines support a positive block-level read.";
-  } else if (positiveCount > 0 && (hasTradeoff || hasContextualDecline)) {
-    summary += " The block shows a mixed pattern, so the stronger and softer signals should be read together.";
+  if (headline === "Strong Growth") {
+    summary += " Together, the block points to strong growth because the main pattern shows higher output, heavier weight, or a higher plateau being sustained.";
+  } else if (headline === "Moderate Growth") {
+    summary += " The block is positive overall, but the signals are mixed enough to keep it in moderate growth.";
+  } else if (headline === "Fatigue Trade-Off") {
+    summary += " The main signal is a trade-off between harder work and completed sets.";
+  } else if (headline === "Contextual Decline") {
+    summary += " The main signal trends down enough to watch with context.";
   } else {
-    summary += " This summary considers both visible exercise lines on the graph.";
+    summary += " The block does not show a strong direction yet.";
   }
 
   const reportAccuracy: ReportAccuracy = childInsights.some(({ insight }) => insight.reportAccuracy === "Low")
@@ -2382,7 +2424,7 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
       symbol: insight.headline.includes("Strong Growth")
         ? "★"
         : insight.headline.includes("Moderate Growth")
-          ? "▣"
+          ? "↗"
           : insight.headline.includes("Trade-Off")
             ? "⚖"
             : insight.headline.includes("Contextual")
@@ -2393,10 +2435,6 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
       impact: index === 0 ? 0.36 : 0.28,
     }))
     .slice(0, 2);
-
-  const strongestInsight = childInsights
-    .slice()
-    .sort((a, b) => getWorkoutSummaryHeadlineRank(b.insight.headline) - getWorkoutSummaryHeadlineRank(a.insight.headline))[0]?.insight;
 
   return {
     id: `generated-block-${usableSeries.map((series) => series.exerciseId).join("-")}-${headline.replace(/\s+/g, "-").toLowerCase()}`,
@@ -2410,9 +2448,8 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     trend: "Generated Block",
     factors: factors.length
       ? factors
-      : [{ symbol: "▣", title: "Block pattern", text: "Both visible series were included in this summary.", impact: 1 }],
-    limitation:
-      "Generated from all visible series in this block graph. The highlighted exercise controls visual layering only, not summary scope.",
+      : [{ symbol: "▣", title: "Block pattern", text: "The visible series were included in this summary.", impact: 1 }],
+    limitation: "Generated from all visible series in this block graph. The highlighted exercise changes the visual layering only.",
   };
 };
 
@@ -2455,9 +2492,9 @@ const workoutSummaryClosingStatementPools: Record<SummaryTone | "lowAccuracy", s
     "This reflects strong development over time and you appear to be progressing well.",
   ],
   positiveContext: [
-    "The overall picture remains encouraging when the added difficulty is considered.",
-    "This still reflects meaningful progress when the increased demand is included in the interpretation.",
-    "The context suggests this is better read as adaptation under higher difficulty than as a setback.",
+    "The overall picture remains encouraging with the added difficulty in mind.",
+    "The added difficulty makes the steady work more meaningful, so the overall trend still reads positive.",
+    "This looks more like adaptation under harder work than a setback.",
   ],
   steady: [
     "Maintaining this level provides a strong foundation moving forward.",
