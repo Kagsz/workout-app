@@ -2094,7 +2094,9 @@ const generateWorkoutSummaryInsightFromSeries = (
   const hasWeightData = Math.max(...stats.weights) > 0;
   const hasWeightIncrease = weightChange > 0 || weightIncreaseCount >= 1;
   const repeatedWeightIncrease = weightIncreaseCount >= 2;
+  const strongWeightIncreaseBias = weightIncreaseCount >= 3;
   const maintainedOutput = lastOutput >= firstOutput - 1;
+  const recoveredToBaseline = lastOutput >= firstOutput - 0.75 || lateAverage >= firstOutput - 0.75;
   const higherOutput = lastOutput >= firstOutput + 1;
   const highPlateau = lateAverage >= earlyAverage + 1;
   const stepUpAndHold = highPlateau && finalPosition >= 0.45;
@@ -2122,6 +2124,14 @@ const generateWorkoutSummaryInsightFromSeries = (
   const singleModerateGrowth =
     isSingleBlock && !singleStrongGrowth && meaningfulOutputGain && finalPosition >= 0.42 && !clearDecline;
 
+  const weightedSingleModerateGrowth =
+    isSingleBlock &&
+    hasWeightData &&
+    hasWeightIncrease &&
+    recoveredToBaseline &&
+    !singleStrongGrowth &&
+    !clearDecline;
+
   const risingWeightWithMaintainedOutput =
     !isSingleBlock &&
     hasWeightIncrease &&
@@ -2131,9 +2141,10 @@ const generateWorkoutSummaryInsightFromSeries = (
   const pairedStrongGrowth =
     !isSingleBlock &&
     (
-      (risingWeightWithMaintainedOutput && (higherOutput || highPlateau || repeatedWeightIncrease || isControlledConstraint)) ||
-      (strongNetOutputGain && (finishesNearHigh || stepUpAndHold || maxUpwardRun >= 2)) ||
-      (hasWeightIncrease && higherOutput && outputIncreaseCount >= 1)
+      (risingWeightWithMaintainedOutput && strongWeightIncreaseBias && (higherOutput || highPlateau || isControlledConstraint || stepUpAndHold)) ||
+      (risingWeightWithMaintainedOutput && repeatedWeightIncrease && higherOutput && highPlateau) ||
+      (hugeNetOutputGain && (finishesNearHigh || stepUpAndHold || maxUpwardRun >= 2)) ||
+      (strongNetOutputGain && repeatedWeightIncrease && (finishesNearHigh || highPlateau || stepUpAndHold))
     );
 
   const pairedModerateGrowth =
@@ -2148,7 +2159,6 @@ const generateWorkoutSummaryInsightFromSeries = (
     !clearDecline;
 
   const fatigueTradeoff =
-    !isSingleBlock &&
     hasWeightIncrease &&
     outputChange <= -Math.max(2, outputScale * (isControlledConstraint ? 0.25 : 0.18)) &&
     !maintainedOutput &&
@@ -2183,6 +2193,13 @@ const generateWorkoutSummaryInsightFromSeries = (
     summary = risingWeightWithMaintainedOutput
       ? "Weight increased while sets were maintained or improved, which points to strong growth even when the graph is not a simple upward line."
       : "Sets moved into a higher range and held enough of that gain to point to strong growth.";
+  } else if (weightedSingleModerateGrowth) {
+    headline = "Moderate Growth";
+    trend = "Moderate weighted single-block growth";
+    primarySymbol = "◼";
+    primaryTitle = "Weight context";
+    primaryText = "Weight increased while output recovered or stayed close to its starting level.";
+    summary = "Weight increased while output recovered or stayed near the starting level, which points to moderate growth rather than a neutral read.";
   } else if (singleModerateGrowth) {
     headline = "Moderate Growth";
     trend = "Moderate single-metric growth";
@@ -2470,7 +2487,6 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     limitation: "Generated from all visible series in this block graph. The highlighted exercise changes the visual layering only.",
   };
 };
-
 const sortWorkoutSummaryFactorsByImpact = (factors: WorkoutSummaryFactor[]) =>
   [...factors].sort((a, b) => Number(b.impact || 0) - Number(a.impact || 0));
 
