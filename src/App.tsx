@@ -2412,7 +2412,8 @@ const showsLateDifficultyCarry = pairedStats.some((stats) => {
   const consecutiveWeightRun = getWorkoutSummaryMaxUpwardRun(stats.weights);
 
   return (
-    consecutiveWeightRun >= 2 && stats.lastOutput >= stats.firstOutput - 1;
+    consecutiveWeightRun >= 2 && stats.lastOutput >= stats.firstOutput - 1
+  );
 });
 
   const noMeaningfulDecline = pairedStats.every((stats) => {
