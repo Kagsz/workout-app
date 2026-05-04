@@ -2164,9 +2164,9 @@ const generateWorkoutSummaryInsightFromSeries = (
     !maintainedOutput &&
     !recoveryDominance;
 
-  let headline = "Neutral";
-  let summary = "Output stays close to its starting level, so this reads as a neutral trend for now.";
-  let trend = "Neutral";
+  let headline = "Steady Output";
+  let summary = "Output stays close to its starting level, so this reads as steady output for now.";
+  let trend = "Steady Output";
   let reportAccuracy: ReportAccuracy = hasDateData ? "High" : "Moderate";
   let accuracyReason = hasDateData ? "real data" : "real data · date data limited";
   let primarySymbol = "→";
@@ -2219,8 +2219,8 @@ const generateWorkoutSummaryInsightFromSeries = (
       ? "Weight increased while sets stayed near their starting level, which points to moderate growth."
       : "Sets finish above the starting point, though the pattern is mixed enough to keep this in moderate growth.";
   } else if (fatigueTradeoff) {
-    headline = "Neutral";
-    trend = "Mixed";
+    headline = "Steady Output";
+    trend = "Mixed / steady";
     primarySymbol = "↔";
     primaryTitle = "Mixed signal";
     primaryText = "Weight increased while completed sets dropped, creating a mixed pattern.";
@@ -2239,8 +2239,8 @@ const generateWorkoutSummaryInsightFromSeries = (
     reportAccuracy = reportAccuracy === "High" ? "Moderate" : reportAccuracy;
     accuracyReason = `${accuracyReason} · decline pattern`;
   } else if (recoveryDominance || stepUpAndHold) {
-    headline = "Neutral";
-    trend = "Mixed";
+    headline = "Steady Output";
+    trend = "Mixed / steady";
     primarySymbol = recoveryDominance ? "↺" : "→";
     primaryTitle = recoveryDominance ? "Recovery signal" : "Higher hold";
     primaryText = recoveryDominance
@@ -2367,7 +2367,7 @@ const getWorkoutSummarySentenceForSeries = (series: GraphSeries, insight: Workou
     return `${name} is still building a baseline`;
   }
 
-  return `${name} is mostly neutral`;
+  return `${name} shows steady output`;
 };
 const generateWorkoutSummaryInsightFromSeriesSet = (
   seriesList: GraphSeries[],
@@ -2405,16 +2405,13 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     return consecutiveWeightRun >= 3 && outputHeld;
   });
   const showsContinuationAfterRecovery = pairedStats.some((stats) => {
-  return stats.lateAverage > stats.earlyAverage;
-});
+    return stats.lateAverage > stats.earlyAverage;
+  });
 
-const showsLateDifficultyCarry = pairedStats.some((stats) => {
-  const consecutiveWeightRun = getWorkoutSummaryMaxUpwardRun(stats.weights);
-
-  return (
-    consecutiveWeightRun >= 2 && stats.lastOutput >= stats.firstOutput - 1
-  );
-});
+  const showsLateDifficultyCarry = pairedStats.some((stats) => {
+    const consecutiveWeightRun = getWorkoutSummaryMaxUpwardRun(stats.weights);
+    return consecutiveWeightRun >= 2 && stats.lastOutput >= stats.firstOutput - 1;
+  });
 
   const noMeaningfulDecline = pairedStats.every((stats) => {
     return stats.lastOutput >= stats.firstOutput - 1 && stats.lateAverage >= stats.earlyAverage - 1;
@@ -2428,27 +2425,33 @@ const showsLateDifficultyCarry = pairedStats.some((stats) => {
     return stats.maxOutput >= stats.firstOutput + 2 && stats.lastOutput >= stats.maxOutput - 1;
   });
 
-const pairedCleanStrongTier =
-  bothStrong ||
-  (
-    noMeaningfulDecline &&
-    (
-      // Core strong signals (KEEP THESE)
-      pairedSustainedOutputGain ||
-      pairedPeakRetained ||
+  const hasRecoveryOnlyPattern = pairedStats.some((stats) => {
+    const earlyDip = stats.minOutput < stats.firstOutput;
+    const recoveredButFlat =
+      stats.lastOutput >= stats.firstOutput &&
+      stats.lateAverage <= stats.maxOutput - 0.25;
 
-      // Exceptional progression (NOW WITH LIMITER)
+    return earlyDip && recoveredButFlat && stats.outputIncreaseCount <= 2;
+  });
+
+  const pairedCleanStrongTier =
+    bothStrong ||
+    (
+      noMeaningfulDecline &&
+      !hasRecoveryOnlyPattern &&
       (
-        hasExceptionalProgression &&
+        pairedSustainedOutputGain ||
+        pairedPeakRetained ||
         (
-          showsContinuationAfterRecovery ||
-          showsLateDifficultyCarry
+          hasExceptionalProgression &&
+          (
+            showsContinuationAfterRecovery ||
+            showsLateDifficultyCarry
+          )
         )
       )
-    )
-  );
-
-  let headline = "Neutral";
+    );
+  let headline = "Steady Output";
   if (pairedCleanStrongTier) {
     headline = "Strong Growth";
   } else if (bothModerate || anyStrong || positiveCount > 0) {
@@ -2478,7 +2481,7 @@ const pairedCleanStrongTier =
   } else if (headline === "Contextual Decline") {
     summary += " The main signal trends down enough to watch with context.";
   } else {
-    summary += " The block does not show a strong direction yet.";
+    summary += " The block shows steady output without a clear gain or loss trend.";
   }
 
   const reportAccuracy: ReportAccuracy = childInsights.some(({ insight }) => insight.reportAccuracy === "Low")
@@ -2534,6 +2537,7 @@ const getWorkoutSummarySecondaryFactors = (insight: WorkoutSummaryInsight) =>
 const getWorkoutSummaryTone = (insight: WorkoutSummaryInsight): SummaryTone => {
   if (insight.headline.includes("Strong Growth")) return "positive";
   if (insight.headline.includes("Moderate Growth")) return "positiveContext";
+  if (insight.headline.includes("Steady Output")) return "steady";
   if (["Positive Progress Under Weight", "Emerging Growth", "Sustained Capacity"].includes(insight.headline)) return "positiveContext";
   if (insight.headline.includes("Baseline")) return "baseline";
   if (["Contextual Decline", "Temporary Decline", "Fatigue Impact"].includes(insight.headline)) return "contextual";
