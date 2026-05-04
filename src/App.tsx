@@ -2441,15 +2441,6 @@ const hasWeakLateSpike = pairedStats.some((stats) => {
 
   return lateSpike && notSustained;
 });
-  const hasRecoveryOnlyPattern = pairedStats.some((stats) => {
-    const earlyDip = stats.minOutput < stats.firstOutput;
-    const recoveredButFlat =
-      stats.lastOutput >= stats.firstOutput &&
-      stats.lateAverage <= stats.maxOutput - 0.25;
-
-    return earlyDip && recoveredButFlat && stats.outputIncreaseCount <= 2;
-  });
-
   const pairedCleanStrongTier =
     bothStrong ||
     (
