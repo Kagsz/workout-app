@@ -2424,7 +2424,23 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
   const pairedPeakRetained = pairedStats.every((stats) => {
     return stats.maxOutput >= stats.firstOutput + 2 && stats.lastOutput >= stats.maxOutput - 1;
   });
+const hasRecoveryOnlyPattern = pairedStats.some((stats) => {
+  const earlyDip = stats.minOutput < stats.firstOutput;
 
+  const recoveredButFlat =
+    stats.lastOutput >= stats.firstOutput &&
+    stats.lateAverage <= stats.maxOutput - 0.25;
+
+  return earlyDip && recoveredButFlat && stats.outputIncreaseCount <= 2;
+});
+const hasWeakLateSpike = pairedStats.some((stats) => {
+  const lateSpike = stats.maxOutput === stats.lastOutput;
+
+  const notSustained =
+    stats.lateAverage < stats.maxOutput - 0.5;
+
+  return lateSpike && notSustained;
+});
   const hasRecoveryOnlyPattern = pairedStats.some((stats) => {
     const earlyDip = stats.minOutput < stats.firstOutput;
     const recoveredButFlat =
@@ -2439,6 +2455,7 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     (
       noMeaningfulDecline &&
       !hasRecoveryOnlyPattern &&
+	  !hasWeakLateSpike &&
       (
         pairedSustainedOutputGain ||
         pairedPeakRetained ||
