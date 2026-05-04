@@ -2219,14 +2219,16 @@ const generateWorkoutSummaryInsightFromSeries = (
       ? "Weight increased while sets stayed near their starting level, which points to moderate growth."
       : "Sets finish above the starting point, though the pattern is mixed enough to keep this in moderate growth.";
   } else if (fatigueTradeoff) {
-  headline = "Neutral";
-  trend = "Mixed";
-  primarySymbol = "↔";
-  primaryTitle = "Mixed signal";
-  primaryText = "Weight increased while completed sets dropped, so the result sits between growth and decline.";
-  summary = "The graph shows mixed signals: weight moved up, but completed sets softened. That keeps this from reading as clear growth or clear decline.";
-  reportAccuracy = reportAccuracy === "High" ? "Moderate" : reportAccuracy;
-  accuracyReason = `${accuracyReason} · mixed signal`;
+    headline = "Neutral";
+    trend = "Mixed";
+    primarySymbol = "↔";
+    primaryTitle = "Mixed signal";
+    primaryText = "Weight increased while completed sets dropped, creating a mixed pattern.";
+    summary = isControlledConstraint
+      ? "Under a controlled variation, weight increased while completed sets dipped, which reads as mixed rather than decline."
+      : "Weight increased while completed sets dipped, which reflects a mixed pattern rather than clear growth or decline.";
+    reportAccuracy = reportAccuracy === "High" ? "Moderate" : reportAccuracy;
+    accuracyReason = `${accuracyReason} · mixed signal`;
   } else if (clearDecline) {
     headline = "Contextual Decline";
     trend = "Downward";
@@ -2367,43 +2369,117 @@ const getWorkoutSummarySentenceForSeries = (series: GraphSeries, insight: Workou
 
   return `${name} is mostly neutral`;
 };
+const generateWorkoutSummaryInsightFromSeriesSet = (
+  seriesList: GraphSeries[],
+  contextLabel = "this graph"
+): WorkoutSummaryInsight => {
+  const usableSeries = seriesList.filter((series) => series.points.length > 0);
 
-// --- NEW STRONG LOGIC ---
-const hasExceptionalProgression = pairedStats.some((stats) => {
-  return (
-    stats.consecutiveWeightIncreases >= 3 &&
-    stats.lastOutput >= stats.firstOutput &&
-    stats.lastOutput >= stats.earlyAverage // confirms no soft drop
-  );
-});
+  if (!usableSeries.length) {
+    return buildInsufficientWorkoutSummaryInsight(contextLabel);
+  }
 
-const noMeaningfulDecline = pairedStats.every((stats) => {
-  return stats.lastOutput >= stats.firstOutput - 1;
-});
+  if (usableSeries.length === 1) {
+    return generateWorkoutSummaryInsightFromSeries(usableSeries[0], contextLabel);
+  }
 
-// Strong only if BOTH strong OR exceptional carry
-const bothStrong = strongCount === childInsights.length;
-const anyStrong = strongCount >= 1;
-const bothModerate = moderateCount === childInsights.length;
+  const childInsights = usableSeries.map((series) => ({
+    series,
+    insight: generateWorkoutSummaryInsightFromSeries(series, series.exerciseName || contextLabel),
+  }));
 
-// CLEAN STRONG TIER
-const pairedCleanStrongTier =
-  (bothStrong) ||
-  (hasExceptionalProgression && noMeaningfulDecline);
+  const pairedStats = usableSeries.map((series) => getWorkoutSummaryTrendStats(series.points));
+  const strongCount = childInsights.filter(({ insight }) => insight.headline.includes("Strong Growth")).length;
+  const moderateCount = childInsights.filter(({ insight }) => insight.headline.includes("Moderate Growth")).length;
+  const positiveCount = strongCount + moderateCount;
+  const contextualCount = childInsights.filter(({ insight }) => insight.headline.includes("Contextual")).length;
+  const baselineCount = childInsights.filter(({ insight }) => insight.headline.includes("Baseline")).length;
 
-// --- NEW HEADLINE RESOLUTION ---
+  const bothStrong = strongCount === childInsights.length;
+  const anyStrong = strongCount >= 1;
+  const bothModerate = moderateCount === childInsights.length;
 
-let headline = "Neutral";
+  const hasExceptionalProgression = pairedStats.some((stats) => {
+    const consecutiveWeightRun = getWorkoutSummaryMaxUpwardRun(stats.weights);
+    const outputHeld = stats.lastOutput >= stats.firstOutput && stats.lateAverage >= stats.earlyAverage - 0.25;
+    return consecutiveWeightRun >= 3 && outputHeld;
+  });
 
-if (pairedCleanStrongTier) {
-  headline = "Strong Growth";
-} else if (bothModerate || anyStrong || positiveCount > 0) {
-  headline = "Moderate Growth";
-} else if (contextualCount > 0) {
-  headline = "Contextual Decline";
-} else if (baselineCount === childInsights.length) {
-  headline = "Baseline Established";
-}
+  const noMeaningfulDecline = pairedStats.every((stats) => {
+    return stats.lastOutput >= stats.firstOutput - 1 && stats.lateAverage >= stats.earlyAverage - 1;
+  });
+
+  const pairedCleanStrongTier = bothStrong || (hasExceptionalProgression && noMeaningfulDecline);
+
+  let headline = "Neutral";
+  if (pairedCleanStrongTier) {
+    headline = "Strong Growth";
+  } else if (bothModerate || anyStrong || positiveCount > 0) {
+    headline = "Moderate Growth";
+  } else if (contextualCount > 0) {
+    headline = "Contextual Decline";
+  } else if (baselineCount === childInsights.length) {
+    headline = "Baseline Established";
+  }
+
+  const sortedByImpact = childInsights
+    .slice()
+    .sort((a, b) => getWorkoutSummaryHeadlineRank(b.insight.headline) - getWorkoutSummaryHeadlineRank(a.insight.headline));
+  const strongestInsight = sortedByImpact[0]?.insight;
+
+  const summaryPieces = childInsights.map(({ series, insight }) => getWorkoutSummarySentenceForSeries(series, insight));
+  let summary = `Across this block, ${summaryPieces.join(" and ")}.`;
+
+  if (headline === "Strong Growth") {
+    summary += hasExceptionalProgression && !bothStrong
+      ? " Together, the block points to strong growth because one exercise shows exceptional progression while the other line avoids a meaningful decline."
+      : " Together, the block points to strong growth because both visible exercise lines show strong positive signals.";
+  } else if (headline === "Moderate Growth") {
+    summary += " The block is positive overall, but the signals are mixed enough to keep it in moderate growth.";
+  } else if (headline === "Contextual Decline") {
+    summary += " The main signal trends down enough to watch with context.";
+  } else {
+    summary += " The block does not show a strong direction yet.";
+  }
+
+  const reportAccuracy: ReportAccuracy = childInsights.some(({ insight }) => insight.reportAccuracy === "Low")
+    ? "Low"
+    : childInsights.some(({ insight }) => insight.reportAccuracy === "Moderate")
+      ? "Moderate"
+      : "High";
+
+  const factors: WorkoutSummaryFactor[] = childInsights
+    .sort((a, b) => getWorkoutSummarySeverityRank(b.insight.headline) - getWorkoutSummarySeverityRank(a.insight.headline))
+    .map(({ series, insight }, index) => ({
+      symbol: insight.headline.includes("Strong Growth")
+        ? "★"
+        : insight.headline.includes("Moderate Growth")
+          ? "↗"
+          : insight.headline.includes("Contextual")
+            ? "↘"
+            : "→",
+      title: series.exerciseName || `Exercise ${index + 1}`,
+      text: `${insight.headline}: ${insight.summary}`,
+      impact: index === 0 ? 0.36 : 0.28,
+    }))
+    .slice(0, 2);
+
+  return {
+    id: `generated-block-${usableSeries.map((series) => series.exerciseId).join("-")}-${headline.replace(/\s+/g, "-").toLowerCase()}`,
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline,
+    summary,
+    achievement: strongestInsight?.achievement,
+    reportAccuracy,
+    accuracyReason: usableSeries.length > 1 ? "real block data · paired graph" : "real data",
+    trend: "Generated Block",
+    factors: factors.length
+      ? factors
+      : [{ symbol: "▣", title: "Block pattern", text: "The visible series were included in this summary.", impact: 1 }],
+    limitation: "Generated from all visible series in this block graph. The highlighted exercise changes the visual layering only.",
+  };
+};
 const sortWorkoutSummaryFactorsByImpact = (factors: WorkoutSummaryFactor[]) =>
   [...factors].sort((a, b) => Number(b.impact || 0) - Number(a.impact || 0));
 
@@ -2419,8 +2495,9 @@ const getWorkoutSummarySecondaryFactors = (insight: WorkoutSummaryInsight) =>
 const getWorkoutSummaryTone = (insight: WorkoutSummaryInsight): SummaryTone => {
   if (insight.headline.includes("Strong Growth")) return "positive";
   if (insight.headline.includes("Moderate Growth")) return "positiveContext";
+  if (["Positive Progress Under Weight", "Emerging Growth", "Sustained Capacity"].includes(insight.headline)) return "positiveContext";
   if (insight.headline.includes("Baseline")) return "baseline";
-  if (insight.headline.includes("Contextual")) return "contextual";
+  if (["Contextual Decline", "Temporary Decline", "Fatigue Impact"].includes(insight.headline)) return "contextual";
   return "neutral";
 };
 
@@ -2428,9 +2505,9 @@ const getWorkoutSummaryToneDotClass = (tone: SummaryTone) => {
   if (tone === "positive") return "bg-emerald-200 ring-emerald-100";
   if (tone === "positiveContext") return "bg-teal-200 ring-teal-100";
   if (tone === "steady") return "bg-sky-200 ring-sky-100";
-  if (tone === "neutral") return "bg-violet-200 ring-violet-100";
   if (tone === "baseline") return "bg-sky-200 ring-sky-100";
   if (tone === "contextual") return "bg-amber-200 ring-amber-100";
+  if (tone === "neutral") return "bg-violet-200 ring-violet-100";
   return "bg-slate-400 ring-slate-300";
 };
 
@@ -2454,6 +2531,11 @@ const workoutSummaryClosingStatementPools: Record<SummaryTone | "lowAccuracy", s
     "This pattern is best understood within the broader context of your training.",
     "Short-term variation does not define the full picture of progress.",
     "This report points to context worth watching rather than a fixed conclusion.",
+  ],
+  tradeoff: [
+    "This reflects a balance within your training rather than a setback.",
+    "This pattern represents a trade-off within the session rather than a decline.",
+    "The data points to a give-and-take pattern rather than a simple regression.",
   ],
   baseline: [
     "As more sessions are recorded, clearer patterns will emerge.",
