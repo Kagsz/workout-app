@@ -2409,7 +2409,19 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     return stats.lastOutput >= stats.firstOutput - 1 && stats.lateAverage >= stats.earlyAverage - 1;
   });
 
-  const pairedCleanStrongTier = bothStrong || (hasExceptionalProgression && noMeaningfulDecline);
+  const pairedSustainedOutputGain = pairedStats.every((stats) => {
+    return stats.lastOutput >= stats.firstOutput + 1 && stats.lateAverage >= stats.earlyAverage + 0.5;
+  });
+
+  const pairedPeakRetained = pairedStats.every((stats) => {
+    return stats.maxOutput >= stats.firstOutput + 2 && stats.lastOutput >= stats.maxOutput - 1;
+  });
+
+  const pairedCleanStrongTier =
+    bothStrong ||
+    (hasExceptionalProgression && noMeaningfulDecline) ||
+    (pairedSustainedOutputGain && noMeaningfulDecline) ||
+    (pairedPeakRetained && pairedSustainedOutputGain);
 
   let headline = "Neutral";
   if (pairedCleanStrongTier) {
@@ -2433,7 +2445,9 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
   if (headline === "Strong Growth") {
     summary += hasExceptionalProgression && !bothStrong
       ? " Together, the block points to strong growth because one exercise shows exceptional progression while the other line avoids a meaningful decline."
-      : " Together, the block points to strong growth because both visible exercise lines show strong positive signals.";
+      : pairedSustainedOutputGain
+        ? " Together, the block points to strong growth because both exercise lines finish in a higher sustained range than where they began."
+        : " Together, the block points to strong growth because both visible exercise lines show strong positive signals.";
   } else if (headline === "Moderate Growth") {
     summary += " The block is positive overall, but the signals are mixed enough to keep it in moderate growth.";
   } else if (headline === "Contextual Decline") {
