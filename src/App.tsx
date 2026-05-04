@@ -2404,6 +2404,16 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     const outputHeld = stats.lastOutput >= stats.firstOutput && stats.lateAverage >= stats.earlyAverage - 0.25;
     return consecutiveWeightRun >= 3 && outputHeld;
   });
+  const showsContinuationAfterRecovery = pairedStats.some((stats) => {
+  return stats.lateAverage > stats.earlyAverage;
+});
+
+const showsLateDifficultyCarry = pairedStats.some((stats) => {
+  const consecutiveWeightRun = getWorkoutSummaryMaxUpwardRun(stats.weights);
+
+  return (
+    consecutiveWeightRun >= 2 && stats.lastOutput >= stats.firstOutput - 1;
+});
 
   const noMeaningfulDecline = pairedStats.every((stats) => {
     return stats.lastOutput >= stats.firstOutput - 1 && stats.lateAverage >= stats.earlyAverage - 1;
@@ -2417,11 +2427,25 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     return stats.maxOutput >= stats.firstOutput + 2 && stats.lastOutput >= stats.maxOutput - 1;
   });
 
-  const pairedCleanStrongTier =
-    bothStrong ||
-    (hasExceptionalProgression && noMeaningfulDecline) ||
-    (pairedSustainedOutputGain && noMeaningfulDecline) ||
-    (pairedPeakRetained && pairedSustainedOutputGain);
+const pairedCleanStrongTier =
+  bothStrong ||
+  (
+    noMeaningfulDecline &&
+    (
+      // Core strong signals (KEEP THESE)
+      pairedSustainedOutputGain ||
+      pairedPeakRetained ||
+
+      // Exceptional progression (NOW WITH LIMITER)
+      (
+        hasExceptionalProgression &&
+        (
+          showsContinuationAfterRecovery ||
+          showsLateDifficultyCarry
+        )
+      )
+    )
+  );
 
   let headline = "Neutral";
   if (pairedCleanStrongTier) {
