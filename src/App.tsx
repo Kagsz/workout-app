@@ -1929,7 +1929,12 @@ type WorkoutSummarySignalTag =
   | "controlled_major_set_gain"
   | "strong_finish"
   | "volatile_without_resolution"
-  | "spike_not_retained";
+  | "spike_not_retained"
+  | "early_gain_then_plateau"
+  | "late_spike_without_support"
+  | "plateau_after_progression"
+  | "no_output_progression_under_load"
+  | "load_drop_observed";
 
 type WorkoutSummaryTrendStats = {
   outputs: number[];
@@ -2133,6 +2138,18 @@ const hasWorkoutSummaryRecoveryAfterLoadDrop = (stats: WorkoutSummaryTrendStats)
   return false;
 };
 
+const hasWorkoutSummaryWeightDrop = (stats: WorkoutSummaryTrendStats) => {
+  for (let index = 1; index < stats.weights.length; index += 1) {
+    if (stats.weights[index] > 0 && stats.weights[index - 1] > 0 && stats.weights[index] < stats.weights[index - 1]) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const getWorkoutSummaryPreviousOutput = (stats: WorkoutSummaryTrendStats) =>
+  stats.outputs.length >= 2 ? stats.outputs[stats.outputs.length - 2] : stats.lastOutput;
+
 const getWorkoutSummaryTrendLabelFromScorecard = (scorecard: WorkoutSummaryScorecard) => {
   if (scorecard.tags.includes("no_signal")) return "Neutral";
   if (scorecard.declineScore >= 4) return "Downward";
@@ -2172,6 +2189,33 @@ const buildWorkoutSummaryScorecard = (
   const volatileWithoutResolution = stats.outputRange >= 3 && !meaningfulFinishGain && !lateAverageUp;
   const controlledMajorSetGain = controlled && stats.outputDelta >= 3;
   const majorSetGain = stats.outputDelta >= 3;
+  const previousOutput = getWorkoutSummaryPreviousOutput(stats);
+  const loadDropObserved = mode === "paired" && hasWorkoutSummaryWeightDrop(stats);
+  const finalPointIsPeak = stats.lastOutput >= stats.maxOutput - 0.1;
+  const finalSpikeWithoutSupport =
+    finalPointIsPeak &&
+    stats.outputs.length >= 5 &&
+    stats.lastOutput - previousOutput >= Math.max(2, stats.outputRange * 0.35) &&
+    stats.lateAverage <= stats.lastOutput - 1.25 &&
+    stats.maxOutputRun < 3;
+  const earlyGainThenPlateau =
+    mode === "single" &&
+    meaningfulFinishGain &&
+    stats.outputRange <= 1.5 &&
+    stats.maxOutput <= stats.lastOutput + 0.25 &&
+    stats.lateAverage <= stats.maxOutput - 0.1;
+  const noOutputProgressionUnderLoad =
+    mode === "paired" &&
+    hasWeightIncrease &&
+    stats.outputDelta < 1 &&
+    stats.averageDelta < 0.5;
+  const plateauAfterProgression =
+    mode === "paired" &&
+    hasWeightIncrease &&
+    maintainedUnderLoad &&
+    stats.outputDelta <= 1 &&
+    stats.averageDelta <= 0.75 &&
+    stats.outputRange <= 1.5;
 
   if (noSignal) addWorkoutSummaryTag(tags, "no_signal");
   if (meaningfulFinishGain) addWorkoutSummaryTag(tags, "finish_above_start");
@@ -2190,6 +2234,11 @@ const buildWorkoutSummaryScorecard = (
   if (strongFinishGain) addWorkoutSummaryTag(tags, "strong_finish");
   if (volatileWithoutResolution) addWorkoutSummaryTag(tags, "volatile_without_resolution");
   if (spikeNotRetained) addWorkoutSummaryTag(tags, "spike_not_retained");
+  if (earlyGainThenPlateau) addWorkoutSummaryTag(tags, "early_gain_then_plateau");
+  if (finalSpikeWithoutSupport) addWorkoutSummaryTag(tags, "late_spike_without_support");
+  if (plateauAfterProgression) addWorkoutSummaryTag(tags, "plateau_after_progression");
+  if (noOutputProgressionUnderLoad) addWorkoutSummaryTag(tags, "no_output_progression_under_load");
+  if (loadDropObserved) addWorkoutSummaryTag(tags, "load_drop_observed");
 
   if (meaningfulFinishGain) growthScore += mode === "single" ? 2 : 2;
   if (lateAverageUp) growthScore += mode === "single" ? 3 : 2;
@@ -2209,6 +2258,12 @@ const buildWorkoutSummaryScorecard = (
   if (spikeNotRetained) riskScore += 2;
   if (volatileWithoutResolution) riskScore += 2;
   if (unrecoveredTradeoff) riskScore += 3;
+  if (earlyGainThenPlateau) riskScore += 2;
+  if (finalSpikeWithoutSupport) riskScore += 3;
+  if (plateauAfterProgression) riskScore += 2;
+  if (noOutputProgressionUnderLoad && !controlled) riskScore += 2;
+  if (noOutputProgressionUnderLoad && controlled) riskScore += 1;
+  if (loadDropObserved) riskScore += 2;
   if (stats.hasSignificantGap && stats.outputDelta < 0) riskScore += 1;
 
   if (finishBelowStart) declineScore += 2;
@@ -2227,16 +2282,29 @@ const buildWorkoutSummaryScorecard = (
   } else if (declineScore >= 5 && finalScore < 2) {
     label = "Contextual Decline";
   } else if (mode === "single") {
-    if (finalScore >= 7 && !volatileWithoutResolution) {
+    const singleStrongEligible =
+      !volatileWithoutResolution &&
+      !finalSpikeWithoutSupport &&
+      !earlyGainThenPlateau &&
+      (lateAverageUp || stats.maxOutputRun >= 3 || (strongFinishGain && stats.peakRetentionGap <= 1));
+
+    if (singleStrongEligible && finalScore >= 8) {
       label = "Strong Growth";
-    } else if (finalScore >= 3) {
+    } else if (finalScore >= 3 || meaningfulFinishGain) {
       label = "Moderate Growth";
     } else {
       label = "Neutral";
     }
   } else {
-    const canReachStrong = exceptionalScore >= 1 || (growthScore >= 8 && riskScore <= 1);
-    if (canReachStrong && finalScore >= 6) {
+    const strongCap =
+      finalSpikeWithoutSupport ||
+      plateauAfterProgression ||
+      noOutputProgressionUnderLoad ||
+      loadDropObserved ||
+      (lateAverageDown && stats.outputDelta <= 0);
+    const canReachStrong = !strongCap && (exceptionalScore >= 1 || (growthScore >= 9 && riskScore <= 1));
+
+    if (canReachStrong && finalScore >= 7) {
       label = "Strong Growth";
     } else if (finalScore >= 3 || (hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 1)) {
       label = "Moderate Growth";
@@ -2294,6 +2362,11 @@ const getWorkoutSummaryFactorText = (tag: WorkoutSummarySignalTag) => {
     strong_finish: { symbol: "↗", title: "Strong finish", text: "The graph closes meaningfully above the starting level.", impact: 0.32 },
     volatile_without_resolution: { symbol: "~", title: "Unresolved volatility", text: "The graph moves sharply but does not resolve into a higher range.", impact: 0.25 },
     spike_not_retained: { symbol: "△", title: "Unretained spike", text: "A high point appears, but the graph does not retain that level.", impact: 0.24 },
+    early_gain_then_plateau: { symbol: "→", title: "Early gain then plateau", text: "The graph improves early, then settles without continued progression.", impact: 0.22 },
+    late_spike_without_support: { symbol: "↗", title: "Late spike", text: "The graph finishes sharply higher, but the spike is not supported by enough surrounding sessions.", impact: 0.22 },
+    plateau_after_progression: { symbol: "→", title: "Progression plateau", text: "Difficulty increased, but output settled into a plateau rather than continuing upward.", impact: 0.24 },
+    no_output_progression_under_load: { symbol: "▣", title: "Load-led progress", text: "Difficulty increased while output stayed mostly flat.", impact: 0.22 },
+    load_drop_observed: { symbol: "↘", title: "Load adjustment", text: "A later weight reduction weakens the continuous-progression signal.", impact: 0.2 },
   };
 
   return copy[tag];
@@ -2446,11 +2519,22 @@ const combineWorkoutSummaryScorecards = (
   const anyExceptional = exceptionalScore >= 1;
   const noUnresolvedTradeoff = !tags.includes("unrecovered_tradeoff");
   const noHardDecline = !bothContextual && declineScore < 7;
+  const hasStrongCap =
+    tags.includes("plateau_after_progression") ||
+    tags.includes("late_spike_without_support") ||
+    tags.includes("no_output_progression_under_load") ||
+    tags.includes("load_drop_observed") ||
+    items.some((item) =>
+      item.scorecard.tags.includes("finish_below_start") || item.scorecard.tags.includes("late_average_below_early")
+    );
 
   let label: WorkoutSummaryLabel = "Neutral";
   if (bothContextual || (contextualCount > 0 && positiveCount === 0)) {
     label = "Contextual Decline";
-  } else if (bothStrong || (anyExceptional && finalScore >= 6 && noHardDecline) || (growthScore >= 10 && riskScore <= 2 && noUnresolvedTradeoff)) {
+  } else if (
+    !hasStrongCap &&
+    (bothStrong || (anyExceptional && finalScore >= 7 && noHardDecline) || (growthScore >= 12 && riskScore <= 2 && noUnresolvedTradeoff))
+  ) {
     label = "Strong Growth";
   } else if (positiveCount > 0 || finalScore >= 3) {
     label = "Moderate Growth";
@@ -3514,7 +3598,6 @@ export default function App() {
       setScreen("members");
     }
   };
-
   const archiveMember = (memberId: string) => {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
     if (selectedMemberId === memberId) {
