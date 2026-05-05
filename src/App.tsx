@@ -3514,6 +3514,15 @@ export default function App() {
       setScreen("members");
     }
   };
+
+  const archiveMember = (memberId: string) => {
+    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
+    if (selectedMemberId === memberId) {
+      setSelectedMemberId(null);
+      setScreen("members");
+    }
+  };
+
   const restoreMember = (memberId: string) => {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
   };
