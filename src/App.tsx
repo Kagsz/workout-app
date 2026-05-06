@@ -1934,7 +1934,9 @@ type WorkoutSummarySignalTag =
   | "late_spike_without_support"
   | "plateau_after_progression"
   | "no_output_progression_under_load"
-  | "load_drop_observed";
+  | "load_drop_observed"
+  | "retained_meaningful_improvement"
+  | "synchronized_plateau_breakthrough";
 
 type WorkoutSummaryTrendStats = {
   outputs: number[];
@@ -1971,10 +1973,6 @@ type WorkoutSummaryScorecard = {
   riskScore: number;
   declineScore: number;
   finalScore: number;
-  moderateHits: number;
-  moderateTotal: number;
-  hasOutstandingPerformance: boolean;
-  hasStrongCap: boolean;
   tags: WorkoutSummarySignalTag[];
   trend: string;
   primaryReason: string;
@@ -2162,26 +2160,6 @@ const getWorkoutSummaryTrendLabelFromScorecard = (scorecard: WorkoutSummaryScore
   return "Flat";
 };
 
-const hasWorkoutSummaryMaintainedOutputDuringWeightRun = (stats: WorkoutSummaryTrendStats, minRun = 4) => {
-  let currentRun = 0;
-
-  for (let index = 1; index < stats.weights.length; index += 1) {
-    const weightIncreased = stats.weights[index] > stats.weights[index - 1];
-    const outputMaintained = stats.outputs[index] >= stats.outputs[index - 1] - 0.5;
-
-    if (weightIncreased && outputMaintained) {
-      currentRun += 1;
-      if (currentRun >= minRun) return true;
-    } else if (weightIncreased) {
-      currentRun = 0;
-    } else if (stats.weights[index] < stats.weights[index - 1]) {
-      currentRun = 0;
-    }
-  }
-
-  return false;
-};
-
 const buildWorkoutSummaryScorecard = (
   series: GraphSeries,
   mode: WorkoutSummaryBlockMode
@@ -2189,6 +2167,10 @@ const buildWorkoutSummaryScorecard = (
   const stats = getWorkoutSummaryTrendStats(series.points);
   const controlled = isControlledWorkoutSummarySeries(series);
   const tags: WorkoutSummarySignalTag[] = [];
+  let growthScore = 0;
+  let exceptionalScore = 0;
+  let riskScore = 0;
+  let declineScore = 0;
 
   const hasWeightIncrease = stats.weightIncreaseCount > 0 || stats.weightDelta > 0;
   const noSignal = stats.outputs.length < 3 || (stats.outputRange <= 0.1 && !hasWeightIncrease);
@@ -2196,12 +2178,12 @@ const buildWorkoutSummaryScorecard = (
     ? stats.outputDelta >= 1 || (stats.outputDelta >= 0.75 && stats.averageDelta >= 0.5 && stats.firstOutput >= 8)
     : stats.outputDelta >= 1;
   const strongFinishGain = mode === "single"
-    ? stats.outputDelta >= 2 || (stats.outputDelta >= 1.25 && stats.averageDelta >= 1)
-    : stats.outputDelta >= 2;
-  const finishBelowStart = stats.outputDelta <= -1;
-  const lateAverageUp = stats.averageDelta >= (mode === "single" ? 0.75 : 0.5);
-  const lateAverageDown = stats.averageDelta <= -0.75;
-  const maintainedUnderLoad = hasWeightIncrease && stats.lastOutput >= stats.firstOutput - (controlled ? 1 : 0.5);
+    ? stats.outputDelta >= 3 || stats.averageDelta >= 2 || stats.percentChange >= 0.18
+    : stats.outputDelta >= 3 || stats.averageDelta >= 2;
+  const lateAverageUp = mode === "single" ? stats.averageDelta >= 1 : stats.averageDelta >= 0.5;
+  const lateAverageDown = mode === "single" ? stats.averageDelta <= -1 : stats.averageDelta <= -0.75;
+  const finishBelowStart = mode === "single" ? stats.outputDelta <= -1 : stats.outputDelta <= -1;
+  const maintainedUnderLoad = hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 0.25 && stats.lateAverage >= stats.earlyAverage - 0.5;
   const dropUnderLoad = hasWorkoutSummaryDropAfterLoadIncrease(stats);
   const recoveredAfterLoadDrop = hasWorkoutSummaryRecoveryAfterLoadDrop(stats);
   const unrecoveredTradeoff = dropUnderLoad && !recoveredAfterLoadDrop && stats.lastOutput < stats.firstOutput;
@@ -2236,10 +2218,6 @@ const buildWorkoutSummaryScorecard = (
     stats.outputDelta <= 1 &&
     stats.averageDelta <= 0.75 &&
     stats.outputRange <= 1.5;
-  const fourPlusMaintainedWeightRun =
-    mode === "paired" && hasWorkoutSummaryMaintainedOutputDuringWeightRun(stats, 4);
-  const densePositiveOutput =
-    meaningfulFinishGain && lateAverageUp && stats.peakRetentionGap <= 1.25 && stats.maxOutputRun >= 2;
 
   if (noSignal) addWorkoutSummaryTag(tags, "no_signal");
   if (meaningfulFinishGain) addWorkoutSummaryTag(tags, "finish_above_start");
@@ -2248,7 +2226,7 @@ const buildWorkoutSummaryScorecard = (
   if (lateAverageDown) addWorkoutSummaryTag(tags, "late_average_below_early");
   if (hasWeightIncrease) addWorkoutSummaryTag(tags, "weight_increased");
   if (stats.maxWeightRun >= 3) addWorkoutSummaryTag(tags, "three_weight_increases");
-  if (stats.maxWeightRun >= 4 || fourPlusMaintainedWeightRun) addWorkoutSummaryTag(tags, "four_plus_weight_increases");
+  if (stats.maxWeightRun >= 4) addWorkoutSummaryTag(tags, "four_plus_weight_increases");
   if (maintainedUnderLoad) addWorkoutSummaryTag(tags, "maintained_under_load");
   if (dropUnderLoad) addWorkoutSummaryTag(tags, "tradeoff_drop_under_load");
   if (recoveredAfterLoadDrop) addWorkoutSummaryTag(tags, "recovered_after_tradeoff");
@@ -2264,58 +2242,41 @@ const buildWorkoutSummaryScorecard = (
   if (noOutputProgressionUnderLoad) addWorkoutSummaryTag(tags, "no_output_progression_under_load");
   if (loadDropObserved) addWorkoutSummaryTag(tags, "load_drop_observed");
 
-  const moderateIdentifiers = [
-    meaningfulFinishGain,
-    lateAverageUp,
-    hasWeightIncrease,
-    maintainedUnderLoad,
-    recoveredAfterLoadDrop,
-    stats.maxWeightRun >= 3,
-    densePositiveOutput,
-    controlled && maintainedUnderLoad,
-  ];
-  const moderateHits = moderateIdentifiers.filter(Boolean).length;
-  const moderateTotal = moderateIdentifiers.length;
+  if (meaningfulFinishGain) growthScore += mode === "single" ? 2 : 2;
+  if (lateAverageUp) growthScore += mode === "single" ? 3 : 2;
+  if (hasWeightIncrease) growthScore += mode === "single" ? 1 : 1;
+  if (stats.maxWeightRun >= 3) growthScore += 2;
+  if (stats.maxWeightRun >= 4) {
+    growthScore += 3;
+    exceptionalScore += 1;
+  }
+  if (maintainedUnderLoad) growthScore += 2;
+  if (recoveredAfterLoadDrop) growthScore += 2;
+  if (strongFinishGain) growthScore += mode === "single" ? 4 : 3;
+  if (majorSetGain && mode === "paired") growthScore += 2;
+  if (controlledMajorSetGain && mode === "paired") exceptionalScore += 1;
+  if (stats.outputIncreaseCount >= 3 && stats.lastOutput >= stats.firstOutput) growthScore += 1;
 
-  const declineScore =
-    (finishBelowStart ? 2 : 0) +
-    (lateAverageDown ? 2 : 0) +
-    (!hasWeightIncrease && finishBelowStart && lateAverageDown ? 2 : 0) +
-    (unrecoveredTradeoff ? 1 : 0);
-  const riskScore =
-    (spikeNotRetained ? 2 : 0) +
-    (volatileWithoutResolution ? 2 : 0) +
-    (unrecoveredTradeoff ? 3 : 0) +
-    (earlyGainThenPlateau ? 2 : 0) +
-    (finalSpikeWithoutSupport ? 3 : 0) +
-    (plateauAfterProgression ? 2 : 0) +
-    (noOutputProgressionUnderLoad ? (controlled ? 1 : 2) : 0) +
-    (loadDropObserved ? 2 : 0);
-  const growthScore = moderateHits;
-  const exceptionalScore =
-    (fourPlusMaintainedWeightRun ? 1 : 0) +
-    (controlledMajorSetGain ? 1 : 0) +
-    (majorSetGain && lateAverageUp ? 1 : 0) +
-    (recoveredAfterLoadDrop && meaningfulFinishGain && lateAverageUp ? 1 : 0) +
-    (mode === "single" && strongFinishGain && lateAverageUp && stats.peakRetentionGap <= 1 ? 1 : 0);
+  if (spikeNotRetained) riskScore += 2;
+  if (volatileWithoutResolution) riskScore += 2;
+  if (unrecoveredTradeoff) riskScore += 3;
+  if (earlyGainThenPlateau) riskScore += 2;
+  if (finalSpikeWithoutSupport) riskScore += 3;
+  if (plateauAfterProgression) riskScore += 2;
+  if (noOutputProgressionUnderLoad && !controlled) riskScore += 2;
+  if (noOutputProgressionUnderLoad && controlled) riskScore += 1;
+  if (loadDropObserved) riskScore += 2;
+  if (stats.hasSignificantGap && stats.outputDelta < 0) riskScore += 1;
+
+  if (finishBelowStart) declineScore += 2;
+  if (lateAverageDown) declineScore += 2;
+  if (!hasWeightIncrease && finishBelowStart && lateAverageDown) declineScore += 2;
+  if (unrecoveredTradeoff) declineScore += 1;
+
+  // Tradeoff under added demand is not inherently negative. Only unresolved tradeoff becomes risk.
+  if (dropUnderLoad && recoveredAfterLoadDrop) riskScore = Math.max(0, riskScore - 1);
+
   const finalScore = growthScore + exceptionalScore * 2 - riskScore;
-
-  const hasStrongCap =
-    finalSpikeWithoutSupport ||
-    earlyGainThenPlateau ||
-    plateauAfterProgression ||
-    loadDropObserved ||
-    unrecoveredTradeoff ||
-    spikeNotRetained ||
-    (mode === "paired" && noOutputProgressionUnderLoad && !controlled) ||
-    (finishBelowStart && lateAverageDown);
-  const hasOutstandingPerformance =
-    fourPlusMaintainedWeightRun ||
-    controlledMajorSetGain ||
-    (mode === "paired" && majorSetGain && lateAverageUp && !spikeNotRetained) ||
-    (recoveredAfterLoadDrop && meaningfulFinishGain && lateAverageUp && !unrecoveredTradeoff) ||
-    (mode === "single" && strongFinishGain && lateAverageUp && stats.peakRetentionGap <= 1);
-
   let label: WorkoutSummaryLabel = "Neutral";
 
   if (noSignal) {
@@ -2323,31 +2284,31 @@ const buildWorkoutSummaryScorecard = (
   } else if (declineScore >= 5 && finalScore < 2) {
     label = "Contextual Decline";
   } else if (mode === "single") {
-    const strictSingleStrong =
-      !hasStrongCap &&
-      ((strongFinishGain && lateAverageUp && stats.peakRetentionGap <= 1) ||
-        (stats.maxOutputRun >= 3 && meaningfulFinishGain && lateAverageUp));
+    const singleStrongEligible =
+      !volatileWithoutResolution &&
+      !finalSpikeWithoutSupport &&
+      !earlyGainThenPlateau &&
+      (lateAverageUp || stats.maxOutputRun >= 3 || (strongFinishGain && stats.peakRetentionGap <= 1));
 
-    if (strictSingleStrong) {
+    if (singleStrongEligible && finalScore >= 8) {
       label = "Strong Growth";
-    } else if (meaningfulFinishGain || lateAverageUp || (hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 0.5)) {
+    } else if (finalScore >= 3 || meaningfulFinishGain) {
       label = "Moderate Growth";
     } else {
       label = "Neutral";
     }
   } else {
-    const moderateRatio = moderateTotal ? moderateHits / moderateTotal : 0;
-    const strictPairedStrong =
-      !hasStrongCap &&
-      meaningfulFinishGain &&
-      lateAverageUp &&
-      maintainedUnderLoad &&
-      !spikeNotRetained &&
-      !volatileWithoutResolution;
+    const strongCap =
+      finalSpikeWithoutSupport ||
+      plateauAfterProgression ||
+      noOutputProgressionUnderLoad ||
+      loadDropObserved ||
+      (lateAverageDown && stats.outputDelta <= 0);
+    const canReachStrong = !strongCap && (exceptionalScore >= 1 || (growthScore >= 9 && riskScore <= 1));
 
-    if (strictPairedStrong || (!hasStrongCap && (hasOutstandingPerformance || moderateRatio >= 0.8))) {
+    if (canReachStrong && finalScore >= 7) {
       label = "Strong Growth";
-    } else if (moderateHits > 0 || (hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 1)) {
+    } else if (finalScore >= 3 || (hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 1)) {
       label = "Moderate Growth";
     } else {
       label = "Neutral";
@@ -2362,10 +2323,6 @@ const buildWorkoutSummaryScorecard = (
     riskScore,
     declineScore,
     finalScore,
-    moderateHits,
-    moderateTotal,
-    hasOutstandingPerformance,
-    hasStrongCap,
     tags,
     trend: "Flat",
     primaryReason: "",
@@ -2379,6 +2336,8 @@ const buildWorkoutSummaryScorecard = (
 const getWorkoutSummaryPrimaryReason = (scorecard: WorkoutSummaryScorecard) => {
   if (scorecard.tags.includes("no_signal")) return "The graph does not provide a meaningful directional signal yet.";
   if (scorecard.label === "Contextual Decline") return "The output trends downward without enough internal demand context to explain the drop.";
+  if (scorecard.tags.includes("synchronized_plateau_breakthrough")) return "Both exercises broke a stable plateau together under equal or higher demand.";
+  if (scorecard.tags.includes("retained_meaningful_improvement")) return "A major output gain was still meaningfully retained at the finish.";
   if (scorecard.tags.includes("four_plus_weight_increases")) return "Four or more consecutive weight increases create an exceptional progression signal.";
   if (scorecard.tags.includes("controlled_major_set_gain")) return "A controlled exercise gained three or more sets, which is treated as an exceptional marker.";
   if (scorecard.tags.includes("recovered_after_tradeoff")) return "A demand-based drop was followed by recovery, which supports adaptation rather than regression.";
@@ -2412,6 +2371,8 @@ const getWorkoutSummaryFactorText = (tag: WorkoutSummarySignalTag) => {
     plateau_after_progression: { symbol: "→", title: "Progression plateau", text: "Difficulty increased, but output settled into a plateau rather than continuing upward.", impact: 0.24 },
     no_output_progression_under_load: { symbol: "▣", title: "Load-led progress", text: "Difficulty increased while output stayed mostly flat.", impact: 0.22 },
     load_drop_observed: { symbol: "↘", title: "Load adjustment", text: "A later weight reduction weakens the continuous-progression signal.", impact: 0.2 },
+    retained_meaningful_improvement: { symbol: "★", title: "Retained improvement", text: "A major gain was still meaningfully retained at the finish.", impact: 0.36 },
+    synchronized_plateau_breakthrough: { symbol: "★", title: "Plateau breakthrough", text: "Both exercises broke a stable plateau together under equal or higher demand.", impact: 0.38 },
   };
 
   return copy[tag];
@@ -2419,6 +2380,8 @@ const getWorkoutSummaryFactorText = (tag: WorkoutSummarySignalTag) => {
 
 const buildWorkoutSummaryFactorsFromScorecard = (scorecard: WorkoutSummaryScorecard): WorkoutSummaryFactor[] => {
   const priority: WorkoutSummarySignalTag[] = [
+    "synchronized_plateau_breakthrough",
+    "retained_meaningful_improvement",
     "four_plus_weight_increases",
     "controlled_major_set_gain",
     "major_set_gain",
@@ -2546,6 +2509,67 @@ const getWorkoutSummarySentenceForSeries = (series: GraphSeries, insight: Workou
   return `${name} is mostly neutral`;
 };
 
+
+const getWorkoutSummaryStatsForCombinedItem = (item: { series: GraphSeries; scorecard: WorkoutSummaryScorecard }) =>
+  getWorkoutSummaryTrendStats(item.series.points);
+
+const hasRetainedMeaningfulImprovementQualifier = (
+  items: Array<{ series: GraphSeries; scorecard: WorkoutSummaryScorecard }>
+) => {
+  if (items.length < 2) return false;
+
+  const statItems = items.map((item) => ({ item, stats: getWorkoutSummaryStatsForCombinedItem(item) }));
+  const allSeriesHaveEnoughData = statItems.every(({ stats }) => stats.outputs.length >= 4);
+  if (!allSeriesHaveEnoughData) return false;
+
+  const allFinishAboveBaseline = statItems.every(({ stats }) => stats.lastOutput - stats.firstOutput >= 1);
+  const averageFinalGain = getWorkoutSummaryAverage(
+    statItems.map(({ stats }) => stats.lastOutput - stats.firstOutput)
+  );
+  const hasMajorRetainedGain = statItems.some(({ stats }) => {
+    const peakGain = stats.maxOutput - stats.firstOutput;
+    const finalGain = stats.lastOutput - stats.firstOutput;
+    const retentionRatio = peakGain > 0 ? finalGain / peakGain : 0;
+    return peakGain >= 4 && finalGain >= 2 && retentionRatio >= 0.5;
+  });
+  const hasHardLimiter = statItems.some(({ item, stats }) =>
+    item.scorecard.tags.includes("unrecovered_tradeoff") ||
+    item.scorecard.tags.includes("load_drop_observed") ||
+    stats.lastOutput < stats.firstOutput
+  );
+
+  return allFinishAboveBaseline && averageFinalGain >= 1.75 && hasMajorRetainedGain && !hasHardLimiter;
+};
+
+const hasSynchronizedPlateauBreakthroughQualifier = (
+  items: Array<{ series: GraphSeries; scorecard: WorkoutSummaryScorecard }>
+) => {
+  if (items.length < 2) return false;
+
+  return items.every((item) => {
+    const stats = getWorkoutSummaryStatsForCombinedItem(item);
+    if (stats.outputs.length < 5) return false;
+
+    const finalIndex = stats.outputs.length - 1;
+    const previousOutput = stats.outputs[finalIndex - 1];
+    const previousWeight = stats.weights[finalIndex - 1] || 0;
+    const finalWeight = stats.weights[finalIndex] || 0;
+    const priorWindow = stats.outputs.slice(Math.max(0, finalIndex - 3), finalIndex);
+    const priorRange = priorWindow.length ? Math.max(...priorWindow) - Math.min(...priorWindow) : 0;
+    const noMeaningfulRegressionInPlateau = priorWindow.every((value) => value >= previousOutput - 0.5);
+    const demandHeldOrIncreased = finalWeight === 0 || previousWeight === 0 || finalWeight >= previousWeight;
+
+    return (
+      priorWindow.length >= 3 &&
+      priorRange <= 0.5 &&
+      noMeaningfulRegressionInPlateau &&
+      stats.lastOutput >= previousOutput + 1 &&
+      stats.lastOutput > stats.firstOutput &&
+      demandHeldOrIncreased
+    );
+  });
+};
+
 const combineWorkoutSummaryScorecards = (
   items: Array<{ series: GraphSeries; insight: WorkoutSummaryInsight; scorecard: WorkoutSummaryScorecard }>
 ) => {
@@ -2553,8 +2577,6 @@ const combineWorkoutSummaryScorecards = (
   const exceptionalScore = items.reduce((total, item) => total + item.scorecard.exceptionalScore, 0);
   const riskScore = items.reduce((total, item) => total + item.scorecard.riskScore, 0);
   const declineScore = items.reduce((total, item) => total + item.scorecard.declineScore, 0);
-  const moderateHits = items.reduce((total, item) => total + item.scorecard.moderateHits, 0);
-  const moderateTotal = items.reduce((total, item) => total + item.scorecard.moderateTotal, 0);
   const finalScore = growthScore + exceptionalScore * 2 - riskScore;
   const tags = items.flatMap((item) => item.scorecard.tags).filter((tag, index, list) => list.indexOf(tag) === index);
   const strongCount = items.filter((item) => item.scorecard.label === "Strong Growth").length;
@@ -2563,32 +2585,34 @@ const combineWorkoutSummaryScorecards = (
   const positiveCount = strongCount + moderateCount;
   const bothStrong = strongCount === items.length;
   const bothContextual = contextualCount === items.length;
-  const moderateRatio = moderateTotal ? moderateHits / moderateTotal : 0;
-
-  const hasPairedDeclineCap = items.some((item) =>
-    item.scorecard.tags.includes("finish_below_start") && item.scorecard.tags.includes("late_average_below_early")
-  );
+  const anyExceptional = exceptionalScore >= 1;
+  const noUnresolvedTradeoff = !tags.includes("unrecovered_tradeoff");
+  const noHardDecline = !bothContextual && declineScore < 7;
   const hasStrongCap =
-    hasPairedDeclineCap ||
-    tags.includes("early_gain_then_plateau") ||
     tags.includes("plateau_after_progression") ||
     tags.includes("late_spike_without_support") ||
-    tags.includes("spike_not_retained") ||
-    tags.includes("unrecovered_tradeoff") ||
+    tags.includes("no_output_progression_under_load") ||
     tags.includes("load_drop_observed") ||
-    tags.includes("no_output_progression_under_load");
-  const hasOutstandingPerformance =
-    tags.includes("four_plus_weight_increases") ||
-    tags.includes("controlled_major_set_gain") ||
-    (tags.includes("major_set_gain") && tags.includes("late_average_above_early")) ||
-    (tags.includes("recovered_after_tradeoff") && tags.includes("finish_above_start"));
+    items.some((item) =>
+      item.scorecard.tags.includes("finish_below_start") || item.scorecard.tags.includes("late_average_below_early")
+    );
+  const hasRetainedMeaningfulImprovement = hasRetainedMeaningfulImprovementQualifier(items);
+  const hasSynchronizedPlateauBreakthrough = hasSynchronizedPlateauBreakthroughQualifier(items);
+  const hasOutstandingQualifier = hasRetainedMeaningfulImprovement || hasSynchronizedPlateauBreakthrough;
+
+  if (hasRetainedMeaningfulImprovement) addWorkoutSummaryTag(tags, "retained_meaningful_improvement");
+  if (hasSynchronizedPlateauBreakthrough) addWorkoutSummaryTag(tags, "synchronized_plateau_breakthrough");
 
   let label: WorkoutSummaryLabel = "Neutral";
   if (bothContextual || (contextualCount > 0 && positiveCount === 0)) {
     label = "Contextual Decline";
-  } else if (!hasStrongCap && (bothStrong || hasOutstandingPerformance || moderateRatio >= 0.8)) {
+  } else if (
+    (hasOutstandingQualifier && noHardDecline && noUnresolvedTradeoff) ||
+    (!hasStrongCap &&
+      (bothStrong || (anyExceptional && finalScore >= 7 && noHardDecline) || (growthScore >= 12 && riskScore <= 2 && noUnresolvedTradeoff)))
+  ) {
     label = "Strong Growth";
-  } else if (positiveCount > 0 || moderateHits > 0 || finalScore >= 1) {
+  } else if (positiveCount > 0 || finalScore >= 3) {
     label = "Moderate Growth";
   }
 
@@ -2600,10 +2624,6 @@ const combineWorkoutSummaryScorecards = (
     riskScore,
     declineScore,
     finalScore,
-    moderateHits,
-    moderateTotal,
-    hasOutstandingPerformance,
-    hasStrongCap,
     tags,
     trend: "Generated Block",
     primaryReason: "",
