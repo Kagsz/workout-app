@@ -344,29 +344,6 @@ const GRAPH_UI_LOCK_CSS = `
 const getProgramBlockCount = (program: Program | null | undefined) =>
   program?.routines.reduce((total, routine) => total + routine.blocks.length, 0) || 0;
 
-const applySingleBlockNeutralCap = ({
-  blockType,
-  baselineOutput,
-  finalOutput,
-  currentClassification,
-}: {
-  blockType: BlockType;
-  baselineOutput: number;
-  finalOutput: number;
-  currentClassification: string;
-}) => {
-  if (
-    blockType === "single" &&
-    finalOutput < baselineOutput &&
-    currentClassification !== "Neutral"
-  ) {
-    return "Neutral";
-  }
-
-  return currentClassification;
-};
-
-
 // ===== HELPERS =====
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -2307,13 +2284,18 @@ const buildWorkoutSummaryScorecard = (
   } else if (declineScore >= 5 && finalScore < 2) {
     label = "Contextual Decline";
   } else if (mode === "single") {
+    const singleFinishesBelowBaseline = stats.lastOutput < stats.firstOutput;
+
     const singleStrongEligible =
+      !singleFinishesBelowBaseline &&
       !volatileWithoutResolution &&
       !finalSpikeWithoutSupport &&
       !earlyGainThenPlateau &&
       (lateAverageUp || stats.maxOutputRun >= 3 || (strongFinishGain && stats.peakRetentionGap <= 1));
 
-    if (singleStrongEligible && finalScore >= 8) {
+    if (singleFinishesBelowBaseline) {
+      label = "Neutral";
+    } else if (singleStrongEligible && finalScore >= 8) {
       label = "Strong Growth";
     } else if (finalScore >= 3 || meaningfulFinishGain) {
       label = "Moderate Growth";
