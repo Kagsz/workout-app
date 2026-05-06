@@ -344,6 +344,29 @@ const GRAPH_UI_LOCK_CSS = `
 const getProgramBlockCount = (program: Program | null | undefined) =>
   program?.routines.reduce((total, routine) => total + routine.blocks.length, 0) || 0;
 
+const applySingleBlockNeutralCap = ({
+  blockType,
+  baselineOutput,
+  finalOutput,
+  currentClassification,
+}: {
+  blockType: BlockType;
+  baselineOutput: number;
+  finalOutput: number;
+  currentClassification: string;
+}) => {
+  if (
+    blockType === "single" &&
+    finalOutput < baselineOutput &&
+    currentClassification !== "Neutral"
+  ) {
+    return "Neutral";
+  }
+
+  return currentClassification;
+};
+
+
 // ===== HELPERS =====
 
 const uid = () => Math.random().toString(36).slice(2, 9);
