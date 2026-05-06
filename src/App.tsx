@@ -2522,23 +2522,28 @@ const hasRetainedMeaningfulImprovementQualifier = (
   const allSeriesHaveEnoughData = statItems.every(({ stats }) => stats.outputs.length >= 4);
   if (!allSeriesHaveEnoughData) return false;
 
-  const allFinishAboveBaseline = statItems.every(({ stats }) => stats.lastOutput - stats.firstOutput >= 1);
-  const averageFinalGain = getWorkoutSummaryAverage(
-    statItems.map(({ stats }) => stats.lastOutput - stats.firstOutput)
+  const hasDemandContext = statItems.some(
+    ({ stats }) => stats.weightIncreaseCount > 0 || stats.weightDelta > 0
   );
+
   const hasMajorRetainedGain = statItems.some(({ stats }) => {
     const peakGain = stats.maxOutput - stats.firstOutput;
     const finalGain = stats.lastOutput - stats.firstOutput;
     const retentionRatio = peakGain > 0 ? finalGain / peakGain : 0;
     return peakGain >= 4 && finalGain >= 2 && retentionRatio >= 0.5;
   });
-  const hasHardLimiter = statItems.some(({ item, stats }) =>
-    item.scorecard.tags.includes("unrecovered_tradeoff") ||
-    item.scorecard.tags.includes("load_drop_observed") ||
-    stats.lastOutput < stats.firstOutput
-  );
 
-  return allFinishAboveBaseline && averageFinalGain >= 1.75 && hasMajorRetainedGain && !hasHardLimiter;
+  const pairedSafetyPasses = statItems.every(({ item, stats }) => {
+    const finishesAtOrAboveBaseline = stats.lastOutput >= stats.firstOutput;
+    const hasUnresolvedDecline =
+      item.scorecard.tags.includes("unrecovered_tradeoff") ||
+      item.scorecard.tags.includes("finish_below_start") ||
+      item.scorecard.tags.includes("late_average_below_early");
+
+    return finishesAtOrAboveBaseline && !hasUnresolvedDecline;
+  });
+
+  return hasMajorRetainedGain && pairedSafetyPasses && hasDemandContext;
 };
 
 const hasSynchronizedPlateauBreakthroughQualifier = (
