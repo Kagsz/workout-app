@@ -2539,9 +2539,7 @@ const hasStrictRetainedMeaningfulImprovementQualifier = (
   });
   const hasHardLimiter = statItems.some(({ item, stats }) =>
     item.scorecard.tags.includes("unrecovered_tradeoff") ||
-    item.scorecard.tags.includes("load_drop_observed") ||
     item.scorecard.tags.includes("finish_below_start") ||
-    item.scorecard.tags.includes("late_average_below_early") ||
     stats.lastOutput < stats.firstOutput
   );
 
@@ -2605,6 +2603,7 @@ const combineWorkoutSummaryScorecards = (
 
   const hasStrongCap =
     tags.includes("late_spike_without_support") ||
+    tags.includes("plateau_after_progression") ||
     tags.includes("no_output_progression_under_load") ||
     tags.includes("load_drop_observed") ||
     tags.includes("unrecovered_tradeoff") ||
