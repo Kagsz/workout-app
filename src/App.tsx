@@ -2525,13 +2525,7 @@ const hasRetainedMeaningfulImprovementQualifier = (
   const hasDemandContext = statItems.some(
     ({ stats }) => stats.weightIncreaseCount > 0 || stats.weightDelta > 0
   );
-
-  const hasMajorRetainedGain = statItems.some(({ stats }) => {
-    const peakGain = stats.maxOutput - stats.firstOutput;
-    const finalGain = stats.lastOutput - stats.firstOutput;
-    const retentionRatio = peakGain > 0 ? finalGain / peakGain : 0;
-    return peakGain >= 4 && finalGain >= 2 && retentionRatio >= 0.5;
-  });
+  if (!hasDemandContext) return false;
 
   const pairedSafetyPasses = statItems.every(({ item, stats }) => {
     const finishesAtOrAboveBaseline = stats.lastOutput >= stats.firstOutput;
@@ -2542,8 +2536,23 @@ const hasRetainedMeaningfulImprovementQualifier = (
 
     return finishesAtOrAboveBaseline && !hasUnresolvedDecline;
   });
+  if (!pairedSafetyPasses) return false;
 
-  return hasMajorRetainedGain && pairedSafetyPasses && hasDemandContext;
+  return statItems.some(({ stats }, standoutIndex) => {
+    const peakGain = stats.maxOutput - stats.firstOutput;
+    const finalGain = stats.lastOutput - stats.firstOutput;
+    const retentionRatio = peakGain > 0 ? finalGain / peakGain : 0;
+    const hasStandoutRetainedGain = peakGain >= 4 && finalGain >= 2 && retentionRatio >= 0.5;
+    if (!hasStandoutRetainedGain) return false;
+
+    return statItems.every(({ stats: pairedStats }, pairedIndex) => {
+      if (pairedIndex === standoutIndex) return true;
+
+      const pairedFinalGain = pairedStats.lastOutput - pairedStats.firstOutput;
+      const pairedHasLoadProgress = pairedStats.weightIncreaseCount > 0 || pairedStats.weightDelta > 0;
+      return pairedFinalGain >= 2 || (pairedFinalGain >= 1 && pairedHasLoadProgress);
+    });
+  });
 };
 
 const hasSynchronizedPlateauBreakthroughQualifier = (
