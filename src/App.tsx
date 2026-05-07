@@ -1985,7 +1985,9 @@ const addWorkoutSummaryTag = (tags: WorkoutSummarySignalTag[], tag: WorkoutSumma
 const countWorkoutSummaryIncreases = (values: number[]) => {
   let count = 0;
   for (let index = 1; index < values.length; index += 1) {
-    if (values[index] > values[index - 1]) count += 1;
+    const previous = values[index - 1];
+    const current = values[index];
+    if (current > 0 && previous > 0 && current > previous) count += 1;
   }
   return count;
 };
@@ -2076,12 +2078,12 @@ const getWorkoutSummaryMemberOpening = (
   const milestoneCount = getWorkoutSummaryMilestoneCount(scorecard, stats);
   const target = scorecard.mode === "single" ? "exercise" : "block";
 
-  if (milestoneCount >= 3) return `You crushed this ${target}!`;
-  if (scorecard.label === "Exceptional Growth") return `This was a great performance.`;
-  if (scorecard.label === "Moderate Growth") return `You did a solid job with this ${target}.`;
-  if (scorecard.label === "Contextual Decline") return `This ${target} had some tradeoffs worth noticing.`;
-  if (series?.exerciseName) return `${series.exerciseName} gives us a useful read on your training.`;
-  return `This graph gives us a useful read on your training.`;
+  if (scorecard.label === "Exceptional Growth" && milestoneCount >= 3) return `You crushed this ${target}!`;
+  if (scorecard.label === "Exceptional Growth") return `This was an astounding performance.`;
+  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 6) return `Impressive performance!`;
+  if (scorecard.label === "Moderate Growth") return `This was a strong ${target}.`;
+  if (scorecard.label === "Contextual Decline") return `This trend is worth reading with context.`;
+  return `A solid effort throughout this ${target}.`;
 };
 
 const getWorkoutSummaryAchievementSentence = (
@@ -2092,12 +2094,12 @@ const getWorkoutSummaryAchievementSentence = (
   const performanceWord = getWorkoutSummaryPerformanceWord(series);
   const loadWord = scorecard.mode === "single" ? "workload" : "weight";
 
-  if (stats.weightIncreaseCount >= 5) {
+  if (stats.weightIncreaseCount >= 3) {
     return `You increased ${loadWord} ${stats.weightIncreaseCount} separate times across the program, which is a real training milestone.`;
   }
 
-  if (stats.weightIncreaseCount >= 3) {
-    return `You increased ${loadWord} ${stats.weightIncreaseCount} times across the program.`;
+  if (stats.weightDelta >= 10) {
+    return `You increased ${loadWord} by ${stats.weightDelta} lbs across the program.`;
   }
 
   if (scorecard.tags.includes("major_set_gain") || scorecard.tags.includes("controlled_major_set_gain")) {
@@ -2108,12 +2110,12 @@ const getWorkoutSummaryAchievementSentence = (
     return `You handled higher demand while keeping ${performanceWord} steady.`;
   }
 
-  if (scorecard.tags.includes("strong_finish")) {
-    return `The finish was noticeably stronger than the starting point.`;
+  if (scorecard.tags.includes("strong_finish") && stats.outputDelta > 0) {
+    return `Performance finished clearly above where it started.`;
   }
 
-  if (scorecard.tags.includes("finish_above_start")) {
-    return `The block still finished above where it started.`;
+  if (scorecard.tags.includes("finish_above_start") && stats.outputDelta > 0) {
+    return `The block still finished slightly above where it started.`;
   }
 
   return "";
@@ -2129,11 +2131,15 @@ const getWorkoutSummaryTrendSentence = (
   const hasBackAndForth = stats.outputRange >= 3 && stats.outputIncreaseCount > 1 && stats.outputIncreaseCount < Math.max(2, stats.outputs.length - 1);
 
   if (stats.hasDateData && stats.hasSignificantGap && stats.outputDelta > 0) {
-    return `Even with a longer gap between sessions, ${performanceWord} still ended higher than it began.`;
+    return `Even with a longer gap between sessions, ${performanceWord} still finished above where it began.`;
   }
 
   if (stats.hasDateData && stats.hasSignificantGap && Math.abs(stats.outputDelta) <= 1) {
     return `There was a longer gap between sessions, but ${performanceWord} mostly held steady.`;
+  }
+
+  if (stats.hasDateData && stats.hasSignificantGap && stats.outputDelta < 0 && scorecard.label === "Contextual Decline") {
+    return `The longer gap may be useful context for the later downward trend.`;
   }
 
   if (scorecard.tags.includes("no_output_progression_under_load") || (stats.weightIncreaseCount >= 3 && Math.abs(stats.outputDelta) <= 1)) {
@@ -2173,11 +2179,11 @@ const getWorkoutSummaryLabelSentence = (scorecard: WorkoutSummaryScorecard) => {
   }
 
   if (scorecard.label === "Moderate Growth") {
-    return `It lands as Moderate Growth because the positive signs are real, but the graph does not show enough retained or synchronized support to move higher.`;
+    return ``;
   }
 
   if (scorecard.label === "Contextual Decline") {
-    return `The decline is best read with context rather than as a simple judgment on the work.`;
+    return `External factors like recovery, environment, schedule, or health can sometimes influence repeated downward trends like this.`;
   }
 
   if (scorecard.label === "Baseline Established") {
@@ -2185,10 +2191,10 @@ const getWorkoutSummaryLabelSentence = (scorecard: WorkoutSummaryScorecard) => {
   }
 
   if (scorecard.tags.includes("no_signal")) {
-    return `For now, the graph does not show a clear enough training signal to move beyond Neutral.`;
+    return `The trend is best read as neutral for now.`;
   }
 
-  return `For now, Neutral is the cleanest read because the pattern is not resolved enough to call it growth or decline.`;
+  return ``;
 };
 
 const joinWorkoutSummarySentences = (sentences: Array<string | undefined>) =>
@@ -2196,7 +2202,7 @@ const joinWorkoutSummarySentences = (sentences: Array<string | undefined>) =>
     .map((sentence) => String(sentence || "").trim())
     .filter(Boolean)
     .filter((sentence, index, list) => list.indexOf(sentence) === index)
-    .slice(0, 5)
+    .slice(0, 4)
     .join(" ");
 
 const getWorkoutSummaryTrendStats = (points: GraphPoint[]): WorkoutSummaryTrendStats => {
@@ -2572,13 +2578,17 @@ const buildWorkoutSummaryTextFromScorecard = (
   const trend = getWorkoutSummaryTrendSentence(scorecard, stats, series);
   const labelReason = getWorkoutSummaryLabelSentence(scorecard);
 
-  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 6 && scorecard.riskScore > 0) {
+  if (scorecard.label === "Neutral") {
+    const simpleTrend = trend || (Math.abs(stats.outputDelta) <= 1 ? `Performance stayed relatively steady through this block.` : labelReason);
+    const modestPositive = stats.outputDelta > 0 ? `That keeps the overall direction modestly positive.` : undefined;
+    return joinWorkoutSummarySentences([opening, simpleTrend, modestPositive, labelReason]);
+  }
+
+  if (scorecard.label === "Moderate Growth" && scorecard.tags.includes("maintained_under_load")) {
     return joinWorkoutSummarySentences([
       opening,
-      achievement || trend,
+      achievement || `You handled higher demand while keeping performance steady, which is a real positive sign of progress.`,
       trend && trend !== achievement ? trend : undefined,
-      `This is one of those graphs where the positives are worth noticing, even though the label stays Moderate.`,
-      labelReason,
     ]);
   }
 
@@ -2606,9 +2616,7 @@ const generateWorkoutSummaryInsightFromSeries = (
   const summary = buildWorkoutSummaryTextFromScorecard(scorecard, series, stats);
   const reportAccuracy: ReportAccuracy = points.length < 4 ? "Low" : points.length < 6 ? "Moderate" : "High";
   const accuracyReason = points.length < 4 ? "limited data" : mode === "single" ? "single-block graph" : "paired exercise line";
-  const achievement = headline.includes("Growth")
-    ? getWorkoutSummaryAchievementSentence(scorecard, stats, series) || undefined
-    : undefined;
+  const achievement = undefined;
 
   return {
     id: `generated-${series.exerciseId}-${points.length}-${headline.replace(/\s+/g, "-").toLowerCase()}`,
@@ -2815,17 +2823,42 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
     .slice()
     .sort((a, b) => getWorkoutSummaryHeadlineRank(b.insight.headline) - getWorkoutSummaryHeadlineRank(a.insight.headline));
   const strongestInsight = sortedByImpact[0]?.insight;
+  const childStats = childItems.map(({ series }) => getWorkoutSummaryTrendStats(series.points));
   const combinedStats = getWorkoutSummaryTrendStats(usableSeries.flatMap((series) => series.points));
   const combinedOpening = getWorkoutSummaryMemberOpening(combinedScorecard, combinedStats, null);
-  const summaryPieces = childItems.map(({ series, insight }) => getWorkoutSummarySentenceForSeries(series, insight));
-  const combinedAchievement = getWorkoutSummaryAchievementSentence(combinedScorecard, combinedStats, null);
+  const maxWeightGain = Math.max(0, ...childStats.map((stats) => stats.weightDelta));
+  const totalWeightIncreases = childStats.reduce((total, stats) => total + stats.weightIncreaseCount, 0);
+  const anyControlled = usableSeries.some((series) => isControlledWorkoutSummarySeries(series));
+  const anyFinishBelowStart = childStats.some((stats) => stats.outputDelta < 0);
+  const allNeutral = childItems.every(({ scorecard }) => scorecard.label === "Neutral");
+  const allModerate = childItems.every(({ scorecard }) => scorecard.label === "Moderate Growth");
+  const pairedAchievement =
+    maxWeightGain >= 10
+      ? `You increased demand by up to ${maxWeightGain} lbs across this block.`
+      : totalWeightIncreases >= 3
+        ? `You moved weight up multiple times across this block.`
+        : "";
+  const controlledContext =
+    anyControlled && maxWeightGain > 0
+      ? `The controlled movement style matters here because performance was being measured while demand increased.`
+      : "";
+  const neutralPattern =
+    allNeutral && anyFinishBelowStart
+      ? `Both exercises point toward a neutral trend, with later output not fully recovering by the end of the block.`
+      : allNeutral
+        ? `Both exercises point toward a neutral trend without a clear enough move higher or lower.`
+        : "";
+  const moderatePattern =
+    allModerate && maxWeightGain > 0
+      ? `You increased demand, held stretches of steady performance, and kept the block in a positive direction.`
+      : "";
   const combinedTrend = getWorkoutSummaryTrendSentence(combinedScorecard, combinedStats, null);
   const labelReason = getWorkoutSummaryLabelSentence(combinedScorecard);
   let summary = joinWorkoutSummarySentences([
     combinedOpening,
-    combinedAchievement,
-    combinedTrend,
-    `Across this block, ${summaryPieces.join(" and ")}.`,
+    pairedAchievement || moderatePattern || neutralPattern,
+    controlledContext,
+    combinedTrend && !pairedAchievement && !moderatePattern && !neutralPattern ? combinedTrend : undefined,
     labelReason,
   ]);
 
@@ -2837,18 +2870,21 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
 
   const factors: WorkoutSummaryFactor[] = childItems
     .sort((a, b) => getWorkoutSummarySeverityRank(b.insight.headline) - getWorkoutSummarySeverityRank(a.insight.headline))
-    .map(({ series, insight }, index) => ({
-      symbol: insight.headline.includes("Exceptional Growth")
-        ? "★"
-        : insight.headline.includes("Moderate Growth")
-          ? "↗"
-          : insight.headline.includes("Contextual")
-            ? "↘"
-            : "→",
-      title: series.exerciseName || `Exercise ${index + 1}`,
-      text: `${insight.headline}: ${insight.summary}`,
-      impact: index === 0 ? 0.36 : 0.28,
-    }))
+    .map(({ series, insight, scorecard }, index) => {
+      const primaryFactor = buildWorkoutSummaryFactorsFromScorecard(scorecard)[0];
+      return {
+        symbol: insight.headline.includes("Exceptional Growth")
+          ? "★"
+          : insight.headline.includes("Moderate Growth")
+            ? "↗"
+            : insight.headline.includes("Contextual")
+              ? "↘"
+              : "→",
+        title: series.exerciseName || `Exercise ${index + 1}`,
+        text: primaryFactor?.text || scorecard.primaryReason,
+        impact: index === 0 ? 0.36 : 0.28,
+      };
+    })
     .slice(0, 2);
 
   return {
@@ -2897,19 +2933,19 @@ const getWorkoutSummaryToneDotClass = (tone: SummaryTone) => {
   return "bg-slate-400 ring-slate-300";
 };const workoutSummaryClosingStatementPools: Record<SummaryTone | "lowAccuracy", string[]> = {
   positive: [
-    "Great work! This is the kind of pattern you can keep building from.",
-    "This was a strong showing, and the later sessions give you something real to build on.",
-    "The work shows up clearly here without needing to force the interpretation.",
+    "The momentum you built here is incredible.",
+    "This is a great foundation to build from.",
+    "The work shows up clearly here.",
   ],
   positiveContext: [
-    "The overall picture stays encouraging when the full workload is considered.",
-    "There is enough here to call the direction positive without overselling it.",
-    "This gives you a solid base to keep building from.",
+    "This is a great foundation to build from.",
+    "That keeps the overall direction positive without overselling it.",
+    "Several positive signs showed up here.",
   ],
   contextual: [
-    "This is worth watching, but it does not need to be treated as a verdict on the work.",
-    "The pattern is useful because it shows where the tradeoff happened.",
-    "This reads more like context to learn from than a hard conclusion.",
+    "That context matters when reading the pattern.",
+    "This is worth watching without turning it into a judgment on the work.",
+    "The pattern deserves context before drawing a hard conclusion.",
   ],
   baseline: [
     "As more sessions are recorded, the pattern will become easier to read.",
@@ -2920,7 +2956,7 @@ const getWorkoutSummaryToneDotClass = (tone: SummaryTone) => {
     "As more sessions are recorded, the trend will become easier to trust.",
     "This is an early read, and future sessions will make the pattern clearer.",
   ],
-  neutral: ["This is still useful information, even without a strong growth signal yet."],
+  neutral: ["That keeps the overall read grounded.", "This is still a useful baseline to compare against later."],
 };
 
 const getWorkoutSummaryClosingTone = (insight: WorkoutSummaryInsight): SummaryTone | "lowAccuracy" => {
@@ -2945,9 +2981,8 @@ const buildWorkoutSummaryLabel = (insight: WorkoutSummaryInsight) =>
 
 const buildWorkoutSummaryText = (insight: WorkoutSummaryInsight) => {
   const baseSummary = String(insight.summary || "").trim();
-  const achievement = insight.achievement ? ` ${insight.achievement}` : "";
   const closingStatement = getWorkoutSummaryClosingStatement(insight);
-  return `${baseSummary}${achievement} ${closingStatement}`.trim();
+  return `${baseSummary} ${closingStatement}`.trim();
 };
 
 function WorkoutSummarySymbol({ symbol }: { symbol: string }) {
