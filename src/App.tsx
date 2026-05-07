@@ -2046,11 +2046,6 @@ const getWorkoutSummaryMaxUpwardRun = (values: number[]) => {
   return maxRun;
 };
 
-const getWorkoutSummaryEndLabel = (point: GraphPoint, weightValue: number) => {
-  const weightLabel = weightValue > 0 ? `${weightValue} lbs` : point.weight || "BW";
-  return `${point.y} performance at ${weightLabel}`;
-};
-
 const getWorkoutSummaryPerformanceWord = (series?: GraphSeries | null) => {
   const name = String(series?.exerciseName || "").toLowerCase();
 
