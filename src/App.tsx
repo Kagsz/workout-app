@@ -2073,7 +2073,7 @@ const getWorkoutSummaryMilestoneCount = (scorecard: WorkoutSummaryScorecard, sta
 const getWorkoutSummaryMemberOpening = (
   scorecard: WorkoutSummaryScorecard,
   stats: WorkoutSummaryTrendStats,
-  series?: GraphSeries | null
+  _series?: GraphSeries | null
 ) => {
   const milestoneCount = getWorkoutSummaryMilestoneCount(scorecard, stats);
   const target = scorecard.mode === "single" ? "exercise" : "block";
@@ -2648,17 +2648,6 @@ const getWorkoutSummaryHeadlineRank = (headline: string) => {
   if (headline.includes("Baseline")) return 1;
   return 0;
 };
-
-const getWorkoutSummarySentenceForSeries = (series: GraphSeries, insight: WorkoutSummaryInsight) => {
-  const name = series.exerciseName || "This exercise";
-
-  if (insight.headline.includes("Exceptional Growth")) return `${name} shows exceptional growth`;
-  if (insight.headline.includes("Moderate Growth")) return `${name} shows moderate growth`;
-  if (insight.headline.includes("Contextual")) return `${name} trends down enough to watch with context`;
-  if (insight.headline.includes("Baseline")) return `${name} is still building a baseline`;
-  return `${name} is mostly neutral`;
-};
-
 
 const getWorkoutSummaryStatsForCombinedItem = (item: { series: GraphSeries; scorecard: WorkoutSummaryScorecard }) =>
   getWorkoutSummaryTrendStats(item.series.points);
