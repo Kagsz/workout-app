@@ -2077,24 +2077,8 @@ const isCompletionFocusedWorkoutSummarySeries = (series?: GraphSeries | null) =>
   return /30\s*\/?\s*30|check|completion/.test(combined) || (/slam/.test(name) && /30/.test(combined));
 };
 
-const getWorkoutSummaryMilestoneCount = (scorecard: WorkoutSummaryScorecard, stats: WorkoutSummaryTrendStats) => {
-  let count = 0;
-  if (scorecard.tags.includes("synchronized_plateau_breakthrough")) count += 2;
-  if (scorecard.tags.includes("retained_meaningful_improvement")) count += 2;
-  if (scorecard.tags.includes("controlled_major_set_gain")) count += 1;
-  if (scorecard.tags.includes("major_set_gain")) count += 1;
-  if (scorecard.tags.includes("strong_finish")) count += 1;
-  if (scorecard.tags.includes("maintained_under_load")) count += 1;
-  if (scorecard.tags.includes("late_average_above_early")) count += 1;
-  if (stats.weightIncreaseCount >= 3) count += 1;
-  if (stats.weightDelta >= 10) count += 1;
-  return count;
-};
-
 const capitalizeWorkoutSummaryText = (value: string) =>
   value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
-
-const getWorkoutSummaryExerciseNoun = (mode: WorkoutSummaryBlockMode) => (mode === "single" ? "one" : "block");
 
 const getWorkoutSummaryMetricUnit = (series?: GraphSeries | null) => {
   const metric = String(series?.points?.[0]?.metric || "").trim().toLowerCase();
@@ -2133,10 +2117,9 @@ const getWorkoutSummaryLoadScaleWord = (delta: number) => {
 
 const getWorkoutSummaryMemberOpening = (
   scorecard: WorkoutSummaryScorecard,
-  stats: WorkoutSummaryTrendStats,
+  _stats: WorkoutSummaryTrendStats,
   series?: GraphSeries | null
 ) => {
-  const milestoneCount = getWorkoutSummaryMilestoneCount(scorecard, stats);
   const target = scorecard.mode === "single" ? "one" : "block";
 
   if (scorecard.label === "Exceptional Growth") return `You crushed this ${target}!`;
@@ -2364,10 +2347,8 @@ const getWorkoutSummarySupportSlots = (
   series?: GraphSeries | null
 ): WorkoutSummaryNarrativeSlot[] => {
   const slots: WorkoutSummaryNarrativeSlot[] = [];
-  const performanceWord = getWorkoutSummaryPerformanceWord(series);
   const loadWord = getWorkoutSummaryLoadWord(series);
   const controlled = isControlledWorkoutSummarySeries(series);
-  const loadDelta = formatWorkoutSummaryNumber(Math.abs(stats.weightDelta));
   const outputDelta = formatWorkoutSummaryOutputDelta(stats.outputDelta, series);
   const constraintLabel = getWorkoutSummaryConstraintLabel(series);
   const loadScale = getWorkoutSummaryLoadScaleWord(Math.abs(stats.weightDelta));
@@ -2481,7 +2462,7 @@ const getWorkoutSummarySupportSlots = (
 
 const getWorkoutSummaryLabelSlot = (
   scorecard: WorkoutSummaryScorecard,
-  stats: WorkoutSummaryTrendStats
+  _stats: WorkoutSummaryTrendStats
 ): WorkoutSummaryNarrativeSlot | null => {
   if (scorecard.label === "Exceptional Growth" && scorecard.tags.includes("retained_meaningful_improvement")) {
     return {
@@ -2508,7 +2489,7 @@ const getWorkoutSummaryLabelSlot = (
 
 const getWorkoutSummaryCloserSlot = (
   scorecard: WorkoutSummaryScorecard,
-  stats: WorkoutSummaryTrendStats
+  _stats: WorkoutSummaryTrendStats
 ): WorkoutSummaryNarrativeSlot | null => {
   if (scorecard.label === "Exceptional Growth") {
     return {
@@ -2554,7 +2535,6 @@ const buildWorkoutSummaryTextFromSlots = (
 };
 
 const joinWorkoutSummarySentences = (sentences: Array<string | undefined>, maxSentences = 4) => {
-  const seenFamilies = new Set<string>();
   const cleaned = sentences
     .map((sentence) => String(sentence || "").trim())
     .filter(Boolean)
@@ -3158,20 +3138,16 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
   const totalWeightIncreases = childStats.reduce((total, stats) => total + stats.weightIncreaseCount, 0);
   const maxWeightRun = Math.max(0, ...childStats.map((stats) => stats.maxWeightRun));
   const maxOutputDelta = Math.max(...childStats.map((stats) => stats.outputDelta));
-  const minOutputDelta = Math.min(...childStats.map((stats) => stats.outputDelta));
   const anyControlled = usableSeries.some((series) => isControlledWorkoutSummarySeries(series));
   const anyCompletionFocused = usableSeries.some((series) => isCompletionFocusedWorkoutSummarySeries(series));
   const anyFinishBelowStart = childStats.some((stats) => stats.outputDelta < 0);
   const anyRecoveredTradeoff = childItems.some(({ scorecard }) => scorecard.tags.includes("recovered_after_tradeoff"));
   const anyMaintainedUnderLoad = childItems.some(({ scorecard }) => scorecard.tags.includes("maintained_under_load"));
   const allNeutral = childItems.every(({ scorecard }) => scorecard.label === "Neutral");
-  const allModerate = childItems.every(({ scorecard }) => scorecard.label === "Moderate Growth");
   const bothPositive = childItems.every(({ scorecard }) => scorecard.label === "Moderate Growth" || scorecard.label === "Exceptional Growth");
   const bothFinishAboveStart = childStats.every((stats) => stats.outputDelta > 0);
   const bothStayAtOrAboveStart = childStats.every((stats) => stats.lastOutput >= stats.firstOutput - 0.25);
   const bothTightRange = childStats.every((stats) => stats.outputRange <= 1.5);
-  const bothRecoveredStructure = childStats.every((stats) => stats.peakRetentionGap <= Math.max(1.25, stats.outputRange * 0.45));
-  const anyLargeStartJump = childStats.some((stats) => stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(2, stats.outputRange * 0.45));
   const allLargeStartJump = childStats.every((stats) => stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(1, stats.outputRange * 0.35));
   const loadWord = usableSeries.some((series) => /carry|farmer/i.test(series.exerciseName)) ? "load" : "weight";
   const dominantWeightSeries = usableSeries[childStats.findIndex((stats) => stats.weightDelta === maxWeightGain)] || usableSeries[0];
