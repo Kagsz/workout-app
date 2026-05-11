@@ -2091,21 +2091,61 @@ const getWorkoutSummaryMilestoneCount = (scorecard: WorkoutSummaryScorecard, sta
   return count;
 };
 
+const capitalizeWorkoutSummaryText = (value: string) =>
+  value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+
+const getWorkoutSummaryExerciseNoun = (mode: WorkoutSummaryBlockMode) => (mode === "single" ? "one" : "block");
+
+const getWorkoutSummaryMetricUnit = (series?: GraphSeries | null) => {
+  const metric = String(series?.points?.[0]?.metric || "").trim().toLowerCase();
+  const target = String(series?.points?.[0]?.target || "").trim().toLowerCase();
+  const name = String(series?.exerciseName || "").trim().toLowerCase();
+  const combined = `${metric} ${target} ${name}`;
+
+  if (/calorie|cals?\b/.test(combined)) return "calories";
+  if (/\blap|run|walk/.test(combined)) return "laps";
+  if (/\brep|slam/.test(combined)) return "reps";
+  if (/yard|carry|farmer/.test(combined)) return "rounds";
+  if (/set/.test(combined)) return "sets";
+  return "points";
+};
+
+const formatWorkoutSummaryOutputDelta = (value: number, series?: GraphSeries | null) =>
+  `${formatWorkoutSummaryNumber(Math.abs(value))} ${getWorkoutSummaryMetricUnit(series)}`;
+
+const getWorkoutSummaryConstraintLabel = (series?: GraphSeries | null) => {
+  const name = String(series?.exerciseName || "").toLowerCase();
+  const target = String(series?.points?.[0]?.target || "").toLowerCase();
+  const combined = `${name} ${target}`;
+  const constraints: string[] = [];
+  if (/\btempo\b/.test(combined)) constraints.push("TEMPO");
+  if (/\bpause\b/.test(combined)) constraints.push("PAUSE");
+  if (/\becc\b|eccentric/.test(combined)) constraints.push("ECC");
+  if (/\biso\b/.test(combined)) constraints.push("ISO");
+  return constraints.length ? constraints.join("/") : "controlled";
+};
+
+const getWorkoutSummaryLoadScaleWord = (delta: number) => {
+  if (delta >= 20) return "profound";
+  if (delta >= 10) return "pronounced";
+  return "gradual";
+};
+
 const getWorkoutSummaryMemberOpening = (
   scorecard: WorkoutSummaryScorecard,
   stats: WorkoutSummaryTrendStats,
   series?: GraphSeries | null
 ) => {
   const milestoneCount = getWorkoutSummaryMilestoneCount(scorecard, stats);
-  const target = scorecard.mode === "single" ? "exercise" : "block";
+  const target = scorecard.mode === "single" ? "one" : "block";
 
-  if (scorecard.label === "Exceptional Growth" && milestoneCount >= 3) return `You crushed this ${target}!`;
-  if (scorecard.label === "Exceptional Growth") return `This was an astounding performance.`;
-  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 6) return `Impressive performance!`;
-  if (scorecard.label === "Moderate Growth") return `This was a strong ${target}.`;
+  if (scorecard.label === "Exceptional Growth") return `You crushed this ${target}!`;
+  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 7) return `This is a strong performance.`;
+  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 5) return `You performed well here.`;
+  if (scorecard.label === "Moderate Growth") return `This was a solid ${scorecard.mode === "single" ? "effort" : "block"}.`;
   if (scorecard.label === "Contextual Decline") return `This trend is worth reading with context.`;
-  if (isCompletionFocusedWorkoutSummarySeries(series)) return `A steady effort throughout this ${target}.`;
-  return `A solid effort throughout this ${target}.`;
+  if (isCompletionFocusedWorkoutSummarySeries(series)) return `This graph reads more like a consistency check than a progression-focused workout.`;
+  return `This was a steady read.`;
 };
 
 type WorkoutSummaryNarrativeSlot = {
@@ -2113,6 +2153,7 @@ type WorkoutSummaryNarrativeSlot = {
   tier: "elite" | "major" | "minor" | "context" | "label" | "closer";
   sentence: string;
   impact: number;
+  family?: string;
 };
 
 const addWorkoutSummarySlot = (
@@ -2120,7 +2161,10 @@ const addWorkoutSummarySlot = (
   slot: WorkoutSummaryNarrativeSlot | null | undefined
 ) => {
   if (!slot?.sentence) return;
+  const normalizedSentence = slot.sentence.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   if (slots.some((existing) => existing.id === slot.id || existing.sentence === slot.sentence)) return;
+  if (slot.family && slots.some((existing) => existing.family === slot.family && existing.impact >= slot.impact - 0.04)) return;
+  if (slots.some((existing) => existing.sentence.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === normalizedSentence)) return;
   slots.push(slot);
 };
 
@@ -2134,31 +2178,60 @@ const getWorkoutSummaryDominantStorySlot = (
   const controlled = isControlledWorkoutSummarySeries(series);
   const completionFocused = isCompletionFocusedWorkoutSummarySeries(series);
   const loadDelta = formatWorkoutSummaryNumber(Math.abs(stats.weightDelta));
-  const outputDelta = formatWorkoutSummaryNumber(Math.abs(stats.outputDelta));
+  const outputDelta = formatWorkoutSummaryOutputDelta(stats.outputDelta, series);
+  const constraintLabel = getWorkoutSummaryConstraintLabel(series);
+  const outputGain = stats.lastOutput - stats.firstOutput;
+  const retainedLargeGain = stats.maxOutput - stats.firstOutput >= 3 && stats.peakRetentionGap <= Math.max(1.25, stats.outputRange * 0.35);
+  const hasExplosiveStart = stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(2, stats.outputRange * 0.45);
+  const stableRange = stats.outputRange <= 1.5;
 
   if (completionFocused) {
     return {
       id: "completion-focused",
       tier: "context",
-      sentence: `This exercise reads more like a consistency check than a progression-focused graph.`,
-      impact: 0.34,
+      sentence: `This type of exercise plays an important role in long-term progress despite having limited recordable data.`,
+      impact: 0.42,
+      family: "completion",
     };
   }
 
   if (scorecard.label === "Contextual Decline") {
-    if (stats.outputDelta < 0) {
-      return {
-        id: "contextual-decline-story",
-        tier: "label",
-        sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} trended downward by the end of the block after starting higher.`,
-        impact: 0.42,
-      };
-    }
     return {
-      id: "contextual-decline-mixed",
+      id: "contextual-decline-story",
       tier: "label",
-      sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} moved through an uneven pattern that needs context to read cleanly.`,
-      impact: 0.38,
+      sentence: `The graph gradually moves downward through the program without showing signs of major instability or collapse.`,
+      impact: 0.46,
+      family: "decline",
+    };
+  }
+
+  if (scorecard.label === "Exceptional Growth" && controlled && outputGain >= 3) {
+    return {
+      id: "controlled-explosive-exceptional",
+      tier: "elite",
+      sentence: `Explosive upward progression under ${constraintLabel} constraints is extremely rare, making the acceleration shown here especially impressive.`,
+      impact: 0.52,
+      family: "exceptional-constraint",
+    };
+  }
+
+  if (scorecard.label === "Exceptional Growth" && hasExplosiveStart && outputGain >= 8 && scorecard.mode === "single") {
+    return {
+      id: "vertical-single-exceptional",
+      tier: "elite",
+      sentence: `After a nearly vertical start, you kept building through the remaining sessions without giving back the ground you gained.`,
+      impact: 0.5,
+      family: "exceptional-trajectory",
+    };
+  }
+
+  if (scorecard.label === "Exceptional Growth" && outputGain >= 3 && retainedLargeGain) {
+    return {
+      id: "retained-adaptation-exceptional",
+      tier: "elite",
+      sentence: `You created distance from the starting baseline early and never gave that progress back.`,
+      impact: 0.49,
+      family: "retained-adaptation",
     };
   }
 
@@ -2167,7 +2240,8 @@ const getWorkoutSummaryDominantStorySlot = (
       id: "sync-breakthrough-story",
       tier: "elite",
       sentence: `Both exercises broke through together, which gives this block a much stronger progression signal.`,
-      impact: 0.46,
+      impact: 0.47,
+      family: "sync",
     };
   }
 
@@ -2176,16 +2250,48 @@ const getWorkoutSummaryDominantStorySlot = (
       id: "retained-story",
       tier: "elite",
       sentence: `The biggest story is that the later sessions held onto a real improvement instead of giving it back.`,
-      impact: 0.44,
+      impact: 0.45,
+      family: "retained-adaptation",
     };
   }
 
-  if (controlled && stats.weightDelta > 0 && stats.outputDelta >= -1) {
+  if (stats.maxWeightRun >= 4 && stats.outputDelta >= -1) {
     return {
-      id: "controlled-load-story",
+      id: "four-weight-run-story",
       tier: scorecard.label === "Exceptional Growth" ? "elite" : "major",
-      sentence: `The sustained ${performanceWord} is more meaningful than it may look because ${loadWord} climbed by ${loadDelta} lbs along the way.`,
+      sentence: `You maintained output through ${stats.maxWeightRun} consecutive ${loadWord} increases, which gives this graph a stronger progression profile.`,
+      impact: 0.44,
+      family: "weight-progression",
+    };
+  }
+
+  if (scorecard.tags.includes("recovered_after_tradeoff")) {
+    return {
+      id: "tradeoff-recovery-story",
+      tier: "major",
+      sentence: `The dip under heavier ${loadWord} recovered cleanly, which makes the fluctuation read more like adaptation than regression.`,
+      impact: 0.41,
+      family: "recovery",
+    };
+  }
+
+  if (scorecard.tags.includes("maintained_under_load") && stats.weightDelta > 0) {
+    return {
+      id: "maintained-under-load-story",
+      tier: scorecard.label === "Exceptional Growth" ? "elite" : "major",
+      sentence: `Maintaining output while increasing ${loadWord} is what separates this from a flatter progression pattern.`,
       impact: 0.4,
+      family: "weight-progression",
+    };
+  }
+
+  if (controlled && stats.weightDelta > 0 && Math.abs(stats.outputDelta) <= 1.5) {
+    return {
+      id: "subtle-controlled-story",
+      tier: "major",
+      sentence: `The growth here is more subtle than it appears because the ${constraintLabel} work held structure while ${loadWord} increased.`,
+      impact: 0.39,
+      family: "constraint",
     };
   }
 
@@ -2195,6 +2301,7 @@ const getWorkoutSummaryDominantStorySlot = (
       tier: scorecard.label === "Exceptional Growth" ? "elite" : "major",
       sentence: `The clearest win here is the added ${loadWord}: you moved ${loadDelta} lbs heavier without a major drop-off.`,
       impact: 0.38,
+      family: "weight-progression",
     };
   }
 
@@ -2202,8 +2309,9 @@ const getWorkoutSummaryDominantStorySlot = (
     return {
       id: "output-gain-story",
       tier: "major",
-      sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} finished ${outputDelta} higher than the starting point.`,
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} finished ${outputDelta} above where it started.`,
       impact: 0.36,
+      family: "output-gain",
     };
   }
 
@@ -2211,8 +2319,9 @@ const getWorkoutSummaryDominantStorySlot = (
     return {
       id: "unresolved-volatility-story",
       tier: "major",
-      sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} moved back and forth without settling into a stronger finish.`,
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} moved through a mixed range without fully settling into a stronger finish.`,
       impact: 0.34,
+      family: "volatility",
     };
   }
 
@@ -2220,8 +2329,9 @@ const getWorkoutSummaryDominantStorySlot = (
     return {
       id: "finish-below-story",
       tier: "major",
-      sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} finished below the starting point, so the graph does not show a positive finish.`,
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} finished below the starting point, so this graph needs a more cautious read.`,
       impact: 0.34,
+      family: "decline",
     };
   }
 
@@ -2229,17 +2339,19 @@ const getWorkoutSummaryDominantStorySlot = (
     return {
       id: "finish-above-story",
       tier: "major",
-      sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} finished above where it started.`,
-      impact: 0.3,
+      sentence: `Despite some minor fluctuation, the graph generally trends upward and finished above where it started.`,
+      impact: 0.31,
+      family: "finish",
     };
   }
 
-  if (Math.abs(stats.outputDelta) <= 1) {
+  if (Math.abs(stats.outputDelta) <= 1 && stableRange) {
     return {
       id: "steady-story",
       tier: "minor",
-      sentence: `${performanceWord.charAt(0).toUpperCase()}${performanceWord.slice(1)} stayed relatively steady from start to finish.`,
-      impact: 0.26,
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} maintained a tightly controlled range from start to finish.`,
+      impact: 0.28,
+      family: "stability",
     };
   }
 
@@ -2256,38 +2368,43 @@ const getWorkoutSummarySupportSlots = (
   const loadWord = getWorkoutSummaryLoadWord(series);
   const controlled = isControlledWorkoutSummarySeries(series);
   const loadDelta = formatWorkoutSummaryNumber(Math.abs(stats.weightDelta));
+  const outputDelta = formatWorkoutSummaryOutputDelta(stats.outputDelta, series);
+  const constraintLabel = getWorkoutSummaryConstraintLabel(series);
+  const loadScale = getWorkoutSummaryLoadScaleWord(Math.abs(stats.weightDelta));
 
-  if (stats.weightIncreaseCount >= 3) {
+  if (scorecard.label === "Exceptional Growth" && stats.weightIncreaseCount >= 3) {
+    addWorkoutSummarySlot(slots, {
+      id: "exceptional-weight-finish",
+      tier: "elite",
+      sentence: `You closed the program with ${stats.weightIncreaseCount} total ${loadWord} increases while keeping the higher structure intact.`,
+      impact: 0.36,
+      family: "weight-progression",
+    });
+  } else if (stats.weightIncreaseCount >= 3 && !scorecard.tags.includes("four_plus_weight_increases")) {
     addWorkoutSummarySlot(slots, {
       id: "three-plus-load-increases",
       tier: "major",
-      sentence: `You moved ${loadWord} up ${stats.weightIncreaseCount} separate times, which is worth noticing even when it is not the whole story.`,
-      impact: 0.34,
+      sentence: `You moved ${loadWord} up multiple times across this block.`,
+      impact: 0.3,
+      family: "weight-progression",
     });
-  } else if (stats.weightDelta > 0) {
+  } else if (stats.weightDelta > 0 && !scorecard.tags.includes("maintained_under_load")) {
     addWorkoutSummarySlot(slots, {
       id: "load-increase",
       tier: "major",
-      sentence: `You added ${loadDelta} lbs over the course of the block.`,
-      impact: 0.3,
+      sentence: `The ${loadScale} ${loadWord} increase adds important context to the performance trend.`,
+      impact: 0.27,
+      family: "weight-progression",
     });
   }
 
-  if (scorecard.tags.includes("maintained_under_load") && stats.weightDelta > 0) {
-    addWorkoutSummarySlot(slots, {
-      id: "held-with-added-weight",
-      tier: "major",
-      sentence: `Holding ${performanceWord} steady with the added ${loadWord} is a real positive sign.`,
-      impact: 0.35,
-    });
-  }
-
-  if (scorecard.tags.includes("recovered_after_tradeoff")) {
+  if (scorecard.tags.includes("recovered_after_tradeoff") && !scorecard.tags.includes("unrecovered_tradeoff")) {
     addWorkoutSummarySlot(slots, {
       id: "recovered-tradeoff",
       tier: "major",
-      sentence: `There was a dip after ${loadWord} increased, but the later sessions recovered that ground.`,
-      impact: 0.32,
+      sentence: `After the tradeoff dip, the graph recovered back into range instead of collapsing backward.`,
+      impact: 0.33,
+      family: "recovery",
     });
   }
 
@@ -2297,6 +2414,7 @@ const getWorkoutSummarySupportSlots = (
       tier: "context",
       sentence: `The heavier ${loadWord} came with a drop that was not fully recovered by the end.`,
       impact: 0.31,
+      family: "tradeoff",
     });
   }
 
@@ -2304,42 +2422,57 @@ const getWorkoutSummarySupportSlots = (
     addWorkoutSummarySlot(slots, {
       id: "controlled-tradeoff",
       tier: "context",
-      sentence: `With a controlled exercise, that kind of drop can read more like a weight tradeoff than a simple regression.`,
+      sentence: `Under ${constraintLabel} constraints, that late drop reads more like a ${loadWord} tradeoff than a simple regression.`,
       impact: 0.3,
+      family: "constraint",
     });
   }
 
-  if (stats.hasDateData && stats.hasSignificantGap && scorecard.label === "Contextual Decline") {
+  if (scorecard.label === "Contextual Decline") {
     addWorkoutSummarySlot(slots, {
-      id: "gap-context-decline",
-      tier: "context",
-      sentence: `The longer gap between sessions may be useful context for the later drop.`,
-      impact: 0.24,
+      id: "external-context-note",
+      tier: "label",
+      sentence: `Conditioning-based work can be influenced by recovery, environment, schedule, health, or outside fatigue.`,
+      impact: 0.31,
+      family: "contextual-decline",
     });
   } else if (stats.hasDateData && stats.hasSignificantGap && stats.outputDelta >= 1 && scorecard.finalScore < 6) {
     addWorkoutSummarySlot(slots, {
       id: "gap-positive-context",
       tier: "minor",
-      sentence: `Even with a longer gap between sessions, the finish still landed above the start.`,
+      sentence: `Even with a dip around the longer gap between sessions, the finish still landed above the start.`,
       impact: 0.2,
+      family: "gap",
     });
   }
 
-  if (scorecard.tags.includes("spike_not_retained")) {
+  if (scorecard.tags.includes("spike_not_retained") && scorecard.label !== "Exceptional Growth") {
     addWorkoutSummarySlot(slots, {
       id: "spike-not-retained",
       tier: "context",
       sentence: `The high point was not fully held through the end of the block.`,
-      impact: 0.27,
+      impact: 0.25,
+      family: "retention",
     });
   }
 
-  if (scorecard.tags.includes("late_average_above_early") && stats.outputDelta >= 0) {
+  if (scorecard.label === "Exceptional Growth" && stats.outputDelta > 0) {
     addWorkoutSummarySlot(slots, {
-      id: "later-average-up",
+      id: "exceptional-output-delta",
+      tier: "major",
+      sentence: `Finishing ${outputDelta} above where you started reflects an exceptional level of progress.`,
+      impact: 0.34,
+      family: "output-gain",
+    });
+  }
+
+  if (scorecard.label === "Moderate Growth" && stats.outputDelta > 0 && stats.outputDelta <= 2 && stats.weightDelta <= 0) {
+    addWorkoutSummarySlot(slots, {
+      id: "moderate-small-finish",
       tier: "minor",
-      sentence: `The later sessions sat slightly above the early stretch.`,
-      impact: 0.22,
+      sentence: `That is a solid sign moving forward without overselling the graph.`,
+      impact: 0.14,
+      family: "closer-soft",
     });
   }
 
@@ -2350,36 +2483,23 @@ const getWorkoutSummaryLabelSlot = (
   scorecard: WorkoutSummaryScorecard,
   stats: WorkoutSummaryTrendStats
 ): WorkoutSummaryNarrativeSlot | null => {
-  if (scorecard.label === "Exceptional Growth") {
-    const needsExplanation =
-      scorecard.tags.includes("no_output_progression_under_load") ||
-      scorecard.tags.includes("plateau_after_progression") ||
-      Math.abs(stats.outputDelta) <= 1;
-
-    if (!needsExplanation) return null;
+  if (scorecard.label === "Exceptional Growth" && scorecard.tags.includes("retained_meaningful_improvement")) {
     return {
-      id: "exceptional-structural-explanation",
+      id: "exceptional-retained-explanation",
       tier: "label",
-      sentence: `What separates this as Exceptional Growth is the structure behind the result: ${scorecard.primaryReason}`,
+      sentence: `The result stands out because the graph retained the adaptation rather than relying on a single peak.`,
       impact: 0.3,
+      family: "retained-adaptation",
     };
   }
 
-  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 6) {
+  if (scorecard.label === "Moderate Growth" && scorecard.tags.includes("no_output_progression_under_load")) {
     return {
-      id: "high-moderate-explanation",
+      id: "load-led-moderate-explanation",
       tier: "label",
-      sentence: `The positive signs are clear, but the graph does not quite separate enough to move higher.`,
-      impact: 0.22,
-    };
-  }
-
-  if (scorecard.label === "Contextual Decline") {
-    return {
-      id: "external-context-note",
-      tier: "label",
-      sentence: `External factors like recovery, environment, schedule, or health can sometimes influence repeated downward trends like this.`,
-      impact: 0.3,
+      sentence: `The progress here comes more from handling increased difficulty than dramatically increasing output.`,
+      impact: 0.28,
+      family: "weight-progression",
     };
   }
 
@@ -2392,28 +2512,19 @@ const getWorkoutSummaryCloserSlot = (
 ): WorkoutSummaryNarrativeSlot | null => {
   if (scorecard.label === "Exceptional Growth") {
     return {
-      id: "exceptional-momentum-closer",
+      id: "exceptional-outstanding-closer",
       tier: "closer",
-      sentence: `The momentum you built here is incredible.`,
+      sentence: `Outstanding work.`,
       impact: 0.18,
+      family: "closer",
     };
   }
 
   if (scorecard.label === "Moderate Growth") {
     if (scorecard.finalScore >= 6) {
-      return { id: "moderate-foundation-closer", tier: "closer", sentence: `This is a great foundation to build from.`, impact: 0.16 };
+      return { id: "moderate-great-work", tier: "closer", sentence: `Great work.`, impact: 0.15, family: "closer" };
     }
-    if (stats.outputDelta > 0 && stats.outputDelta <= 1.5) {
-      return { id: "modestly-positive-closer", tier: "closer", sentence: `That keeps the direction modestly positive.`, impact: 0.14 };
-    }
-    return null;
-  }
-
-  if (scorecard.label === "Neutral") {
-    if (Math.abs(stats.outputDelta) <= 1) {
-      return { id: "neutral-mixed-closer", tier: "closer", sentence: `The trend stayed mixed rather than clearly positive or negative.`, impact: 0.13 };
-    }
-    return null;
+    return { id: "moderate-good-work", tier: "closer", sentence: `Good work.`, impact: 0.13, family: "closer" };
   }
 
   return null;
@@ -2432,18 +2543,27 @@ const buildWorkoutSummaryTextFromSlots = (
   addWorkoutSummarySlot(slots, getWorkoutSummaryLabelSlot(scorecard, stats));
   addWorkoutSummarySlot(slots, getWorkoutSummaryCloserSlot(scorecard, stats));
 
-  const maxSentences = scorecard.label === "Neutral" || isCompletionFocusedWorkoutSummarySeries(series) ? 3 : 5;
+  const maxSentences =
+    scorecard.label === "Exceptional Growth" ? 4 :
+    scorecard.label === "Moderate Growth" && scorecard.finalScore >= 6 ? 4 :
+    scorecard.label === "Contextual Decline" ? 3 :
+    isCompletionFocusedWorkoutSummarySeries(series) ? 2 :
+    3;
   const selected = [opening, ...slots.map((slot) => slot.sentence)];
   return joinWorkoutSummarySentences(selected, maxSentences);
 };
 
-const joinWorkoutSummarySentences = (sentences: Array<string | undefined>, maxSentences = 4) =>
-  sentences
+const joinWorkoutSummarySentences = (sentences: Array<string | undefined>, maxSentences = 4) => {
+  const seenFamilies = new Set<string>();
+  const cleaned = sentences
     .map((sentence) => String(sentence || "").trim())
     .filter(Boolean)
-    .filter((sentence, index, list) => list.indexOf(sentence) === index)
-    .slice(0, maxSentences)
-    .join(" ");
+    .map((sentence) => sentence.replace(/\s+/g, " "))
+    .filter((sentence, index, list) => list.findIndex((item) => item.toLowerCase() === sentence.toLowerCase()) === index)
+    .slice(0, maxSentences);
+
+  return cleaned.join(" ");
+};
 
 const getWorkoutSummaryTrendStats = (points: GraphPoint[]): WorkoutSummaryTrendStats => {
   const sortedPoints = [...points].sort((a, b) => {
@@ -3036,48 +3156,95 @@ const generateWorkoutSummaryInsightFromSeriesSet = (
   const combinedOpening = getWorkoutSummaryMemberOpening(combinedScorecard, combinedStats, null);
   const maxWeightGain = Math.max(0, ...childStats.map((stats) => stats.weightDelta));
   const totalWeightIncreases = childStats.reduce((total, stats) => total + stats.weightIncreaseCount, 0);
+  const maxWeightRun = Math.max(0, ...childStats.map((stats) => stats.maxWeightRun));
+  const maxOutputDelta = Math.max(...childStats.map((stats) => stats.outputDelta));
+  const minOutputDelta = Math.min(...childStats.map((stats) => stats.outputDelta));
   const anyControlled = usableSeries.some((series) => isControlledWorkoutSummarySeries(series));
   const anyCompletionFocused = usableSeries.some((series) => isCompletionFocusedWorkoutSummarySeries(series));
   const anyFinishBelowStart = childStats.some((stats) => stats.outputDelta < 0);
+  const anyRecoveredTradeoff = childItems.some(({ scorecard }) => scorecard.tags.includes("recovered_after_tradeoff"));
+  const anyMaintainedUnderLoad = childItems.some(({ scorecard }) => scorecard.tags.includes("maintained_under_load"));
   const allNeutral = childItems.every(({ scorecard }) => scorecard.label === "Neutral");
   const allModerate = childItems.every(({ scorecard }) => scorecard.label === "Moderate Growth");
   const bothPositive = childItems.every(({ scorecard }) => scorecard.label === "Moderate Growth" || scorecard.label === "Exceptional Growth");
+  const bothFinishAboveStart = childStats.every((stats) => stats.outputDelta > 0);
+  const bothStayAtOrAboveStart = childStats.every((stats) => stats.lastOutput >= stats.firstOutput - 0.25);
+  const bothTightRange = childStats.every((stats) => stats.outputRange <= 1.5);
+  const bothRecoveredStructure = childStats.every((stats) => stats.peakRetentionGap <= Math.max(1.25, stats.outputRange * 0.45));
+  const anyLargeStartJump = childStats.some((stats) => stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(2, stats.outputRange * 0.45));
+  const allLargeStartJump = childStats.every((stats) => stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(1, stats.outputRange * 0.35));
   const loadWord = usableSeries.some((series) => /carry|farmer/i.test(series.exerciseName)) ? "load" : "weight";
+  const dominantWeightSeries = usableSeries[childStats.findIndex((stats) => stats.weightDelta === maxWeightGain)] || usableSeries[0];
+  const dominantWeightName = dominantWeightSeries?.exerciseName || "the weighted movement";
   const combinedSlots: Array<string | undefined> = [combinedOpening];
 
   if (anyCompletionFocused && combinedScorecard.label === "Neutral") {
-    combinedSlots.push(`This block reads more like completion consistency than a progression-focused graph.`);
-  } else if (combinedScorecard.tags.includes("synchronized_plateau_breakthrough")) {
-    combinedSlots.push(`Both exercises broke through together, which gives this block a much stronger progression signal.`);
-  } else if (combinedScorecard.tags.includes("retained_meaningful_improvement")) {
-    combinedSlots.push(`The later sessions held onto a real improvement instead of giving it back.`);
-  } else if (maxWeightGain >= 10 && !anyFinishBelowStart) {
-    combinedSlots.push(`The clearest win here is the added ${loadWord}: you moved up to ${formatWorkoutSummaryNumber(maxWeightGain)} lbs heavier without a major drop-off.`);
-  } else if (totalWeightIncreases >= 3) {
-    combinedSlots.push(`You moved ${loadWord} up multiple times across this block.`);
-  } else if (allNeutral && anyFinishBelowStart) {
-    combinedSlots.push(`Both exercises point toward a neutral trend, with later performance not fully recovering by the end of the block.`);
-  } else if (allNeutral) {
-    combinedSlots.push(`Both exercises stayed relatively mixed without a clear move higher or lower.`);
-  } else if (allModerate || bothPositive) {
-    combinedSlots.push(`Both exercises showed positive signs without fully separating into a higher tier.`);
-  }
-
-  if (anyControlled && maxWeightGain > 0) {
-    combinedSlots.push(`The sustained performance matters more than it may look because weight increased during the block.`);
-  }
-
-  if (combinedScorecard.label === "Contextual Decline") {
-    combinedSlots.push(`External factors like recovery, environment, schedule, or health can sometimes influence repeated downward trends like this.`);
+    combinedSlots.push(`This graph reads more like a consistency check than a progression-focused workout.`);
+    combinedSlots.push(`This type of exercise plays an important role in long-term progress despite having limited recordable data.`);
+  } else if (combinedScorecard.label === "Contextual Decline") {
+    combinedSlots.push(`The graph gradually moves downward through the program without showing signs of major instability or collapse.`);
+    combinedSlots.push(`Conditioning-based work can be influenced by recovery, environment, schedule, health, or outside fatigue.`);
   } else if (combinedScorecard.label === "Exceptional Growth") {
-    combinedSlots.push(`The momentum you built here is incredible.`);
-  } else if (combinedScorecard.label === "Moderate Growth" && combinedScorecard.finalScore >= 6) {
-    combinedSlots.push(`This is a great foundation to build from.`);
+    if (anyControlled && maxOutputDelta >= 3) {
+      combinedSlots.push(`Explosive upward progression under ${usableSeries.map((series) => getWorkoutSummaryConstraintLabel(series)).filter((value, index, list) => value !== "controlled" && list.indexOf(value) === index).join("/") || "controlled"} constraints is extremely rare, making the acceleration shown here especially impressive.`);
+    } else if (allLargeStartJump || combinedScorecard.tags.includes("retained_meaningful_improvement")) {
+      combinedSlots.push(`You immediately created distance in both exercises, separating them from the starting baseline.`);
+    } else if (combinedScorecard.tags.includes("synchronized_plateau_breakthrough")) {
+      combinedSlots.push(`Both exercises broke through together, which gives this block a much stronger progression signal.`);
+    } else {
+      combinedSlots.push(`Both exercises built a stronger working range and kept that higher structure through the program.`);
+    }
+
+    if (maxWeightGain > 0 && bothStayAtOrAboveStart) {
+      combinedSlots.push(`You maintained that higher structure while continuing upward in ${loadWord}.`);
+    } else if (anyRecoveredTradeoff) {
+      combinedSlots.push(`Even after the tradeoff dip, both exercises recovered back into structure instead of collapsing backward.`);
+    }
+
+    if (bothFinishAboveStart) {
+      combinedSlots.push(`That level of retained adaptation reflects an exceptional performance.`);
+    }
+    combinedSlots.push(`Outstanding work.`);
+  } else if (combinedScorecard.label === "Moderate Growth") {
+    if (maxWeightRun >= 4) {
+      combinedSlots.push(`Both exercises established a stronger structure while continuing through ${maxWeightRun} consecutive ${loadWord} increases.`);
+    } else if (anyMaintainedUnderLoad && maxWeightGain > 0) {
+      combinedSlots.push(`Maintaining output while increasing ${loadWord} is what separates this block from a flatter progression pattern.`);
+    } else if (anyRecoveredTradeoff) {
+      combinedSlots.push(`Both exercises moved through a tradeoff phase and recovered back into range rather than collapsing backward.`);
+    } else if (bothTightRange && maxWeightGain > 0) {
+      combinedSlots.push(`Both exercises maintained a tightly controlled range while ${loadWord} increased throughout the program.`);
+    } else if (bothPositive) {
+      combinedSlots.push(`Both exercises showed positive structure without needing to force a bigger story than the graph supports.`);
+    } else if (allNeutral && anyFinishBelowStart) {
+      combinedSlots.push(`Both exercises point toward a steadier read, with later performance not fully recovering by the end of the block.`);
+    } else {
+      combinedSlots.push(`This block stayed controlled enough to keep the read positive.`);
+    }
+
+    if (anyControlled && maxWeightGain > 0 && !combinedSlots.some((sentence) => String(sentence || "").includes("constraints"))) {
+      combinedSlots.push(`The constraint work matters here because stable output becomes more valuable as ${loadWord} increases.`);
+    } else if (totalWeightIncreases >= 3 && maxWeightRun < 4) {
+      combinedSlots.push(`The repeated ${loadWord} increases add important context to the block.`);
+    } else if (maxWeightGain >= 10) {
+      combinedSlots.push(`The ${getWorkoutSummaryLoadScaleWord(maxWeightGain)} ${loadWord} increase, led by ${dominantWeightName}, gives the block more substance than output alone shows.`);
+    }
+
+    if (anyRecoveredTradeoff && !combinedSlots.some((sentence) => String(sentence || "").includes("recovered"))) {
+      combinedSlots.push(`The recovery after the dip reinforces the structure of the block.`);
+    }
+    combinedSlots.push(combinedScorecard.finalScore >= 6 ? `Great work.` : `Good work.`);
   } else if (combinedScorecard.label === "Neutral") {
-    combinedSlots.push(`The trend stayed mixed rather than clearly positive or negative.`);
+    if (bothTightRange) {
+      combinedSlots.push(`Both exercises maintained a tightly controlled range, making consistency and workload management the defining traits of this block.`);
+    } else if (anyFinishBelowStart) {
+      combinedSlots.push(`The block stayed mixed, with later performance not fully recovering by the end.`);
+    } else {
+      combinedSlots.push(`The block stayed balanced without a clear move higher or lower.`);
+    }
   }
 
-  let summary = joinWorkoutSummarySentences(combinedSlots, combinedScorecard.label === "Neutral" ? 3 : 5);
+  let summary = joinWorkoutSummarySentences(combinedSlots, combinedScorecard.label === "Exceptional Growth" ? 4 : combinedScorecard.label === "Moderate Growth" ? 4 : 3);
 
   const reportAccuracy: ReportAccuracy = childItems.some(({ insight }) => insight.reportAccuracy === "Low")
     ? "Low"
