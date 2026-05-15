@@ -1686,7 +1686,6 @@ function PathBar({ items }: { items: { label: string; onClick?: () => void }[] }
   );
 }
 
-
 type ReportAccuracy = "Low" | "Moderate" | "High";
 type SummaryTone = "positive" | "positiveContext" | "contextual" | "baseline" | "neutral";
 
@@ -3499,6 +3498,7 @@ function GraphInsightCard({ insight }: { insight?: WorkoutSummaryInsight }) {
   );
 }
 
+
 export default function App() {
   const [members, setMembers] = useState<Member[]>(() => {
     if (typeof window === "undefined") return [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
@@ -3754,11 +3754,11 @@ export default function App() {
 
       const shape =
         selectedBlock?.type === "single"
-          ? "square"
+          ? "triangle"
           : isChangedMidRoutine
             ? "diamond"
             : slot === 2
-              ? "triangle"
+              ? "square"
               : "circle";
 
       const dash = selectedBlock?.type === "paired" && slot === 2 ? "6 4" : undefined;
@@ -4227,6 +4227,7 @@ export default function App() {
       setScreen("members");
     }
   };
+
   const archiveMember = (memberId: string) => {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
     if (selectedMemberId === memberId) {
@@ -5122,6 +5123,8 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+
+                    <GraphInsightCard insight={generatedWorkoutSummaryInsight} />
                   </div>
                 </SectionCard>
               )}
@@ -5385,7 +5388,21 @@ export default function App() {
                       </div>
                     </div>
 
-                    <GraphInsightCard insight={generatedWorkoutSummaryInsight} />
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div className="mb-2 text-sm font-semibold text-zinc-900">Phase 3 Graph Pipeline</div>
+                      <div className="text-sm text-zinc-600">Series Count: {graphData.length}</div>
+                      <div className="mt-3 space-y-1 text-sm text-zinc-500">
+                        {graphData.length > 0 ? (
+                          graphData.map((series) => (
+                            <div key={series.exerciseId}>
+                              {series.exerciseName}: {series.points.length} {series.points.length === 1 ? "point" : "points"}
+                            </div>
+                          ))
+                        ) : (
+                          <div>No scoped graph data yet for this block.</div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </SectionCard>
               )}
