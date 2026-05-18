@@ -2514,42 +2514,70 @@ const classifyAISummaryLabel = (scorecard: AISummaryScorecard): AISummaryClassif
   };
 };
 
+const getAISummaryBestOutputProfile = (scorecard: AISummaryScorecard) =>
+  [...scorecard.seriesProfiles].sort((a, b) => b.outputDelta - a.outputDelta)[0];
+
+const getAISummaryBestWeightProfile = (scorecard: AISummaryScorecard) =>
+  [...scorecard.seriesProfiles].sort((a, b) => b.weightIncreaseCount - a.weightIncreaseCount || b.totalWeightIncrease - a.totalWeightIncrease)[0];
+
+const getAISummaryBlockNoun = (scorecard: AISummaryScorecard) => (scorecard.mode === "single" ? "exercise" : "block");
+
+const getAISummaryConstraintText = (scorecard: AISummaryScorecard) =>
+  scorecard.constraintTags.length ? ` under ${scorecard.constraintTags.join("/")} constraints` : "";
+
 const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryAchievement[] => {
   const achievements: AISummaryAchievement[] = [];
-  const bestWeightProfile = [...scorecard.seriesProfiles].sort((a, b) => b.weightIncreaseCount - a.weightIncreaseCount)[0];
-  const bestOutputProfile = [...scorecard.seriesProfiles].sort((a, b) => b.outputDelta - a.outputDelta)[0];
-  const constraints = scorecard.constraintTags.length ? ` under ${scorecard.constraintTags.join("/")} constraints` : "";
+  const bestWeightProfile = getAISummaryBestWeightProfile(scorecard);
+  const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
+  const constraints = getAISummaryConstraintText(scorecard);
+
+  if (scorecard.hasExplosiveJump && bestOutputProfile) {
+    const delta = formatAISummaryNumber(bestOutputProfile.outputDelta);
+    achievements.push({
+      id: "explosive-output-jump",
+      title: "Explosive output jump",
+      detail:
+        bestOutputProfile.endsAtPeak
+          ? `${bestOutputProfile.exerciseName} launched into a higher working range and finished at its highest output, ending ${delta} above where it started.`
+          : `${bestOutputProfile.exerciseName} created clear separation from its starting baseline and retained much of that gain.`,
+      strength: 0.96,
+      labelImpact: "carries",
+      markerKinds: ["explosive_jump", "output_rise", "strong_finish"],
+    });
+  }
 
   if (scorecard.hasRetainedOutputUnderWeight && bestWeightProfile) {
+    const weightText =
+      bestWeightProfile.weightIncreaseCount >= 3
+        ? ` through ${bestWeightProfile.weightIncreaseCount} weight increases`
+        : " while weight increased";
     achievements.push({
       id: "retained-output-under-weight",
       title: "Output held under rising demand",
-      detail: `${bestWeightProfile.exerciseName} maintained its working range while weight increased${constraints}.`,
-      strength: classification.label === "Exceptional Growth" ? 0.95 : 0.78,
+      detail: `${bestWeightProfile.exerciseName} maintained its working range${weightText}${constraints}.`,
+      strength: classification.label === "Exceptional Growth" ? 0.94 : 0.8,
       labelImpact: classification.label === "Exceptional Growth" ? "carries" : "promotes",
       markerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
     });
   }
 
-  if (scorecard.maxConsecutiveWeightIncreaseCount >= 3 && bestWeightProfile) {
+  if (scorecard.maxConsecutiveWeightIncreaseCount >= 4 && bestWeightProfile) {
     achievements.push({
-      id: "consecutive-weight-increases",
+      id: "four-plus-weight-increases",
       title: `${scorecard.maxConsecutiveWeightIncreaseCount} consecutive weight increases`,
-      detail: `${bestWeightProfile.exerciseName} built momentum through repeated weight progression.`,
-      strength: Math.min(1, 0.58 + scorecard.maxConsecutiveWeightIncreaseCount * 0.08),
-      labelImpact: scorecard.maxConsecutiveWeightIncreaseCount >= 4 ? "carries" : "promotes",
+      detail: `${bestWeightProfile.exerciseName} built rare weight momentum while keeping the block structurally intact.`,
+      strength: Math.min(0.96, 0.7 + scorecard.maxConsecutiveWeightIncreaseCount * 0.06),
+      labelImpact: scorecard.maxConsecutiveWeightIncreaseCount >= 5 || classification.label === "Exceptional Growth" ? "carries" : "promotes",
       markerKinds: ["consecutive_weight_progression", "weight_progression"],
     });
-  }
-
-  if (scorecard.hasExplosiveJump && bestOutputProfile) {
+  } else if (scorecard.maxConsecutiveWeightIncreaseCount >= 3 && bestWeightProfile) {
     achievements.push({
-      id: "explosive-output-jump",
-      title: "Explosive output jump",
-      detail: `${bestOutputProfile.exerciseName} created clear separation from its starting baseline.`,
-      strength: 0.92,
-      labelImpact: "carries",
-      markerKinds: ["explosive_jump", "output_rise"],
+      id: "three-weight-increases",
+      title: `${scorecard.maxConsecutiveWeightIncreaseCount} consecutive weight increases`,
+      detail: `${bestWeightProfile.exerciseName} built steady momentum through repeated weight progression.`,
+      strength: 0.7,
+      labelImpact: "promotes",
+      markerKinds: ["consecutive_weight_progression", "weight_progression"],
     });
   }
 
@@ -2557,18 +2585,29 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
     achievements.push({
       id: "synchronized-progression",
       title: "Both exercises supported the read",
-      detail: "The paired block showed positive structure across both exercises instead of relying on a single line.",
-      strength: 0.74,
-      labelImpact: "supports",
+      detail: "Both exercises contributed to the growth pattern instead of the summary relying on one standout line.",
+      strength: classification.label === "Exceptional Growth" ? 0.84 : 0.72,
+      labelImpact: classification.label === "Exceptional Growth" ? "promotes" : "supports",
       markerKinds: ["synchronized_progression"],
     });
   }
 
-  if (scorecard.hasRebound) {
+  if (bestOutputProfile && bestOutputProfile.outputDelta >= 2 && !scorecard.hasExplosiveJump) {
+    achievements.push({
+      id: "finished-above-start",
+      title: `Finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above baseline`,
+      detail: `${bestOutputProfile.exerciseName} finished clearly above where it started, which keeps the read pointed upward.`,
+      strength: Math.min(0.82, 0.56 + bestOutputProfile.outputDelta * 0.04),
+      labelImpact: bestOutputProfile.outputDelta >= 4 ? "promotes" : "supports",
+      markerKinds: ["output_rise", "strong_finish"],
+    });
+  }
+
+  if (scorecard.hasLateDip && scorecard.hasRebound) {
     achievements.push({
       id: "rebound-after-dip",
       title: "Recovery after a dip",
-      detail: "A temporary drop was followed by a recovery signal, which keeps the trend from reading as simple decline.",
+      detail: "The temporary dip recovered instead of turning into a sustained breakdown.",
       strength: 0.62,
       labelImpact: "supports",
       markerKinds: ["rebound", "late_dip"],
@@ -2576,67 +2615,76 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
   }
 
   if (!achievements.length) {
+    const fallbackDetail =
+      classification.label === "Contextual Decline"
+        ? "The graph moved downward enough to deserve context, but not enough to turn the effort into a simple negative read."
+        : classification.label === "Stable Growth"
+          ? "The graph stayed controlled enough to read more like a consistency check than a dramatic progression window."
+          : classification.reasons[0]?.text || "The graph produced a readable pattern from the available sessions.";
+
     achievements.push({
       id: "primary-pattern",
-      title: classification.label === "Contextual Decline" ? "Primary decline pattern" : classification.label === "Stable Growth" ? "Stable growth pattern" : "Primary progress pattern",
-      detail: classification.reasons[0]?.text || "The graph produced a readable pattern from the available sessions.",
+      title: classification.label === "Contextual Decline" ? "Contextual pattern" : classification.label === "Stable Growth" ? "Stable structure" : "Primary progress pattern",
+      detail: fallbackDetail,
       strength: 0.5,
       labelImpact: "supports",
       markerKinds: classification.reasons.map((reason) => reason.kind),
     });
   }
 
-  return achievements.sort((a, b) => b.strength - a.strength).slice(0, 4);
+  return achievements.sort((a, b) => {
+    const impactRank = { carries: 3, promotes: 2, supports: 1 };
+    return impactRank[b.labelImpact] - impactRank[a.labelImpact] || b.strength - a.strength;
+  }).slice(0, 4);
 };
 
 const buildAISummaryHighlights = (achievements: AISummaryAchievement[], scorecard: AISummaryScorecard): AISummaryHighlight[] => {
-  const carryingAchievements = achievements.filter(
-    (achievement) => achievement.labelImpact === "carries" || achievement.strength >= 0.78
-  );
-  const highlights: AISummaryHighlight[] = carryingAchievements.slice(0, 2).map((achievement) => ({
-    title: achievement.title,
-    detail: achievement.detail,
-    strength: achievement.strength,
-  }));
+  const highlights = achievements
+    .filter((achievement) => achievement.labelImpact === "carries" || achievement.strength >= 0.82)
+    .map((achievement) => ({
+      title: achievement.title,
+      detail: achievement.detail,
+      strength: achievement.strength,
+    }));
 
-  const bestOutputProfile = [...scorecard.seriesProfiles].sort((a, b) => b.outputDelta - a.outputDelta)[0];
-  if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && bestOutputProfile.outputDelta >= 3 && highlights.length < 2) {
+  const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
+  if (bestOutputProfile && bestOutputProfile.outputDelta >= 4 && highlights.length < 2) {
     highlights.push({
       title: `Finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above baseline`,
-      detail: `${bestOutputProfile.exerciseName} ended higher than it started.`,
-      strength: 0.55,
+      detail: `${bestOutputProfile.exerciseName} closed the program well above its starting point.`,
+      strength: Math.min(0.84, 0.58 + bestOutputProfile.outputDelta * 0.035),
     });
   }
 
-  return highlights;
+  return highlights.slice(0, 2);
 };
 
 const shouldUseAISummaryHighlightSlot = (classification: AISummaryClassification, highlight?: AISummaryHighlight) => {
   if (!highlight) return false;
-  if (classification.label === "Exceptional Growth") return highlight.strength >= 0.6;
-  if (classification.label === "Moderate Growth") return highlight.strength >= 0.72;
+  if (classification.label === "Exceptional Growth") return highlight.strength >= 0.68;
+  if (classification.label === "Moderate Growth") return highlight.strength >= 0.78;
   return false;
 };
 
 const buildAISummaryHighlightSentence = (highlight: AISummaryHighlight, scorecard: AISummaryScorecard) => {
   const title = highlight.title.trim();
   const detail = highlight.detail.trim();
+  const constraints = getAISummaryConstraintText(scorecard);
 
   if (/consecutive weight increases/i.test(title)) {
-    return `The clearest highlight was ${title.toLowerCase()}, showing repeated progression in weight demand.`;
+    return `The clearest highlight was ${title.toLowerCase()}, which set the tone for the entire ${getAISummaryBlockNoun(scorecard)}.`;
   }
 
   if (/above baseline/i.test(title)) {
-    return `${title} is the clearest highlight of the graph.`;
+    return `${title} is the clearest sign that the work carried forward instead of fading out.`;
   }
 
   if (/output held|rising demand/i.test(title)) {
-    const constraintText = scorecard.constraintTags.length ? ` under ${scorecard.constraintTags.join("/")} constraints` : "";
-    return `The clearest highlight was maintaining output while difficulty increased${constraintText}.`;
+    return `The clearest win was holding the working range while the demand kept increasing${constraints}.`;
   }
 
   if (/explosive/i.test(title)) {
-    return `The clearest highlight was the explosive jump away from the starting baseline.`;
+    return `The big separator was the early jump into a higher working range and the fact that you never gave that ground back.`;
   }
 
   return detail || title;
@@ -2674,6 +2722,100 @@ const formatAISummaryNumber = (value: number) => {
 
 const getAISummaryHeadline = (classification: AISummaryClassification, _story: AISummaryStory) => classification.label;
 
+const buildAISummaryOpeningSlot = (scorecard: AISummaryScorecard, classification: AISummaryClassification, story: AISummaryStory): AISummaryResolvedSlot => {
+  const blockNoun = getAISummaryBlockNoun(scorecard);
+
+  if (classification.label === "Exceptional Growth") {
+    if (story.identity === "constraint_progression") {
+      return { kind: "opener", text: `You crushed this ${blockNoun}.`, importance: 1 };
+    }
+    if (story.identity === "stacked_progression") {
+      return { kind: "opener", text: `You crushed this ${blockNoun}.`, importance: 1 };
+    }
+    return { kind: "opener", text: `This was an impressive performance.`, importance: 0.96 };
+  }
+
+  if (classification.label === "Moderate Growth") {
+    if (scorecard.hasRetainedOutputUnderWeight || scorecard.maxConsecutiveWeightIncreaseCount >= 3) {
+      return { kind: "opener", text: `This was a strong ${blockNoun}.`, importance: 0.86 };
+    }
+    return { kind: "opener", text: `This was a solid showing.`, importance: 0.82 };
+  }
+
+  if (classification.label === "Contextual Decline") {
+    return { kind: "opener", text: "This trend is worth reading with context.", importance: 0.76 };
+  }
+
+  return { kind: "opener", text: "This graph reads more like a consistency check than a progression-focused workout.", importance: 0.68 };
+};
+
+const buildAISummaryAchievementSentence = (
+  scorecard: AISummaryScorecard,
+  classification: AISummaryClassification,
+  achievement?: AISummaryAchievement
+) => {
+  if (!achievement) return "";
+
+  if (classification.label === "Stable Growth") {
+    return achievement.detail;
+  }
+
+  if (achievement.id === "retained-output-under-weight") {
+    return achievement.detail.replace("maintained its working range", "maintained a stable working range");
+  }
+
+  if (achievement.id === "explosive-output-jump") {
+    return achievement.detail;
+  }
+
+  if (achievement.id === "four-plus-weight-increases") {
+    return achievement.detail;
+  }
+
+  if (achievement.id === "synchronized-progression" && classification.label === "Exceptional Growth") {
+    return "Both exercises helped create distance from the starting baseline and kept the higher structure intact.";
+  }
+
+  if (scorecard.mode === "single" && classification.label === "Moderate Growth" && achievement.id === "finished-above-start") {
+    return achievement.detail.replace("which keeps the read pointed upward", "which is a strong sign of conditioning progress");
+  }
+
+  return achievement.detail;
+};
+
+const buildAISummaryStructuralSentence = (
+  scorecard: AISummaryScorecard,
+  classification: AISummaryClassification,
+  story: AISummaryStory
+) => {
+  const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
+
+  if (classification.label === "Contextual Decline") {
+    return "Conditioning-based outputs can fluctuate with recovery, stress, schedule, or outside fatigue, so this type of decline deserves context before drawing a hard conclusion.";
+  }
+
+  if (classification.label === "Stable Growth") {
+    if (scorecard.hasLateDip && scorecard.hasRebound) {
+      return "The volatility looks more like baseline adjustment than a clean growth or decline pattern.";
+    }
+    return "This type of controlled range can still play an important role in long-term progress, even when the recordable data is limited.";
+  }
+
+  if (story.needsStructuralExplanation && scorecard.hasRetainedOutputUnderWeight) {
+    return "The progression came more from handling increased difficulty than dramatically increasing output.";
+  }
+
+  if (scorecard.hasLateDip && scorecard.hasRebound) {
+    return "Even with the temporary dip, the recovery kept the overall structure intact.";
+  }
+
+  if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && classification.label !== "Stable Growth") {
+    return `${bestOutputProfile.exerciseName} finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above where it started.`;
+  }
+
+  return "";
+};
+
 const composeAISummarySlots = (
   scorecard: AISummaryScorecard,
   classification: AISummaryClassification,
@@ -2684,57 +2826,27 @@ const composeAISummarySlots = (
   const slots: AISummaryResolvedSlot[] = [];
   const primaryAchievement = achievements[0];
   const primaryHighlight = highlights[0];
-  const blockNoun = scorecard.mode === "single" ? "exercise" : "block";
-  const strongestProfile = [...scorecard.seriesProfiles].sort((a, b) => Math.abs(b.outputDelta) - Math.abs(a.outputDelta))[0];
 
-  if (classification.label === "Exceptional Growth") {
-    slots.push({ kind: "opener", text: `You crushed this ${blockNoun}.`, importance: 1 });
-  } else if (classification.label === "Moderate Growth") {
-    slots.push({ kind: "opener", text: `This was a strong ${blockNoun}.`, importance: 0.82 });
-  } else if (classification.label === "Contextual Decline") {
-    slots.push({ kind: "opener", text: "This trend is worth reading with context.", importance: 0.76 });
-  } else {
-    slots.push({ kind: "opener", text: "This graph held a stable overall pattern.", importance: 0.68 });
-  }
+  slots.push(buildAISummaryOpeningSlot(scorecard, classification, story));
 
-  if (primaryAchievement) {
-    slots.push({ kind: "dominant_achievement", text: primaryAchievement.detail, importance: primaryAchievement.strength });
+  const achievementSentence = buildAISummaryAchievementSentence(scorecard, classification, primaryAchievement);
+  if (achievementSentence) {
+    slots.push({ kind: "dominant_achievement", text: achievementSentence, importance: primaryAchievement?.strength || 0.7 });
   }
 
   if (shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
     const highlightText = buildAISummaryHighlightSentence(primaryHighlight, scorecard);
-    if (highlightText && highlightText !== primaryAchievement?.detail) {
+    if (highlightText && highlightText !== achievementSentence) {
       slots.push({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
     }
   }
 
-  if (story.needsStructuralExplanation && scorecard.hasRetainedOutputUnderWeight) {
+  const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story);
+  if (structuralSentence) {
     slots.push({
-      kind: "structural_explanation",
-      text: "The progression comes from handling increased difficulty rather than needing a dramatic output spike.",
-      importance: 0.64,
-    });
-  } else if (strongestProfile && strongestProfile.outputDelta > 0 && classification.label !== "Stable Growth") {
-    slots.push({
-      kind: "supporting_context",
-      text: `${strongestProfile.exerciseName} finished ${formatAISummaryNumber(strongestProfile.outputDelta)} above where it started.`,
-      importance: 0.54,
-    });
-  }
-
-  if (scorecard.hasLateDip && scorecard.hasRebound && classification.label !== "Contextual Decline") {
-    slots.push({
-      kind: "supporting_context",
-      text: "Even with a temporary dip, the graph showed recovery instead of a simple collapse.",
-      importance: 0.5,
-    });
-  }
-
-  if (classification.label === "Contextual Decline") {
-    slots.push({
-      kind: "structural_explanation",
-      text: "The graph moved downward without enough positive counterweight to call it a growth pattern, but conditioning and fatigue variables can affect this type of read.",
-      importance: 0.7,
+      kind: classification.label === "Contextual Decline" || classification.label === "Stable Growth" ? "structural_explanation" : "supporting_context",
+      text: structuralSentence,
+      importance: 0.58,
     });
   }
 
@@ -2744,16 +2856,23 @@ const composeAISummarySlots = (
       : classification.label === "Moderate Growth"
         ? "Good work."
         : classification.label === "Contextual Decline"
-          ? "That context matters before drawing a hard conclusion."
+          ? "That context matters before turning the pattern into a judgment on the work."
           : "This gives future sessions a useful comparison point.";
 
-  slots.push({ kind: "closer", text: closer, importance: 0.35 });
+  if (classification.label !== "Stable Growth" || scorecard.dataConfidence !== "Low") {
+    slots.push({ kind: "closer", text: closer, importance: 0.35 });
+  }
 
   const seen = new Set<string>();
   return slots.filter((slot) => {
     const normalized = slot.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (!normalized || seen.has(normalized)) return false;
+    const shortKey = normalized
+      .replace(/\b(the|a|an|this|that|with|while|under|through|and|or|but|it|its|you|your)\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized || seen.has(normalized) || seen.has(shortKey)) return false;
     seen.add(normalized);
+    seen.add(shortKey);
     return true;
   });
 };
@@ -2774,6 +2893,9 @@ const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) =>
     .map((slot) => slot.text.trim())
     .filter(Boolean)
     .join(" ")
+    .replace(/\bThe graph rose early, dipped[^.]*\./gi, "")
+    .replace(/\bThe graph increased early, dipped[^.]*\./gi, "")
+    .replace(/\bthen\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 
