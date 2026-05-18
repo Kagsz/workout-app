@@ -2590,14 +2590,17 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
 };
 
 const buildAISummaryHighlights = (achievements: AISummaryAchievement[], scorecard: AISummaryScorecard): AISummaryHighlight[] => {
-  const highlights: AISummaryHighlight[] = achievements.slice(0, 3).map((achievement) => ({
+  const carryingAchievements = achievements.filter(
+    (achievement) => achievement.labelImpact === "carries" || achievement.strength >= 0.78
+  );
+  const highlights: AISummaryHighlight[] = carryingAchievements.slice(0, 2).map((achievement) => ({
     title: achievement.title,
     detail: achievement.detail,
     strength: achievement.strength,
   }));
 
   const bestOutputProfile = [...scorecard.seriesProfiles].sort((a, b) => b.outputDelta - a.outputDelta)[0];
-  if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && highlights.length < 3) {
+  if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && bestOutputProfile.outputDelta >= 3 && highlights.length < 2) {
     highlights.push({
       title: `Finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above baseline`,
       detail: `${bestOutputProfile.exerciseName} ended higher than it started.`,
@@ -2606,6 +2609,37 @@ const buildAISummaryHighlights = (achievements: AISummaryAchievement[], scorecar
   }
 
   return highlights;
+};
+
+const shouldUseAISummaryHighlightSlot = (classification: AISummaryClassification, highlight?: AISummaryHighlight) => {
+  if (!highlight) return false;
+  if (classification.label === "Exceptional Growth") return highlight.strength >= 0.6;
+  if (classification.label === "Moderate Growth") return highlight.strength >= 0.72;
+  return false;
+};
+
+const buildAISummaryHighlightSentence = (highlight: AISummaryHighlight, scorecard: AISummaryScorecard) => {
+  const title = highlight.title.trim();
+  const detail = highlight.detail.trim();
+
+  if (/consecutive weight increases/i.test(title)) {
+    return `The clearest highlight was ${title.toLowerCase()}, showing repeated progression in weight demand.`;
+  }
+
+  if (/above baseline/i.test(title)) {
+    return `${title} is the clearest highlight of the graph.`;
+  }
+
+  if (/output held|rising demand/i.test(title)) {
+    const constraintText = scorecard.constraintTags.length ? ` under ${scorecard.constraintTags.join("/")} constraints` : "";
+    return `The clearest highlight was maintaining output while difficulty increased${constraintText}.`;
+  }
+
+  if (/explosive/i.test(title)) {
+    return `The clearest highlight was the explosive jump away from the starting baseline.`;
+  }
+
+  return detail || title;
 };
 
 const locateAISummaryStory = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryStory => {
@@ -2667,8 +2701,11 @@ const composeAISummarySlots = (
     slots.push({ kind: "dominant_achievement", text: primaryAchievement.detail, importance: primaryAchievement.strength });
   }
 
-  if (primaryHighlight && primaryHighlight.title !== primaryAchievement?.title) {
-    slots.push({ kind: "highlight", text: `${primaryHighlight.title}: ${primaryHighlight.detail}`, importance: primaryHighlight.strength });
+  if (shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
+    const highlightText = buildAISummaryHighlightSentence(primaryHighlight, scorecard);
+    if (highlightText && highlightText !== primaryAchievement?.detail) {
+      slots.push({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
+    }
   }
 
   if (story.needsStructuralExplanation && scorecard.hasRetainedOutputUnderWeight) {
@@ -2820,16 +2857,6 @@ function GraphInsightCard({ insight }: { insight: WorkoutSummaryInsight | null }
           <p className="mt-2 text-lg font-semibold leading-snug text-zinc-950">{insight.headline}</p>
           <p className="mt-2 text-sm leading-6 text-zinc-700">{insight.summary}</p>
 
-          {insight.highlights.length ? (
-            <div className="mt-3">
-              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-zinc-500">Highlights</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {insight.highlights.slice(0, 2).map((highlight) => (
-                  <AISummaryMiniCard key={`${insight.id}-${highlight.title}`} title={highlight.title} detail={highlight.detail} />
-                ))}
-              </div>
-            </div>
-          ) : null}
 
           {insight.achievements.length ? (
             <div className="mt-3">
