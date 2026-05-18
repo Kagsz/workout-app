@@ -2809,7 +2809,7 @@ const buildAISummaryStructuralSentence = (
     return "Even with the temporary dip, the recovery kept the overall structure intact.";
   }
 
-  if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && classification.label !== "Stable Growth") {
+  if (bestOutputProfile && bestOutputProfile.outputDelta > 0) {
     return `${bestOutputProfile.exerciseName} finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above where it started.`;
   }
 
