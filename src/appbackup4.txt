@@ -1686,741 +1686,1818 @@ function PathBar({ items }: { items: { label: string; onClick?: () => void }[] }
   );
 }
 
+type ReportAccuracy = "Low" | "Moderate" | "High";
+type SummaryTone = "positive" | "positiveContext" | "contextual" | "baseline" | "neutral";
 
-// ===== AI SUMMARY ARCHITECTURE =====
-
-type AISummaryLabel = "Exceptional Growth" | "Moderate Growth" | "Neutral" | "Contextual Decline";
-type AISummaryTone = "exceptional" | "positive" | "neutral" | "contextual" | "baseline";
-type AISummaryReportAccuracy = "High" | "Moderate" | "Low";
-type AISummaryMarkerKind =
-  | "output_rise"
-  | "output_decline"
-  | "output_plateau"
-  | "output_volatility"
-  | "weight_progression"
-  | "consecutive_weight_progression"
-  | "retained_output_under_weight"
-  | "synchronized_progression"
-  | "constraint_present"
-  | "rebound"
-  | "late_dip"
-  | "explosive_jump"
-  | "strong_finish"
-  | "low_data";
-
-type AISummaryStoryIdentity =
-  | "stacked_progression"
-  | "synchronized_advancement"
-  | "hidden_progression"
-  | "constraint_progression"
-  | "steady_growth"
-  | "stable_retention"
-  | "mixed_signals"
-  | "sustained_decline"
-  | "decline_with_context"
-  | "baseline_read";
-
-type AISummarySlotKind =
-  | "opener"
-  | "dominant_achievement"
-  | "highlight"
-  | "supporting_context"
-  | "structural_explanation"
-  | "closer";
-
-type AISummaryMarker = {
-  kind: AISummaryMarkerKind;
-  text: string;
-  strength: number;
-  seriesName?: string;
-};
-
-type AISummaryAchievement = {
-  id: string;
+type WorkoutSummaryFactor = {
+  symbol: string;
   title: string;
-  detail: string;
-  strength: number;
-  labelImpact: "supports" | "promotes" | "carries";
-  markerKinds: AISummaryMarkerKind[];
-};
-
-type AISummaryHighlight = {
-  title: string;
-  detail: string;
-  strength: number;
-};
-
-type AISummarySeriesProfile = {
-  exerciseName: string;
-  points: GraphPoint[];
-  startOutput: number;
-  endOutput: number;
-  peakOutput: number;
-  lowOutput: number;
-  outputDelta: number;
-  outputRange: number;
-  outputPercentChange: number;
-  numericWeights: number[];
-  uniqueNumericWeights: number[];
-  weightIncreaseCount: number;
-  consecutiveWeightIncreaseCount: number;
-  totalWeightIncrease: number;
-  hasWeightProgression: boolean;
-  hasMaintainedOutputUnderWeight: boolean;
-  hasLateDip: boolean;
-  hasRebound: boolean;
-  hasExplosiveJump: boolean;
-  endsAtPeak: boolean;
-  isFlatOrControlled: boolean;
-};
-
-type AISummaryScorecard = {
-  mode: BlockType;
-  seriesProfiles: AISummarySeriesProfile[];
-  sessionCount: number;
-  dataConfidence: AISummaryReportAccuracy;
-  startOutputAverage: number;
-  endOutputAverage: number;
-  outputDeltaAverage: number;
-  outputRangeAverage: number;
-  totalWeightIncreaseCount: number;
-  maxConsecutiveWeightIncreaseCount: number;
-  hasConstraints: boolean;
-  constraintTags: string[];
-  hasSynchronizedProgression: boolean;
-  hasRetainedOutputUnderWeight: boolean;
-  hasExplosiveJump: boolean;
-  hasLateDip: boolean;
-  hasRebound: boolean;
-  markers: AISummaryMarker[];
-};
-
-type AISummaryClassification = {
-  label: AISummaryLabel;
-  confidence: number;
-  reasons: AISummaryMarker[];
-};
-
-type AISummaryStory = {
-  identity: AISummaryStoryIdentity;
-  label: AISummaryLabel;
-  tone: AISummaryTone;
-  needsStructuralExplanation: boolean;
-};
-
-type AISummaryResolvedSlot = {
-  kind: AISummarySlotKind;
   text: string;
-  importance: number;
+  impact: number;
 };
 
 type WorkoutSummaryInsight = {
   id: string;
-  label: AISummaryLabel;
+  isExperimental: boolean;
+  baseLabel: string;
   headline: string;
   summary: string;
-  tone: AISummaryTone;
-  reportAccuracy: AISummaryReportAccuracy;
+  achievement?: string;
+  reportAccuracy: ReportAccuracy;
   accuracyReason: string;
-  achievements: AISummaryAchievement[];
-  highlights: AISummaryHighlight[];
-  markers: AISummaryMarker[];
-  slots: AISummaryResolvedSlot[];
+  trend: string;
+  factors: WorkoutSummaryFactor[];
+  limitation: string;
 };
 
-const AI_SUMMARY_CONSTRAINT_PATTERNS = ["TEMPO", "PAUSE", "ECC", "ECC."];
+const PRIMARY_FACTOR_COUNT = 2;
+const SECONDARY_FACTOR_THRESHOLD = 0.1;
+const MAX_SECONDARY_FACTORS = 4;
 
-const getAISummaryUniqueValues = <T,>(values: T[]) => Array.from(new Set(values));
+const mockWorkoutSummaryInsights: WorkoutSummaryInsight[] = [
+  {
+    id: "milestone-week",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Exceptional Growth",
+    summary:
+      "Current output is trending upward with consistent sessions and increasing weight. As progress builds, gains become more gradual, which is a normal part of continued development.",
+    achievement:
+      "Week 6 stands out as a major milestone, with the largest increases in both weight and reps!",
+    reportAccuracy: "High",
+    accuracyReason: "consistent data",
+    trend: "Upward",
+    factors: [
+      { symbol: "↗", title: "Graph trend", text: "Output increased across sessions.", impact: 0.38 },
+      { symbol: "◼", title: "Weight progression", text: "Weight increased steadily.", impact: 0.28 },
+      { symbol: "▣", title: "Performance signal", text: "Performance was maintained as difficulty increased.", impact: 0.22 },
+      { symbol: "◷", title: "Consistency", text: "Sessions remained regular.", impact: 0.12 },
+    ],
+    limitation: "Milestone detection is based on observed peaks within the dataset.",
+  },
+  {
+    id: "recovery-after-spike",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Exceptional Growth",
+    summary:
+      "Current output shows a brief drop followed by a return to prior levels. Weight increased around the dip, and performance recovered in the next session, which can indicate positive adaptation rather than a setback.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Irregular",
+    factors: [
+      { symbol: "↘↗", title: "Graph pattern", text: "A single-session drop was followed by a rebound.", impact: 0.34 },
+      { symbol: "◼", title: "Weight context", text: "Weight increased around the dip in output.", impact: 0.26 },
+      { symbol: "▣", title: "Recovery signal", text: "Output returned to or exceeded prior levels next session.", impact: 0.25 },
+      { symbol: "◷", title: "Session timing", text: "Session spacing remained consistent around the dip.", impact: 0.15 },
+    ],
+    limitation: "Single-session fluctuations should be interpreted cautiously without a longer pattern.",
+  },
+  {
+    id: "upward-strong",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Exceptional Growth",
+    summary:
+      "Current output is trending upward while maintaining consistent session frequency. Weight has increased gradually, suggesting strong progression. As progress builds, improvements may appear less dramatic over time, which is expected with continued growth.",
+    reportAccuracy: "High",
+    accuracyReason: "consistent data",
+    trend: "Upward",
+    factors: [
+      { symbol: "↗", title: "Graph trend", text: "Current output increased across recent sessions.", impact: 0.4 },
+      { symbol: "◼", title: "Weight progression", text: "Weight increased steadily while maintaining performance.", impact: 0.27 },
+      { symbol: "◷", title: "Session consistency", text: "Session spacing remained consistent.", impact: 0.18 },
+      { symbol: "▣", title: "Performance signal", text: "Performance improved without a late drop-off.", impact: 0.15 },
+    ],
+    limitation: "Data is consistent and sufficient for confident interpretation.",
+  },
+  {
+    id: "upward-low-data",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Emerging Growth",
+    summary:
+      "Current output is trending upward, but there are limited sessions available to establish a reliable baseline.",
+    reportAccuracy: "Low",
+    accuracyReason: "insufficient data",
+    trend: "Upward",
+    factors: [
+      { symbol: "↗", title: "Graph trend", text: "Output is increasing across available sessions.", impact: 0.38 },
+      { symbol: "?", title: "Data volume", text: "Limited session history reduces report accuracy.", impact: 0.34 },
+      { symbol: "◷", title: "Session spacing", text: "Session pattern is still forming.", impact: 0.18 },
+      { symbol: "▣", title: "Baseline", text: "More data is needed for a stable trend.", impact: 0.1 },
+    ],
+    limitation: "More sessions are required before drawing strong conclusions.",
+  },
+  {
+    id: "flat-increased-weight",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Positive Progress Under Weight",
+    summary:
+      "Current output is relatively flat, but weight has increased over time, showing progress under higher demand. This reflects stronger workload handling even if reps or output remain steady. Slower visible change occurs as progress becomes harder to achieve at higher levels.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Flat",
+    factors: [
+      { symbol: "◼", title: "Weight progression", text: "Weight increased while output remained stable.", impact: 0.36 },
+      { symbol: "▣", title: "Performance signal", text: "Maintaining performance at higher weight shows stronger workload handling.", impact: 0.28 },
+      { symbol: "→", title: "Graph trend", text: "Output remains consistent across sessions.", impact: 0.24 },
+      { symbol: "◷", title: "Session consistency", text: "Sessions remain reasonably consistent.", impact: 0.12 },
+    ],
+    limitation: "Flat output should be interpreted alongside weight changes.",
+  },
+  {
+    id: "flat-long-breaks",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Sustained Performance",
+    summary:
+      "Current output remains stable despite longer gaps between sessions, suggesting maintained performance over time. Stability across a less frequent routine can reflect a solid base to continue building from.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Flat",
+    factors: [
+      { symbol: "→", title: "Graph trend", text: "Output remains consistent.", impact: 0.32 },
+      { symbol: "◷", title: "Session spacing", text: "Longer breaks between sessions are present.", impact: 0.28 },
+      { symbol: "▣", title: "Foundation signal", text: "Stable performance suggests a strong performance baseline.", impact: 0.26 },
+      { symbol: "◼", title: "Weight", text: "Weight remains stable.", impact: 0.14 },
+    ],
+    limitation: "Session gaps influence interpretation of consistency.",
+  },
+  {
+    id: "downward-increased-weight",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Contextual Decline – Positive Signal",
+    summary:
+      "Current output is trending downward while weight has increased. This can indicate that the exercise has become more demanding, and the lower output reflects increased difficulty rather than a negative trend.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Downward",
+    factors: [
+      { symbol: "◼", title: "Weight increase", text: "Weight increased during the same period.", impact: 0.36 },
+      { symbol: "▣", title: "Positive difficulty signal", text: "Heavier weight can naturally reduce output while still reflecting a real tradeoff.", impact: 0.29 },
+      { symbol: "↘", title: "Graph trend", text: "Output decreased across sessions.", impact: 0.27 },
+      { symbol: "◷", title: "Session spacing", text: "Session timing varies slightly.", impact: 0.08 },
+    ],
+    limitation: "Decreased output should be interpreted alongside increased weight.",
+  },
+  {
+    id: "downward-fatigue",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Fatigue Trade-Off",
+    summary:
+      "Current output is trending downward and may be influenced by increased workload earlier in the session, contributing to accumulated fatigue. This reflects a trade-off within the session rather than a negative trend.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Downward",
+    factors: [
+      { symbol: "▦", title: "Preceding workload", text: "Earlier blocks increased in intensity.", impact: 0.34 },
+      { symbol: "▣", title: "Fatigue signal", text: "Accumulated fatigue may reduce performance.", impact: 0.29 },
+      { symbol: "↘", title: "Graph trend", text: "Output decreased across sessions.", impact: 0.25 },
+      { symbol: "◷", title: "Session structure", text: "Exercise occurs later in session.", impact: 0.12 },
+    ],
+    limitation: "Session order and prior workload influence performance.",
+  },
+  {
+    id: "external-conditions-decline",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Contextual Decline",
+    summary:
+      "Current output opened strong, declined through the middle of the program, then improved again near the end. This kind of pattern can happen when training conditions change over time, especially for cardio or outdoor work where heat, humidity, terrain, or other outside factors may affect performance.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "outside factors unknown",
+    trend: "Irregular",
+    factors: [
+      { symbol: "↘↗", title: "Graph pattern", text: "Early highs were followed by decline and late recovery.", impact: 0.34 },
+      { symbol: "▣", title: "Late recovery", text: "Recent sessions improved after the decline.", impact: 0.26 },
+      { symbol: "☁", title: "External context", text: "Outdoor or environmental conditions may affect output.", impact: 0.24 },
+      { symbol: "?", title: "Unknown variables", text: "The report cannot confirm outside conditions from graph data alone.", impact: 0.16 },
+    ],
+    limitation:
+      "Real-world conditions can influence performance, but this report can only flag that context may matter unless those details are recorded.",
+  },
+  {
+    id: "genuine-regression",
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline: "Temporary Decline",
+    summary:
+      "Current output is trending downward with longer gaps between sessions. This pattern can be influenced by time away, illness, or changes in routine, and may not reflect your typical performance level.",
+    reportAccuracy: "Moderate",
+    accuracyReason: "limited context",
+    trend: "Downward",
+    factors: [
+      { symbol: "↘", title: "Graph trend", text: "Output has decreased across recent sessions.", impact: 0.38 },
+      { symbol: "◷", title: "Session spacing", text: "Longer gaps between sessions are present.", impact: 0.3 },
+      { symbol: "▣", title: "Context signal", text: "External factors can impact short-term performance.", impact: 0.2 },
+      { symbol: "◼", title: "Weight", text: "Weight has not increased significantly.", impact: 0.12 },
+    ],
+    limitation: "Short-term declines should be interpreted within broader context and over more sessions.",
+  },
+];
 
-const getAISummaryPointTime = (point: GraphPoint) => {
-  const dateTime = getSafeDateTime(point.date);
-  return Number.isFinite(dateTime) && dateTime > 0 ? dateTime : point.sessionNumber;
-};
+const defaultWorkoutSummaryInsight = mockWorkoutSummaryInsights[0];
 
-const getAISummaryNumericWeight = (weight: string) => {
+const parseWorkoutSummaryWeight = (weight: string) => {
   const normalized = normalizeWeightInput(weight);
-  if (!normalized || normalized === "BW") return null;
+  if (!normalized || normalized === "BW") return 0;
   const value = Number(normalized);
-  return Number.isFinite(value) ? value : null;
+  return Number.isFinite(value) ? value : 0;
 };
 
-const getAISummarySeriesProfile = (series: GraphSeries): AISummarySeriesProfile | null => {
-  const points = [...series.points].sort((a, b) => getAISummaryPointTime(a) - getAISummaryPointTime(b));
-  if (points.length < 2) return null;
+type WorkoutSummaryLabel = "Exceptional Growth" | "Moderate Growth" | "Neutral" | "Contextual Decline" | "Baseline Established";
+type WorkoutSummaryBlockMode = "single" | "paired";
+type WorkoutSummarySignalTag =
+  | "no_signal"
+  | "finish_above_start"
+  | "finish_below_start"
+  | "late_average_above_early"
+  | "late_average_below_early"
+  | "weight_increased"
+  | "three_weight_increases"
+  | "four_plus_weight_increases"
+  | "maintained_under_load"
+  | "tradeoff_drop_under_load"
+  | "recovered_after_tradeoff"
+  | "unrecovered_tradeoff"
+  | "major_set_gain"
+  | "controlled_major_set_gain"
+  | "strong_finish"
+  | "volatile_without_resolution"
+  | "spike_not_retained"
+  | "early_gain_then_plateau"
+  | "late_spike_without_support"
+  | "plateau_after_progression"
+  | "no_output_progression_under_load"
+  | "load_drop_observed"
+  | "retained_meaningful_improvement"
+  | "synchronized_plateau_breakthrough";
 
-  const outputValues = points.map((point) => point.y).filter((value) => Number.isFinite(value));
-  if (outputValues.length < 2) return null;
+type WorkoutSummaryTrendStats = {
+  outputs: number[];
+  weights: number[];
+  first: GraphPoint;
+  last: GraphPoint;
+  firstOutput: number;
+  lastOutput: number;
+  firstWeight: number;
+  lastWeight: number;
+  minOutput: number;
+  maxOutput: number;
+  outputRange: number;
+  outputDelta: number;
+  weightDelta: number;
+  outputIncreaseCount: number;
+  weightIncreaseCount: number;
+  maxOutputRun: number;
+  maxWeightRun: number;
+  earlyAverage: number;
+  lateAverage: number;
+  averageDelta: number;
+  percentChange: number;
+  peakRetentionGap: number;
+  hasSignificantGap: boolean;
+  hasDateData: boolean;
+};
 
-  const startOutput = outputValues[0];
-  const endOutput = outputValues[outputValues.length - 1];
-  const peakOutput = Math.max(...outputValues);
-  const lowOutput = Math.min(...outputValues);
-  const outputDelta = endOutput - startOutput;
-  const outputRange = peakOutput - lowOutput;
-  const outputPercentChange = Math.abs(startOutput) > 0 ? outputDelta / Math.abs(startOutput) : outputDelta;
-  const numericWeights = points.map((point) => getAISummaryNumericWeight(point.weight)).filter((value): value is number => value != null);
-  const uniqueNumericWeights = getAISummaryUniqueValues(numericWeights).sort((a, b) => a - b);
+type WorkoutSummaryScorecard = {
+  mode: WorkoutSummaryBlockMode;
+  label: WorkoutSummaryLabel;
+  growthScore: number;
+  exceptionalScore: number;
+  riskScore: number;
+  declineScore: number;
+  finalScore: number;
+  tags: WorkoutSummarySignalTag[];
+  trend: string;
+  primaryReason: string;
+};
 
-  let weightIncreaseCount = 0;
-  let consecutiveWeightIncreaseCount = 0;
-  let currentConsecutiveWeightIncreaseCount = 0;
-  let previousWeight: number | null = null;
+const addWorkoutSummaryTag = (tags: WorkoutSummarySignalTag[], tag: WorkoutSummarySignalTag) => {
+  if (!tags.includes(tag)) tags.push(tag);
+};
 
-  numericWeights.forEach((weight) => {
-    if (previousWeight != null && weight > previousWeight) {
-      weightIncreaseCount += 1;
-      currentConsecutiveWeightIncreaseCount += 1;
-      consecutiveWeightIncreaseCount = Math.max(consecutiveWeightIncreaseCount, currentConsecutiveWeightIncreaseCount);
-    } else if (previousWeight != null && weight < previousWeight) {
-      currentConsecutiveWeightIncreaseCount = 0;
+const countWorkoutSummaryIncreases = (values: number[]) => {
+  let count = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const previous = values[index - 1];
+    const current = values[index];
+    if (current > 0 && previous > 0 && current > previous) count += 1;
+  }
+  return count;
+};
+
+const getWorkoutSummaryPointTime = (date: string) => {
+  const value = getSafeDateTime(date);
+  return Number.isFinite(value) ? value : NaN;
+};
+
+const buildInsufficientWorkoutSummaryInsight = (contextLabel = "this graph"): WorkoutSummaryInsight => ({
+  id: `generated-insufficient-${contextLabel.replace(/\s+/g, "-").toLowerCase()}`,
+  isExperimental: true,
+  baseLabel: "Workout Summary",
+  headline: "Baseline Established",
+  summary: "There is not enough recorded data yet to classify this graph beyond a starting baseline.",
+  reportAccuracy: "Low",
+  accuracyReason: "insufficient data",
+  trend: "Baseline",
+  factors: [
+    { symbol: "?", title: "Data volume", text: "More recorded sessions are needed before the trend is reliable.", impact: 0.6 },
+    { symbol: "▣", title: "Baseline", text: "This graph can still serve as a starting point for future comparison.", impact: 0.4 },
+  ],
+  limitation: "More sessions are required before drawing a reliable conclusion.",
+});
+
+const isControlledWorkoutSummarySeries = (series: GraphSeries | null | undefined) => {
+  const name = String(series?.exerciseName || "").toLowerCase();
+  const sampleTarget = String(series?.points?.[0]?.target || "").toLowerCase();
+  const combined = `${name} ${sampleTarget}`;
+
+  return (
+    /\btempo\b/.test(combined) ||
+    /\bpause\b/.test(combined) ||
+    /\becc\b/.test(combined) ||
+    /eccentric/.test(combined) ||
+    /\biso\b/.test(combined)
+  );
+};
+
+const getWorkoutSummaryAverage = (values: number[]) => {
+  if (!values.length) return 0;
+  return values.reduce((total, value) => total + value, 0) / values.length;
+};
+
+const getWorkoutSummaryMaxUpwardRun = (values: number[]) => {
+  let currentRun = 0;
+  let maxRun = 0;
+
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] > values[index - 1]) {
+      currentRun += 1;
+      maxRun = Math.max(maxRun, currentRun);
+    } else {
+      currentRun = 0;
     }
+  }
 
-    previousWeight = weight;
-  });
-
-  const firstWeight = numericWeights[0] ?? null;
-  const lastWeight = numericWeights[numericWeights.length - 1] ?? null;
-  const totalWeightIncrease = firstWeight != null && lastWeight != null ? lastWeight - firstWeight : 0;
-  const hasWeightProgression = weightIncreaseCount > 0 || totalWeightIncrease > 0;
-  const hasMaintainedOutputUnderWeight = hasWeightProgression && endOutput >= startOutput - 1;
-  const finalThree = outputValues.slice(-3);
-  const priorToFinalThree = outputValues.slice(0, Math.max(0, outputValues.length - 3));
-  const priorAverage = priorToFinalThree.length
-    ? priorToFinalThree.reduce((sum, value) => sum + value, 0) / priorToFinalThree.length
-    : startOutput;
-  const finalAverage = finalThree.length ? finalThree.reduce((sum, value) => sum + value, 0) / finalThree.length : endOutput;
-  const hasLateDip = outputValues.length >= 5 && finalAverage < priorAverage - Math.max(1, outputRange * 0.25);
-  const hasRebound = outputValues.some((value, index) => index > 0 && index < outputValues.length - 1 && value < outputValues[index - 1] - 0.5 && outputValues[index + 1] >= value + 0.5);
-  const biggestJump = outputValues.reduce((maxJump, value, index) => {
-    if (index === 0) return maxJump;
-    return Math.max(maxJump, value - outputValues[index - 1]);
-  }, 0);
-  const hasExplosiveJump = biggestJump >= Math.max(4, Math.abs(startOutput) * 0.35);
-  const endsAtPeak = endOutput === peakOutput;
-  const isFlatOrControlled = outputRange <= Math.max(1.5, Math.abs(startOutput) * 0.25);
-
-  return {
-    exerciseName: series.exerciseName,
-    points,
-    startOutput,
-    endOutput,
-    peakOutput,
-    lowOutput,
-    outputDelta,
-    outputRange,
-    outputPercentChange,
-    numericWeights,
-    uniqueNumericWeights,
-    weightIncreaseCount,
-    consecutiveWeightIncreaseCount,
-    totalWeightIncrease,
-    hasWeightProgression,
-    hasMaintainedOutputUnderWeight,
-    hasLateDip,
-    hasRebound,
-    hasExplosiveJump,
-    endsAtPeak,
-    isFlatOrControlled,
-  };
+  return maxRun;
 };
 
-const buildAISummaryScorecard = (graphData: GraphSeries[], blockType: BlockType): AISummaryScorecard | null => {
-  const seriesProfiles = graphData.map(getAISummarySeriesProfile).filter((profile): profile is AISummarySeriesProfile => Boolean(profile));
-  if (!seriesProfiles.length) return null;
+const getWorkoutSummaryPerformanceWord = (series?: GraphSeries | null) => {
+  const name = String(series?.exerciseName || "").toLowerCase();
 
-  const allPoints = graphData.flatMap((series) => series.points);
-  const sessionCount = getAISummaryUniqueValues(allPoints.map((point) => point.sessionId)).length || Math.max(...seriesProfiles.map((profile) => profile.points.length));
-  const dataConfidence: AISummaryReportAccuracy = sessionCount >= 6 ? "High" : sessionCount >= 4 ? "Moderate" : "Low";
-  const allExerciseNames = graphData.map((series) => series.exerciseName.toUpperCase()).join(" ");
-  const constraintTags = AI_SUMMARY_CONSTRAINT_PATTERNS.filter((tag) => allExerciseNames.includes(tag.replace(".", "")) || allExerciseNames.includes(tag));
-  const hasConstraints = constraintTags.length > 0;
-  const startOutputAverage = seriesProfiles.reduce((sum, profile) => sum + profile.startOutput, 0) / seriesProfiles.length;
-  const endOutputAverage = seriesProfiles.reduce((sum, profile) => sum + profile.endOutput, 0) / seriesProfiles.length;
-  const outputDeltaAverage = endOutputAverage - startOutputAverage;
-  const outputRangeAverage = seriesProfiles.reduce((sum, profile) => sum + profile.outputRange, 0) / seriesProfiles.length;
-  const totalWeightIncreaseCount = seriesProfiles.reduce((sum, profile) => sum + profile.weightIncreaseCount, 0);
-  const maxConsecutiveWeightIncreaseCount = Math.max(...seriesProfiles.map((profile) => profile.consecutiveWeightIncreaseCount));
-  const hasSynchronizedProgression = blockType === "paired" && seriesProfiles.length > 1 && seriesProfiles.every((profile) => profile.outputDelta >= 0 || profile.hasMaintainedOutputUnderWeight);
-  const hasRetainedOutputUnderWeight = seriesProfiles.some((profile) => profile.hasMaintainedOutputUnderWeight);
-  const hasExplosiveJump = seriesProfiles.some((profile) => profile.hasExplosiveJump);
-  const hasLateDip = seriesProfiles.some((profile) => profile.hasLateDip);
-  const hasRebound = seriesProfiles.some((profile) => profile.hasRebound);
-
-  const markers: AISummaryMarker[] = [];
-
-  if (outputDeltaAverage > 1) {
-    markers.push({ kind: "output_rise", text: "Output finished higher than it started.", strength: Math.min(1, Math.abs(outputDeltaAverage) / 8) });
-  } else if (outputDeltaAverage < -1) {
-    markers.push({ kind: "output_decline", text: "Output finished lower than it started.", strength: Math.min(1, Math.abs(outputDeltaAverage) / 8) });
-  } else {
-    markers.push({ kind: "output_plateau", text: "Output stayed in a controlled range.", strength: 0.45 });
-  }
-
-  if (totalWeightIncreaseCount > 0) {
-    markers.push({ kind: "weight_progression", text: "Weight increased across the block.", strength: Math.min(1, totalWeightIncreaseCount / 6) });
-  }
-
-  if (maxConsecutiveWeightIncreaseCount >= 3) {
-    markers.push({ kind: "consecutive_weight_progression", text: `${maxConsecutiveWeightIncreaseCount} consecutive weight increases appeared in the block.`, strength: Math.min(1, maxConsecutiveWeightIncreaseCount / 5) });
-  }
-
-  if (hasRetainedOutputUnderWeight) {
-    markers.push({ kind: "retained_output_under_weight", text: "Output was retained while weight demand increased.", strength: 0.82 });
-  }
-
-  if (hasSynchronizedProgression) {
-    markers.push({ kind: "synchronized_progression", text: "Both exercises contributed positively to the read.", strength: 0.76 });
-  }
-
-  if (hasConstraints) {
-    markers.push({ kind: "constraint_present", text: `${constraintTags.join("/")} constraints are present.`, strength: 0.68 });
-  }
-
-  if (hasExplosiveJump) {
-    markers.push({ kind: "explosive_jump", text: "A large output jump separated the graph from baseline.", strength: 0.9 });
-  }
-
-  if (hasRebound) {
-    markers.push({ kind: "rebound", text: "A dip was followed by a recovery signal.", strength: 0.58 });
-  }
-
-  if (hasLateDip) {
-    markers.push({ kind: "late_dip", text: "There was a late-program dip to interpret with context.", strength: 0.48 });
-  }
-
-  if (dataConfidence === "Low") {
-    markers.push({ kind: "low_data", text: "More sessions would improve confidence.", strength: 0.5 });
-  }
-
-  return {
-    mode: blockType,
-    seriesProfiles,
-    sessionCount,
-    dataConfidence,
-    startOutputAverage,
-    endOutputAverage,
-    outputDeltaAverage,
-    outputRangeAverage,
-    totalWeightIncreaseCount,
-    maxConsecutiveWeightIncreaseCount,
-    hasConstraints,
-    constraintTags,
-    hasSynchronizedProgression,
-    hasRetainedOutputUnderWeight,
-    hasExplosiveJump,
-    hasLateDip,
-    hasRebound,
-    markers,
-  };
+  if (/rower|bike|run|walk|lap|calorie/.test(name)) return "performance";
+  if (/carry/.test(name)) return "workload";
+  if (/slam/.test(name)) return "work";
+  return "performance";
 };
 
-const getAISummaryMarker = (scorecard: AISummaryScorecard, kind: AISummaryMarkerKind) =>
-  scorecard.markers.find((marker) => marker.kind === kind);
-
-const classifyAISummaryLabel = (scorecard: AISummaryScorecard): AISummaryClassification => {
-  const reasons: AISummaryMarker[] = [];
-  const outputRise = getAISummaryMarker(scorecard, "output_rise");
-  const outputDecline = getAISummaryMarker(scorecard, "output_decline");
-  const retainedUnderWeight = getAISummaryMarker(scorecard, "retained_output_under_weight");
-  const weightProgression = getAISummaryMarker(scorecard, "weight_progression");
-  const consecutiveWeightProgression = getAISummaryMarker(scorecard, "consecutive_weight_progression");
-  const explosiveJump = getAISummaryMarker(scorecard, "explosive_jump");
-  const synchronizedProgression = getAISummaryMarker(scorecard, "synchronized_progression");
-  const constraintPresent = getAISummaryMarker(scorecard, "constraint_present");
-  const strongAverageRise = scorecard.outputDeltaAverage >= Math.max(3, Math.abs(scorecard.startOutputAverage) * 0.25);
-  const meaningfulDecline = scorecard.outputDeltaAverage <= -Math.max(2, Math.abs(scorecard.startOutputAverage) * 0.2);
-  const heavyWeightProgression = scorecard.totalWeightIncreaseCount >= 4 || scorecard.maxConsecutiveWeightIncreaseCount >= 3;
-  const hiddenExceptional = Boolean(retainedUnderWeight && heavyWeightProgression && (scorecard.hasConstraints || scorecard.hasSynchronizedProgression));
-  const obviousExceptional = Boolean(explosiveJump && (strongAverageRise || scorecard.endOutputAverage >= scorecard.startOutputAverage + 8));
-  const synchronizedExceptional = Boolean(synchronizedProgression && heavyWeightProgression && scorecard.outputDeltaAverage >= 0 && scorecard.hasRebound);
-
-  if (hiddenExceptional || obviousExceptional || synchronizedExceptional) {
-    [explosiveJump, retainedUnderWeight, consecutiveWeightProgression, synchronizedProgression, constraintPresent].forEach((marker) => {
-      if (marker) reasons.push(marker);
-    });
-    return { label: "Exceptional Growth", confidence: 0.86, reasons };
-  }
-
-  if (strongAverageRise || Boolean(retainedUnderWeight && weightProgression) || Boolean(weightProgression && scorecard.outputDeltaAverage >= -0.75)) {
-    [outputRise, retainedUnderWeight, weightProgression, synchronizedProgression, constraintPresent].forEach((marker) => {
-      if (marker) reasons.push(marker);
-    });
-    return { label: "Moderate Growth", confidence: 0.74, reasons };
-  }
-
-  if (meaningfulDecline && !retainedUnderWeight) {
-    [outputDecline, getAISummaryMarker(scorecard, "late_dip")].forEach((marker) => {
-      if (marker) reasons.push(marker);
-    });
-    return { label: "Contextual Decline", confidence: 0.68, reasons };
-  }
-
-  [getAISummaryMarker(scorecard, "output_plateau"), getAISummaryMarker(scorecard, "rebound"), weightProgression].forEach((marker) => {
-    if (marker) reasons.push(marker);
-  });
-  return { label: "Neutral", confidence: 0.62, reasons };
+const getWorkoutSummaryLoadWord = (series?: GraphSeries | null) => {
+  const name = String(series?.exerciseName || "").toLowerCase();
+  if (/carry|farmer/.test(name)) return "load";
+  return "weight";
 };
 
-const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryAchievement[] => {
-  const achievements: AISummaryAchievement[] = [];
-  const bestWeightProfile = [...scorecard.seriesProfiles].sort((a, b) => b.weightIncreaseCount - a.weightIncreaseCount)[0];
-  const bestOutputProfile = [...scorecard.seriesProfiles].sort((a, b) => b.outputDelta - a.outputDelta)[0];
-  const constraints = scorecard.constraintTags.length ? ` under ${scorecard.constraintTags.join("/")} constraints` : "";
-
-  if (scorecard.hasRetainedOutputUnderWeight && bestWeightProfile) {
-    achievements.push({
-      id: "retained-output-under-weight",
-      title: "Output held under rising demand",
-      detail: `${bestWeightProfile.exerciseName} maintained its working range while weight increased${constraints}.`,
-      strength: classification.label === "Exceptional Growth" ? 0.95 : 0.78,
-      labelImpact: classification.label === "Exceptional Growth" ? "carries" : "promotes",
-      markerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
-    });
-  }
-
-  if (scorecard.maxConsecutiveWeightIncreaseCount >= 3 && bestWeightProfile) {
-    achievements.push({
-      id: "consecutive-weight-increases",
-      title: `${scorecard.maxConsecutiveWeightIncreaseCount} consecutive weight increases`,
-      detail: `${bestWeightProfile.exerciseName} built momentum through repeated weight progression.`,
-      strength: Math.min(1, 0.58 + scorecard.maxConsecutiveWeightIncreaseCount * 0.08),
-      labelImpact: scorecard.maxConsecutiveWeightIncreaseCount >= 4 ? "carries" : "promotes",
-      markerKinds: ["consecutive_weight_progression", "weight_progression"],
-    });
-  }
-
-  if (scorecard.hasExplosiveJump && bestOutputProfile) {
-    achievements.push({
-      id: "explosive-output-jump",
-      title: "Explosive output jump",
-      detail: `${bestOutputProfile.exerciseName} created clear separation from its starting baseline.`,
-      strength: 0.92,
-      labelImpact: "carries",
-      markerKinds: ["explosive_jump", "output_rise"],
-    });
-  }
-
-  if (scorecard.hasSynchronizedProgression) {
-    achievements.push({
-      id: "synchronized-progression",
-      title: "Both exercises supported the read",
-      detail: "The paired block showed positive structure across both exercises instead of relying on a single line.",
-      strength: 0.74,
-      labelImpact: "supports",
-      markerKinds: ["synchronized_progression"],
-    });
-  }
-
-  if (scorecard.hasRebound) {
-    achievements.push({
-      id: "rebound-after-dip",
-      title: "Recovery after a dip",
-      detail: "A temporary drop was followed by a recovery signal, which keeps the trend from reading as simple decline.",
-      strength: 0.62,
-      labelImpact: "supports",
-      markerKinds: ["rebound", "late_dip"],
-    });
-  }
-
-  if (!achievements.length) {
-    achievements.push({
-      id: "primary-pattern",
-      title: classification.label === "Contextual Decline" ? "Primary decline pattern" : classification.label === "Neutral" ? "Controlled but unresolved pattern" : "Primary progress pattern",
-      detail: classification.reasons[0]?.text || "The graph produced a readable pattern from the available sessions.",
-      strength: 0.5,
-      labelImpact: "supports",
-      markerKinds: classification.reasons.map((reason) => reason.kind),
-    });
-  }
-
-  return achievements.sort((a, b) => b.strength - a.strength).slice(0, 4);
+const formatWorkoutSummaryNumber = (value: number) => {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
 };
 
-const buildAISummaryHighlights = (achievements: AISummaryAchievement[], scorecard: AISummaryScorecard): AISummaryHighlight[] => {
-  const highlights: AISummaryHighlight[] = achievements.slice(0, 3).map((achievement) => ({
-    title: achievement.title,
-    detail: achievement.detail,
-    strength: achievement.strength,
-  }));
+const isCompletionFocusedWorkoutSummarySeries = (series?: GraphSeries | null) => {
+  const name = String(series?.exerciseName || "").toLowerCase();
+  const target = String(series?.points?.[0]?.target || "").toLowerCase();
+  const metric = String(series?.points?.[0]?.metric || "").toLowerCase();
+  const combined = `${name} ${target} ${metric}`;
 
-  const bestOutputProfile = [...scorecard.seriesProfiles].sort((a, b) => b.outputDelta - a.outputDelta)[0];
-  if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && highlights.length < 3) {
-    highlights.push({
-      title: `Finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above baseline`,
-      detail: `${bestOutputProfile.exerciseName} ended higher than it started.`,
-      strength: 0.55,
+  return /30\s*\/?\s*30|check|completion/.test(combined) || (/slam/.test(name) && /30/.test(combined));
+};
+
+const capitalizeWorkoutSummaryText = (value: string) =>
+  value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+
+const getWorkoutSummaryMetricUnit = (series?: GraphSeries | null) => {
+  const metric = String(series?.points?.[0]?.metric || "").trim().toLowerCase();
+  const target = String(series?.points?.[0]?.target || "").trim().toLowerCase();
+  const name = String(series?.exerciseName || "").trim().toLowerCase();
+  const combined = `${metric} ${target} ${name}`;
+
+  if (/calorie|cals?\b/.test(combined)) return "calories";
+  if (/\blap|run|walk/.test(combined)) return "laps";
+  if (/\brep|slam/.test(combined)) return "reps";
+  if (/yard|carry|farmer/.test(combined)) return "rounds";
+  if (/set/.test(combined)) return "sets";
+  return "points";
+};
+
+const formatWorkoutSummaryOutputDelta = (value: number, series?: GraphSeries | null) =>
+  `${formatWorkoutSummaryNumber(Math.abs(value))} ${getWorkoutSummaryMetricUnit(series)}`;
+
+const getWorkoutSummaryConstraintLabel = (series?: GraphSeries | null) => {
+  const name = String(series?.exerciseName || "").toLowerCase();
+  const target = String(series?.points?.[0]?.target || "").toLowerCase();
+  const combined = `${name} ${target}`;
+  const constraints: string[] = [];
+  if (/\btempo\b/.test(combined)) constraints.push("TEMPO");
+  if (/\bpause\b/.test(combined)) constraints.push("PAUSE");
+  if (/\becc\b|eccentric/.test(combined)) constraints.push("ECC");
+  if (/\biso\b/.test(combined)) constraints.push("ISO");
+  return constraints.length ? constraints.join("/") : "controlled";
+};
+
+const getWorkoutSummaryLoadScaleWord = (delta: number) => {
+  if (delta >= 20) return "profound";
+  if (delta >= 10) return "pronounced";
+  return "gradual";
+};
+
+const getWorkoutSummaryMemberOpening = (
+  scorecard: WorkoutSummaryScorecard,
+  _stats: WorkoutSummaryTrendStats,
+  series?: GraphSeries | null
+) => {
+  const target = scorecard.mode === "single" ? "one" : "block";
+
+  if (scorecard.label === "Exceptional Growth") return `You crushed this ${target}!`;
+  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 7) return `This is a strong performance.`;
+  if (scorecard.label === "Moderate Growth" && scorecard.finalScore >= 5) return `You performed well here.`;
+  if (scorecard.label === "Moderate Growth") return `This was a solid ${scorecard.mode === "single" ? "effort" : "block"}.`;
+  if (scorecard.label === "Contextual Decline") return `This trend is worth reading with context.`;
+  if (isCompletionFocusedWorkoutSummarySeries(series)) return `This graph reads more like a consistency check than a progression-focused workout.`;
+  return `This was a steady read.`;
+};
+
+type WorkoutSummaryNarrativeSlot = {
+  id: string;
+  tier: "elite" | "major" | "minor" | "context" | "label" | "closer";
+  sentence: string;
+  impact: number;
+  family?: string;
+};
+
+const addWorkoutSummarySlot = (
+  slots: WorkoutSummaryNarrativeSlot[],
+  slot: WorkoutSummaryNarrativeSlot | null | undefined
+) => {
+  if (!slot?.sentence) return;
+  const normalizedSentence = slot.sentence.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (slots.some((existing) => existing.id === slot.id || existing.sentence === slot.sentence)) return;
+  if (slot.family && slots.some((existing) => existing.family === slot.family && existing.impact >= slot.impact - 0.04)) return;
+  if (slots.some((existing) => existing.sentence.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === normalizedSentence)) return;
+  slots.push(slot);
+};
+
+const getWorkoutSummaryDominantStorySlot = (
+  scorecard: WorkoutSummaryScorecard,
+  stats: WorkoutSummaryTrendStats,
+  series?: GraphSeries | null
+): WorkoutSummaryNarrativeSlot | null => {
+  const performanceWord = getWorkoutSummaryPerformanceWord(series);
+  const loadWord = getWorkoutSummaryLoadWord(series);
+  const controlled = isControlledWorkoutSummarySeries(series);
+  const completionFocused = isCompletionFocusedWorkoutSummarySeries(series);
+  const loadDelta = formatWorkoutSummaryNumber(Math.abs(stats.weightDelta));
+  const outputDelta = formatWorkoutSummaryOutputDelta(stats.outputDelta, series);
+  const constraintLabel = getWorkoutSummaryConstraintLabel(series);
+  const outputGain = stats.lastOutput - stats.firstOutput;
+  const retainedLargeGain = stats.maxOutput - stats.firstOutput >= 3 && stats.peakRetentionGap <= Math.max(1.25, stats.outputRange * 0.35);
+  const hasExplosiveStart = stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(2, stats.outputRange * 0.45);
+  const stableRange = stats.outputRange <= 1.5;
+
+  if (completionFocused) {
+    return {
+      id: "completion-focused",
+      tier: "context",
+      sentence: `This type of exercise plays an important role in long-term progress despite having limited recordable data.`,
+      impact: 0.42,
+      family: "completion",
+    };
+  }
+
+  if (scorecard.label === "Contextual Decline") {
+    return {
+      id: "contextual-decline-story",
+      tier: "label",
+      sentence: `The graph gradually moves downward through the program without showing signs of major instability or collapse.`,
+      impact: 0.46,
+      family: "decline",
+    };
+  }
+
+  if (scorecard.label === "Exceptional Growth" && controlled && outputGain >= 3) {
+    return {
+      id: "controlled-explosive-exceptional",
+      tier: "elite",
+      sentence: `Explosive upward progression under ${constraintLabel} constraints is extremely rare, making the acceleration shown here especially impressive.`,
+      impact: 0.52,
+      family: "exceptional-constraint",
+    };
+  }
+
+  if (scorecard.label === "Exceptional Growth" && hasExplosiveStart && outputGain >= 8 && scorecard.mode === "single") {
+    return {
+      id: "vertical-single-exceptional",
+      tier: "elite",
+      sentence: `After a nearly vertical start, you kept building through the remaining sessions without giving back the ground you gained.`,
+      impact: 0.5,
+      family: "exceptional-trajectory",
+    };
+  }
+
+  if (scorecard.label === "Exceptional Growth" && outputGain >= 3 && retainedLargeGain) {
+    return {
+      id: "retained-adaptation-exceptional",
+      tier: "elite",
+      sentence: `You created distance from the starting baseline early and never gave that progress back.`,
+      impact: 0.49,
+      family: "retained-adaptation",
+    };
+  }
+
+  if (scorecard.tags.includes("synchronized_plateau_breakthrough")) {
+    return {
+      id: "sync-breakthrough-story",
+      tier: "elite",
+      sentence: `Both exercises broke through together, which gives this block a much stronger progression signal.`,
+      impact: 0.47,
+      family: "sync",
+    };
+  }
+
+  if (scorecard.tags.includes("retained_meaningful_improvement")) {
+    return {
+      id: "retained-story",
+      tier: "elite",
+      sentence: `The biggest story is that the later sessions held onto a real improvement instead of giving it back.`,
+      impact: 0.45,
+      family: "retained-adaptation",
+    };
+  }
+
+  if (stats.maxWeightRun >= 4 && stats.outputDelta >= -1) {
+    return {
+      id: "four-weight-run-story",
+      tier: scorecard.label === "Exceptional Growth" ? "elite" : "major",
+      sentence: `You maintained output through ${stats.maxWeightRun} consecutive ${loadWord} increases, which gives this graph a stronger progression profile.`,
+      impact: 0.44,
+      family: "weight-progression",
+    };
+  }
+
+  if (scorecard.tags.includes("recovered_after_tradeoff")) {
+    return {
+      id: "tradeoff-recovery-story",
+      tier: "major",
+      sentence: `The dip under heavier ${loadWord} recovered cleanly, which makes the fluctuation read more like adaptation than regression.`,
+      impact: 0.41,
+      family: "recovery",
+    };
+  }
+
+  if (scorecard.tags.includes("maintained_under_load") && stats.weightDelta > 0) {
+    return {
+      id: "maintained-under-load-story",
+      tier: scorecard.label === "Exceptional Growth" ? "elite" : "major",
+      sentence: `Maintaining output while increasing ${loadWord} is what separates this from a flatter progression pattern.`,
+      impact: 0.4,
+      family: "weight-progression",
+    };
+  }
+
+  if (controlled && stats.weightDelta > 0 && Math.abs(stats.outputDelta) <= 1.5) {
+    return {
+      id: "subtle-controlled-story",
+      tier: "major",
+      sentence: `The growth here is more subtle than it appears because the ${constraintLabel} work held structure while ${loadWord} increased.`,
+      impact: 0.39,
+      family: "constraint",
+    };
+  }
+
+  if (stats.weightDelta >= 10 && stats.outputDelta >= -1) {
+    return {
+      id: "load-led-story",
+      tier: scorecard.label === "Exceptional Growth" ? "elite" : "major",
+      sentence: `The clearest win here is the added ${loadWord}: you moved ${loadDelta} lbs heavier without a major drop-off.`,
+      impact: 0.38,
+      family: "weight-progression",
+    };
+  }
+
+  if (scorecard.tags.includes("major_set_gain") || scorecard.tags.includes("controlled_major_set_gain")) {
+    return {
+      id: "output-gain-story",
+      tier: "major",
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} finished ${outputDelta} above where it started.`,
+      impact: 0.36,
+      family: "output-gain",
+    };
+  }
+
+  if (scorecard.tags.includes("volatile_without_resolution")) {
+    return {
+      id: "unresolved-volatility-story",
+      tier: "major",
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} moved through a mixed range without fully settling into a stronger finish.`,
+      impact: 0.34,
+      family: "volatility",
+    };
+  }
+
+  if (scorecard.tags.includes("finish_below_start")) {
+    return {
+      id: "finish-below-story",
+      tier: "major",
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} finished below the starting point, so this graph needs a more cautious read.`,
+      impact: 0.34,
+      family: "decline",
+    };
+  }
+
+  if (scorecard.tags.includes("finish_above_start") && stats.outputDelta > 0) {
+    return {
+      id: "finish-above-story",
+      tier: "major",
+      sentence: `Despite some minor fluctuation, the graph generally trends upward and finished above where it started.`,
+      impact: 0.31,
+      family: "finish",
+    };
+  }
+
+  if (Math.abs(stats.outputDelta) <= 1 && stableRange) {
+    return {
+      id: "steady-story",
+      tier: "minor",
+      sentence: `${capitalizeWorkoutSummaryText(performanceWord)} maintained a tightly controlled range from start to finish.`,
+      impact: 0.28,
+      family: "stability",
+    };
+  }
+
+  return null;
+};
+
+const getWorkoutSummarySupportSlots = (
+  scorecard: WorkoutSummaryScorecard,
+  stats: WorkoutSummaryTrendStats,
+  series?: GraphSeries | null
+): WorkoutSummaryNarrativeSlot[] => {
+  const slots: WorkoutSummaryNarrativeSlot[] = [];
+  const loadWord = getWorkoutSummaryLoadWord(series);
+  const controlled = isControlledWorkoutSummarySeries(series);
+  const outputDelta = formatWorkoutSummaryOutputDelta(stats.outputDelta, series);
+  const constraintLabel = getWorkoutSummaryConstraintLabel(series);
+  const loadScale = getWorkoutSummaryLoadScaleWord(Math.abs(stats.weightDelta));
+
+  if (scorecard.label === "Exceptional Growth" && stats.weightIncreaseCount >= 3) {
+    addWorkoutSummarySlot(slots, {
+      id: "exceptional-weight-finish",
+      tier: "elite",
+      sentence: `You closed the program with ${stats.weightIncreaseCount} total ${loadWord} increases while keeping the higher structure intact.`,
+      impact: 0.36,
+      family: "weight-progression",
+    });
+  } else if (stats.weightIncreaseCount >= 3 && !scorecard.tags.includes("four_plus_weight_increases")) {
+    addWorkoutSummarySlot(slots, {
+      id: "three-plus-load-increases",
+      tier: "major",
+      sentence: `You moved ${loadWord} up multiple times across this block.`,
+      impact: 0.3,
+      family: "weight-progression",
+    });
+  } else if (stats.weightDelta > 0 && !scorecard.tags.includes("maintained_under_load")) {
+    addWorkoutSummarySlot(slots, {
+      id: "load-increase",
+      tier: "major",
+      sentence: `The ${loadScale} ${loadWord} increase adds important context to the performance trend.`,
+      impact: 0.27,
+      family: "weight-progression",
     });
   }
 
-  return highlights;
+  if (scorecard.tags.includes("recovered_after_tradeoff") && !scorecard.tags.includes("unrecovered_tradeoff")) {
+    addWorkoutSummarySlot(slots, {
+      id: "recovered-tradeoff",
+      tier: "major",
+      sentence: `After the tradeoff dip, the graph recovered back into range instead of collapsing backward.`,
+      impact: 0.33,
+      family: "recovery",
+    });
+  }
+
+  if (scorecard.tags.includes("unrecovered_tradeoff")) {
+    addWorkoutSummarySlot(slots, {
+      id: "unrecovered-tradeoff",
+      tier: "context",
+      sentence: `The heavier ${loadWord} came with a drop that was not fully recovered by the end.`,
+      impact: 0.31,
+      family: "tradeoff",
+    });
+  }
+
+  if (controlled && stats.weightDelta > 0 && stats.outputDelta < 0) {
+    addWorkoutSummarySlot(slots, {
+      id: "controlled-tradeoff",
+      tier: "context",
+      sentence: `Under ${constraintLabel} constraints, that late drop reads more like a ${loadWord} tradeoff than a simple regression.`,
+      impact: 0.3,
+      family: "constraint",
+    });
+  }
+
+  if (scorecard.label === "Contextual Decline") {
+    addWorkoutSummarySlot(slots, {
+      id: "external-context-note",
+      tier: "label",
+      sentence: `Conditioning-based work can be influenced by recovery, environment, schedule, health, or outside fatigue.`,
+      impact: 0.31,
+      family: "contextual-decline",
+    });
+  } else if (stats.hasDateData && stats.hasSignificantGap && stats.outputDelta >= 1 && scorecard.finalScore < 6) {
+    addWorkoutSummarySlot(slots, {
+      id: "gap-positive-context",
+      tier: "minor",
+      sentence: `Even with a dip around the longer gap between sessions, the finish still landed above the start.`,
+      impact: 0.2,
+      family: "gap",
+    });
+  }
+
+  if (scorecard.tags.includes("spike_not_retained") && scorecard.label !== "Exceptional Growth") {
+    addWorkoutSummarySlot(slots, {
+      id: "spike-not-retained",
+      tier: "context",
+      sentence: `The high point was not fully held through the end of the block.`,
+      impact: 0.25,
+      family: "retention",
+    });
+  }
+
+  if (scorecard.label === "Exceptional Growth" && stats.outputDelta > 0) {
+    addWorkoutSummarySlot(slots, {
+      id: "exceptional-output-delta",
+      tier: "major",
+      sentence: `Finishing ${outputDelta} above where you started reflects an exceptional level of progress.`,
+      impact: 0.34,
+      family: "output-gain",
+    });
+  }
+
+  if (scorecard.label === "Moderate Growth" && stats.outputDelta > 0 && stats.outputDelta <= 2 && stats.weightDelta <= 0) {
+    addWorkoutSummarySlot(slots, {
+      id: "moderate-small-finish",
+      tier: "minor",
+      sentence: `That is a solid sign moving forward without overselling the graph.`,
+      impact: 0.14,
+      family: "closer-soft",
+    });
+  }
+
+  return slots.sort((a, b) => b.impact - a.impact);
 };
 
-const locateAISummaryStory = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryStory => {
-  if (classification.label === "Exceptional Growth") {
-    if (scorecard.hasRetainedOutputUnderWeight && scorecard.hasConstraints) {
-      return { identity: "constraint_progression", label: classification.label, tone: "exceptional", needsStructuralExplanation: true };
+const getWorkoutSummaryLabelSlot = (
+  scorecard: WorkoutSummaryScorecard,
+  _stats: WorkoutSummaryTrendStats
+): WorkoutSummaryNarrativeSlot | null => {
+  if (scorecard.label === "Exceptional Growth" && scorecard.tags.includes("retained_meaningful_improvement")) {
+    return {
+      id: "exceptional-retained-explanation",
+      tier: "label",
+      sentence: `The result stands out because the graph retained the adaptation rather than relying on a single peak.`,
+      impact: 0.3,
+      family: "retained-adaptation",
+    };
+  }
+
+  if (scorecard.label === "Moderate Growth" && scorecard.tags.includes("no_output_progression_under_load")) {
+    return {
+      id: "load-led-moderate-explanation",
+      tier: "label",
+      sentence: `The progress here comes more from handling increased difficulty than dramatically increasing output.`,
+      impact: 0.28,
+      family: "weight-progression",
+    };
+  }
+
+  return null;
+};
+
+const getWorkoutSummaryCloserSlot = (
+  scorecard: WorkoutSummaryScorecard,
+  _stats: WorkoutSummaryTrendStats
+): WorkoutSummaryNarrativeSlot | null => {
+  if (scorecard.label === "Exceptional Growth") {
+    return {
+      id: "exceptional-outstanding-closer",
+      tier: "closer",
+      sentence: `Outstanding work.`,
+      impact: 0.18,
+      family: "closer",
+    };
+  }
+
+  if (scorecard.label === "Moderate Growth") {
+    if (scorecard.finalScore >= 6) {
+      return { id: "moderate-great-work", tier: "closer", sentence: `Great work.`, impact: 0.15, family: "closer" };
     }
-    if (scorecard.hasSynchronizedProgression) {
-      return { identity: "synchronized_advancement", label: classification.label, tone: "exceptional", needsStructuralExplanation: false };
-    }
-    return { identity: scorecard.hasExplosiveJump ? "stacked_progression" : "hidden_progression", label: classification.label, tone: "exceptional", needsStructuralExplanation: !scorecard.hasExplosiveJump };
+    return { id: "moderate-good-work", tier: "closer", sentence: `Good work.`, impact: 0.13, family: "closer" };
   }
 
-  if (classification.label === "Moderate Growth") {
-    if (scorecard.hasRetainedOutputUnderWeight) {
-      return { identity: "stable_retention", label: classification.label, tone: "positive", needsStructuralExplanation: true };
-    }
-    return { identity: "steady_growth", label: classification.label, tone: "positive", needsStructuralExplanation: false };
-  }
-
-  if (classification.label === "Contextual Decline") {
-    return { identity: "decline_with_context", label: classification.label, tone: "contextual", needsStructuralExplanation: true };
-  }
-
-  return { identity: scorecard.hasRebound ? "mixed_signals" : "baseline_read", label: classification.label, tone: "neutral", needsStructuralExplanation: false };
+  return null;
 };
 
-const formatAISummaryNumber = (value: number) => {
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+const buildWorkoutSummaryTextFromSlots = (
+  scorecard: WorkoutSummaryScorecard,
+  stats: WorkoutSummaryTrendStats,
+  series: GraphSeries
+) => {
+  const opening = getWorkoutSummaryMemberOpening(scorecard, stats, series);
+  const slots: WorkoutSummaryNarrativeSlot[] = [];
+  addWorkoutSummarySlot(slots, getWorkoutSummaryDominantStorySlot(scorecard, stats, series));
+
+  getWorkoutSummarySupportSlots(scorecard, stats, series).forEach((slot) => addWorkoutSummarySlot(slots, slot));
+  addWorkoutSummarySlot(slots, getWorkoutSummaryLabelSlot(scorecard, stats));
+  addWorkoutSummarySlot(slots, getWorkoutSummaryCloserSlot(scorecard, stats));
+
+  const maxSentences =
+    scorecard.label === "Exceptional Growth" ? 4 :
+    scorecard.label === "Moderate Growth" && scorecard.finalScore >= 6 ? 4 :
+    scorecard.label === "Contextual Decline" ? 3 :
+    isCompletionFocusedWorkoutSummarySeries(series) ? 2 :
+    3;
+  const selected = [opening, ...slots.map((slot) => slot.sentence)];
+  return joinWorkoutSummarySentences(selected, maxSentences);
 };
 
-const getAISummaryHeadline = (classification: AISummaryClassification, story: AISummaryStory) => {
-  if (classification.label === "Exceptional Growth") {
-    if (story.identity === "constraint_progression") return "Exceptional Growth Under Constraint";
-    if (story.identity === "synchronized_advancement") return "Exceptional Growth Across the Block";
-    return "Exceptional Growth";
-  }
-
-  if (classification.label === "Moderate Growth") {
-    if (story.identity === "stable_retention") return "Moderate Growth Through Retention";
-    return "Moderate Growth";
-  }
-
-  return classification.label;
-};
-
-const composeAISummarySlots = (
-  scorecard: AISummaryScorecard,
-  classification: AISummaryClassification,
-  story: AISummaryStory,
-  achievements: AISummaryAchievement[],
-  highlights: AISummaryHighlight[]
-): AISummaryResolvedSlot[] => {
-  const slots: AISummaryResolvedSlot[] = [];
-  const primaryAchievement = achievements[0];
-  const primaryHighlight = highlights[0];
-  const blockNoun = scorecard.mode === "single" ? "exercise" : "block";
-  const strongestProfile = [...scorecard.seriesProfiles].sort((a, b) => Math.abs(b.outputDelta) - Math.abs(a.outputDelta))[0];
-
-  if (classification.label === "Exceptional Growth") {
-    slots.push({ kind: "opener", text: `You crushed this ${blockNoun}.`, importance: 1 });
-  } else if (classification.label === "Moderate Growth") {
-    slots.push({ kind: "opener", text: `This was a strong ${blockNoun}.`, importance: 0.82 });
-  } else if (classification.label === "Contextual Decline") {
-    slots.push({ kind: "opener", text: "This trend is worth reading with context.", importance: 0.76 });
-  } else {
-    slots.push({ kind: "opener", text: "This graph reads as a controlled but unresolved pattern.", importance: 0.68 });
-  }
-
-  if (primaryAchievement) {
-    slots.push({ kind: "dominant_achievement", text: primaryAchievement.detail, importance: primaryAchievement.strength });
-  }
-
-  if (primaryHighlight && primaryHighlight.title !== primaryAchievement?.title) {
-    slots.push({ kind: "highlight", text: `${primaryHighlight.title}: ${primaryHighlight.detail}`, importance: primaryHighlight.strength });
-  }
-
-  if (story.needsStructuralExplanation && scorecard.hasRetainedOutputUnderWeight) {
-    slots.push({
-      kind: "structural_explanation",
-      text: "The progression comes from handling increased difficulty rather than needing a dramatic output spike.",
-      importance: 0.64,
-    });
-  } else if (strongestProfile && strongestProfile.outputDelta > 0 && classification.label !== "Neutral") {
-    slots.push({
-      kind: "supporting_context",
-      text: `${strongestProfile.exerciseName} finished ${formatAISummaryNumber(strongestProfile.outputDelta)} above where it started.`,
-      importance: 0.54,
-    });
-  }
-
-  if (scorecard.hasLateDip && scorecard.hasRebound && classification.label !== "Contextual Decline") {
-    slots.push({
-      kind: "supporting_context",
-      text: "Even with a temporary dip, the graph showed recovery instead of a simple collapse.",
-      importance: 0.5,
-    });
-  }
-
-  if (classification.label === "Contextual Decline") {
-    slots.push({
-      kind: "structural_explanation",
-      text: "The graph moved downward without enough positive counterweight to call it a growth pattern, but conditioning and fatigue variables can affect this type of read.",
-      importance: 0.7,
-    });
-  }
-
-  const closer =
-    classification.label === "Exceptional Growth"
-      ? "Outstanding work."
-      : classification.label === "Moderate Growth"
-        ? "Good work."
-        : classification.label === "Contextual Decline"
-          ? "That context matters before drawing a hard conclusion."
-          : "This gives the next block a useful comparison point.";
-
-  slots.push({ kind: "closer", text: closer, importance: 0.35 });
-
-  const seen = new Set<string>();
-  return slots.filter((slot) => {
-    const normalized = slot.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (!normalized || seen.has(normalized)) return false;
-    seen.add(normalized);
-    return true;
-  });
-};
-
-const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) =>
-  slots
-    .sort((a, b) => {
-      const order: Record<AISummarySlotKind, number> = {
-        opener: 1,
-        dominant_achievement: 2,
-        highlight: 3,
-        supporting_context: 4,
-        structural_explanation: 5,
-        closer: 6,
-      };
-      return order[a.kind] - order[b.kind];
-    })
-    .map((slot) => slot.text.trim())
+const joinWorkoutSummarySentences = (sentences: Array<string | undefined>, maxSentences = 4) => {
+  const cleaned = sentences
+    .map((sentence) => String(sentence || "").trim())
     .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .map((sentence) => sentence.replace(/\s+/g, " "))
+    .filter((sentence, index, list) => list.findIndex((item) => item.toLowerCase() === sentence.toLowerCase()) === index)
+    .slice(0, maxSentences);
 
-const generateWorkoutSummaryInsightFromGraphData = (graphData: GraphSeries[], blockType?: BlockType): WorkoutSummaryInsight | null => {
-  if (!graphData.length || !blockType) return null;
+  return cleaned.join(" ");
+};
 
-  const scorecard = buildAISummaryScorecard(graphData, blockType);
-  if (!scorecard) return null;
+const getWorkoutSummaryTrendStats = (points: GraphPoint[]): WorkoutSummaryTrendStats => {
+  const sortedPoints = [...points].sort((a, b) => {
+    const timeA = Number.isFinite(getWorkoutSummaryPointTime(a.date)) ? getWorkoutSummaryPointTime(a.date) : a.sessionNumber;
+    const timeB = Number.isFinite(getWorkoutSummaryPointTime(b.date)) ? getWorkoutSummaryPointTime(b.date) : b.sessionNumber;
+    return timeA - timeB;
+  });
 
-  const classification = classifyAISummaryLabel(scorecard);
-  const achievements = buildAISummaryAchievements(scorecard, classification);
-  const highlights = buildAISummaryHighlights(achievements, scorecard);
-  const story = locateAISummaryStory(scorecard, classification);
-  const slots = composeAISummarySlots(scorecard, classification, story, achievements, highlights);
-  const summary = cleanupAISummaryText(slots);
-  const headline = getAISummaryHeadline(classification, story);
+  const outputs = sortedPoints.map((point) => Number(point.y)).filter((value) => Number.isFinite(value));
+  const weights = sortedPoints.map((point) => parseWorkoutSummaryWeight(point.weight));
+  const first = sortedPoints[0];
+  const last = sortedPoints[sortedPoints.length - 1];
+  const firstOutput = outputs[0] || 0;
+  const lastOutput = outputs[outputs.length - 1] || 0;
+  const firstWeight = weights[0] || 0;
+  const lastWeight = weights[weights.length - 1] || 0;
+  const minOutput = outputs.length ? Math.min(...outputs) : 0;
+  const maxOutput = outputs.length ? Math.max(...outputs) : 0;
+  const outputRange = maxOutput - minOutput;
+  const outputDelta = lastOutput - firstOutput;
+  const weightDelta = lastWeight - firstWeight;
+  const outputIncreaseCount = countWorkoutSummaryIncreases(outputs);
+  const weightIncreaseCount = countWorkoutSummaryIncreases(weights);
+  const maxOutputRun = getWorkoutSummaryMaxUpwardRun(outputs);
+  const maxWeightRun = getWorkoutSummaryMaxUpwardRun(weights);
+  const windowSize = Math.min(3, Math.max(1, Math.ceil(outputs.length / 3)));
+  const firstWindow = outputs.slice(0, windowSize);
+  const lastWindow = outputs.slice(-windowSize);
+  const earlyAverage = getWorkoutSummaryAverage(firstWindow);
+  const lateAverage = getWorkoutSummaryAverage(lastWindow);
+  const averageDelta = lateAverage - earlyAverage;
+  const percentChange = firstOutput ? outputDelta / Math.max(1, Math.abs(firstOutput)) : 0;
+  const peakRetentionGap = maxOutput - lastOutput;
+  const timePoints = sortedPoints
+    .map((point) => getWorkoutSummaryPointTime(point.date))
+    .filter((value) => Number.isFinite(value));
+  const gaps = timePoints.slice(1).map((time, index) => time - timePoints[index]);
+  const averageGap = getWorkoutSummaryAverage(gaps);
+  const hasSignificantGap = Boolean(gaps.length && averageGap > 0 && gaps.some((gap) => gap > averageGap * 1.75));
+  const hasDateData = timePoints.length >= 2;
 
   return {
-    id: `ai-summary-${blockType}-${classification.label.replace(/\s+/g, "-").toLowerCase()}-${scorecard.sessionCount}-${graphData.map((series) => series.exerciseId).join("-")}`,
-    label: classification.label,
+    outputs,
+    weights,
+    first,
+    last,
+    firstOutput,
+    lastOutput,
+    firstWeight,
+    lastWeight,
+    minOutput,
+    maxOutput,
+    outputRange,
+    outputDelta,
+    weightDelta,
+    outputIncreaseCount,
+    weightIncreaseCount,
+    maxOutputRun,
+    maxWeightRun,
+    earlyAverage,
+    lateAverage,
+    averageDelta,
+    percentChange,
+    peakRetentionGap,
+    hasSignificantGap,
+    hasDateData,
+  };
+};
+
+const hasWorkoutSummaryDropAfterLoadIncrease = (stats: WorkoutSummaryTrendStats) => {
+  for (let index = 1; index < stats.outputs.length; index += 1) {
+    if (stats.weights[index] > stats.weights[index - 1] && stats.outputs[index] <= stats.outputs[index - 1] - 1) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const hasWorkoutSummaryRecoveryAfterLoadDrop = (stats: WorkoutSummaryTrendStats) => {
+  for (let index = 1; index < stats.outputs.length - 1; index += 1) {
+    const droppedUnderLoad = stats.weights[index] > stats.weights[index - 1] && stats.outputs[index] <= stats.outputs[index - 1] - 1;
+    if (!droppedUnderLoad) continue;
+
+    const nextOutputs = stats.outputs.slice(index + 1);
+    const recoveryTarget = Math.max(stats.firstOutput, stats.outputs[index - 1] - 0.5);
+    if (nextOutputs.some((output) => output >= recoveryTarget)) return true;
+  }
+  return false;
+};
+
+const hasWorkoutSummaryWeightDrop = (stats: WorkoutSummaryTrendStats) => {
+  for (let index = 1; index < stats.weights.length; index += 1) {
+    if (stats.weights[index] > 0 && stats.weights[index - 1] > 0 && stats.weights[index] < stats.weights[index - 1]) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const getWorkoutSummaryPreviousOutput = (stats: WorkoutSummaryTrendStats) =>
+  stats.outputs.length >= 2 ? stats.outputs[stats.outputs.length - 2] : stats.lastOutput;
+
+const getWorkoutSummaryTrendLabelFromScorecard = (scorecard: WorkoutSummaryScorecard) => {
+  if (scorecard.tags.includes("no_signal")) return "Neutral";
+  if (scorecard.declineScore >= 4) return "Downward";
+  if (scorecard.finalScore >= 5) return "Upward";
+  if (scorecard.finalScore >= 2) return "Mixed Positive";
+  return "Flat";
+};
+
+const buildWorkoutSummaryScorecard = (
+  series: GraphSeries,
+  mode: WorkoutSummaryBlockMode
+): WorkoutSummaryScorecard => {
+  const stats = getWorkoutSummaryTrendStats(series.points);
+  const controlled = isControlledWorkoutSummarySeries(series);
+  const tags: WorkoutSummarySignalTag[] = [];
+  let growthScore = 0;
+  let exceptionalScore = 0;
+  let riskScore = 0;
+  let declineScore = 0;
+
+  const hasWeightIncrease = stats.weightIncreaseCount > 0 || stats.weightDelta > 0;
+  const noSignal = stats.outputs.length < 3 || (stats.outputRange <= 0.1 && !hasWeightIncrease);
+  const meaningfulFinishGain = mode === "single"
+    ? stats.outputDelta >= 1 || (stats.outputDelta >= 0.75 && stats.averageDelta >= 0.5 && stats.firstOutput >= 8)
+    : stats.outputDelta >= 1;
+  const strongFinishGain = mode === "single"
+    ? stats.outputDelta >= 3 || stats.averageDelta >= 2 || stats.percentChange >= 0.18
+    : stats.outputDelta >= 3 || stats.averageDelta >= 2;
+  const lateAverageUp = mode === "single" ? stats.averageDelta >= 1 : stats.averageDelta >= 0.5;
+  const lateAverageDown = mode === "single" ? stats.averageDelta <= -1 : stats.averageDelta <= -0.75;
+  const finishBelowStart = mode === "single" ? stats.outputDelta <= -1 : stats.outputDelta <= -1;
+  const maintainedUnderLoad = hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 0.25 && stats.lateAverage >= stats.earlyAverage - 0.5;
+  const dropUnderLoad = hasWorkoutSummaryDropAfterLoadIncrease(stats);
+  const recoveredAfterLoadDrop = hasWorkoutSummaryRecoveryAfterLoadDrop(stats);
+  const unrecoveredTradeoff = dropUnderLoad && !recoveredAfterLoadDrop && stats.lastOutput < stats.firstOutput;
+  const spikeNotRetained = stats.maxOutput >= stats.firstOutput + 2 && stats.peakRetentionGap >= 2 && stats.lastOutput < stats.maxOutput - 1;
+  const volatileWithoutResolution = stats.outputRange >= 3 && !meaningfulFinishGain && !lateAverageUp;
+  const controlledMajorSetGain = controlled && stats.outputDelta >= 3;
+  const majorSetGain = stats.outputDelta >= 3;
+  const previousOutput = getWorkoutSummaryPreviousOutput(stats);
+  const loadDropObserved = mode === "paired" && hasWorkoutSummaryWeightDrop(stats);
+  const finalPointIsPeak = stats.lastOutput >= stats.maxOutput - 0.1;
+  const finalSpikeWithoutSupport =
+    finalPointIsPeak &&
+    stats.outputs.length >= 5 &&
+    stats.lastOutput - previousOutput >= Math.max(2, stats.outputRange * 0.35) &&
+    stats.lateAverage <= stats.lastOutput - 1.25 &&
+    stats.maxOutputRun < 3;
+  const earlyGainThenPlateau =
+    mode === "single" &&
+    meaningfulFinishGain &&
+    stats.outputRange <= 1.5 &&
+    stats.maxOutput <= stats.lastOutput + 0.25 &&
+    stats.lateAverage <= stats.maxOutput - 0.1;
+  const noOutputProgressionUnderLoad =
+    mode === "paired" &&
+    hasWeightIncrease &&
+    stats.outputDelta < 1 &&
+    stats.averageDelta < 0.5;
+  const plateauAfterProgression =
+    mode === "paired" &&
+    hasWeightIncrease &&
+    maintainedUnderLoad &&
+    stats.outputDelta <= 1 &&
+    stats.averageDelta <= 0.75 &&
+    stats.outputRange <= 1.5;
+
+  if (noSignal) addWorkoutSummaryTag(tags, "no_signal");
+  if (meaningfulFinishGain) addWorkoutSummaryTag(tags, "finish_above_start");
+  if (finishBelowStart) addWorkoutSummaryTag(tags, "finish_below_start");
+  if (lateAverageUp) addWorkoutSummaryTag(tags, "late_average_above_early");
+  if (lateAverageDown) addWorkoutSummaryTag(tags, "late_average_below_early");
+  if (hasWeightIncrease) addWorkoutSummaryTag(tags, "weight_increased");
+  if (stats.maxWeightRun >= 3) addWorkoutSummaryTag(tags, "three_weight_increases");
+  if (stats.maxWeightRun >= 4) addWorkoutSummaryTag(tags, "four_plus_weight_increases");
+  if (maintainedUnderLoad) addWorkoutSummaryTag(tags, "maintained_under_load");
+  if (dropUnderLoad) addWorkoutSummaryTag(tags, "tradeoff_drop_under_load");
+  if (recoveredAfterLoadDrop) addWorkoutSummaryTag(tags, "recovered_after_tradeoff");
+  if (unrecoveredTradeoff) addWorkoutSummaryTag(tags, "unrecovered_tradeoff");
+  if (majorSetGain) addWorkoutSummaryTag(tags, "major_set_gain");
+  if (controlledMajorSetGain) addWorkoutSummaryTag(tags, "controlled_major_set_gain");
+  if (strongFinishGain) addWorkoutSummaryTag(tags, "strong_finish");
+  if (volatileWithoutResolution) addWorkoutSummaryTag(tags, "volatile_without_resolution");
+  if (spikeNotRetained) addWorkoutSummaryTag(tags, "spike_not_retained");
+  if (earlyGainThenPlateau) addWorkoutSummaryTag(tags, "early_gain_then_plateau");
+  if (finalSpikeWithoutSupport) addWorkoutSummaryTag(tags, "late_spike_without_support");
+  if (plateauAfterProgression) addWorkoutSummaryTag(tags, "plateau_after_progression");
+  if (noOutputProgressionUnderLoad) addWorkoutSummaryTag(tags, "no_output_progression_under_load");
+  if (loadDropObserved) addWorkoutSummaryTag(tags, "load_drop_observed");
+
+  if (meaningfulFinishGain) growthScore += mode === "single" ? 2 : 2;
+  if (lateAverageUp) growthScore += mode === "single" ? 3 : 2;
+  if (hasWeightIncrease) growthScore += mode === "single" ? 1 : 1;
+  if (stats.maxWeightRun >= 3) growthScore += 2;
+  if (stats.maxWeightRun >= 4) {
+    growthScore += 3;
+    exceptionalScore += 1;
+  }
+  if (maintainedUnderLoad) growthScore += 2;
+  if (recoveredAfterLoadDrop) growthScore += 2;
+  if (strongFinishGain) growthScore += mode === "single" ? 4 : 3;
+  if (majorSetGain && mode === "paired") growthScore += 2;
+  if (controlledMajorSetGain && mode === "paired") exceptionalScore += 1;
+  if (stats.outputIncreaseCount >= 3 && stats.lastOutput >= stats.firstOutput) growthScore += 1;
+
+  if (spikeNotRetained) riskScore += 2;
+  if (volatileWithoutResolution) riskScore += 2;
+  if (unrecoveredTradeoff) riskScore += 3;
+  if (earlyGainThenPlateau) riskScore += 2;
+  if (finalSpikeWithoutSupport) riskScore += 3;
+  if (plateauAfterProgression) riskScore += 2;
+  if (noOutputProgressionUnderLoad && !controlled) riskScore += 2;
+  if (noOutputProgressionUnderLoad && controlled) riskScore += 1;
+  if (loadDropObserved) riskScore += 2;
+  if (stats.hasSignificantGap && stats.outputDelta < 0) riskScore += 1;
+
+  if (finishBelowStart) declineScore += 2;
+  if (lateAverageDown) declineScore += 2;
+  if (!hasWeightIncrease && finishBelowStart && lateAverageDown) declineScore += 2;
+  if (unrecoveredTradeoff) declineScore += 1;
+
+  // Tradeoff under added weight is not inherently negative. Only unresolved tradeoff becomes risk.
+  if (dropUnderLoad && recoveredAfterLoadDrop) riskScore = Math.max(0, riskScore - 1);
+
+  const finalScore = growthScore + exceptionalScore * 2 - riskScore;
+  let label: WorkoutSummaryLabel = "Neutral";
+
+  if (noSignal) {
+    label = "Neutral";
+  } else if (declineScore >= 5 && finalScore < 2) {
+    label = "Contextual Decline";
+  } else if (mode === "single") {
+    const singleFinishesBelowBaseline = stats.lastOutput < stats.firstOutput;
+
+    const singleStrongEligible =
+      !singleFinishesBelowBaseline &&
+      !volatileWithoutResolution &&
+      !finalSpikeWithoutSupport &&
+      !earlyGainThenPlateau &&
+      (lateAverageUp || stats.maxOutputRun >= 3 || (strongFinishGain && stats.peakRetentionGap <= 1));
+
+    if (singleFinishesBelowBaseline) {
+      label = "Neutral";
+    } else if (singleStrongEligible && finalScore >= 8) {
+      label = "Exceptional Growth";
+    } else if (finalScore >= 3 || meaningfulFinishGain) {
+      label = "Moderate Growth";
+    } else {
+      label = "Neutral";
+    }
+  } else {
+    const strongCap =
+      finalSpikeWithoutSupport ||
+      plateauAfterProgression ||
+      noOutputProgressionUnderLoad ||
+      loadDropObserved ||
+      (lateAverageDown && stats.outputDelta <= 0);
+    const canReachStrong = !strongCap && (exceptionalScore >= 1 || (growthScore >= 9 && riskScore <= 1));
+
+    if (canReachStrong && finalScore >= 7) {
+      label = "Exceptional Growth";
+    } else if (finalScore >= 3 || (hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 1)) {
+      label = "Moderate Growth";
+    } else {
+      label = "Neutral";
+    }
+  }
+
+  const scorecard: WorkoutSummaryScorecard = {
+    mode,
+    label,
+    growthScore,
+    exceptionalScore,
+    riskScore,
+    declineScore,
+    finalScore,
+    tags,
+    trend: "Flat",
+    primaryReason: "",
+  };
+
+  scorecard.trend = getWorkoutSummaryTrendLabelFromScorecard(scorecard);
+  scorecard.primaryReason = getWorkoutSummaryPrimaryReason(scorecard);
+  return scorecard;
+};
+
+const getWorkoutSummaryPrimaryReason = (scorecard: WorkoutSummaryScorecard) => {
+  if (scorecard.tags.includes("no_signal")) return "The graph does not provide a meaningful directional signal yet.";
+  if (scorecard.label === "Contextual Decline") return "Performance trends downward without enough internal training context to explain the drop.";
+  if (scorecard.tags.includes("synchronized_plateau_breakthrough")) return "Both exercises broke a stable plateau together with equal or heavier weight.";
+  if (scorecard.tags.includes("retained_meaningful_improvement")) return "A major output gain was still meaningfully retained at the finish.";
+  if (scorecard.tags.includes("four_plus_weight_increases")) return "Four or more consecutive weight increases create an exceptional progression signal.";
+  if (scorecard.tags.includes("controlled_major_set_gain")) return "A controlled exercise gained three or more sets, which is treated as an exceptional marker.";
+  if (scorecard.tags.includes("recovered_after_tradeoff")) return "A weight-based drop was followed by recovery, which supports adaptation rather than regression.";
+  if (scorecard.tags.includes("maintained_under_load")) return "Output was maintained while weight increased.";
+  if (scorecard.tags.includes("late_average_above_early")) return "Later sessions sit above the early-session baseline.";
+  if (scorecard.tags.includes("finish_above_start")) return "The graph finishes above where it began.";
+  return "The graph does not show enough positive or negative direction to move beyond neutral.";
+};
+
+const getWorkoutSummaryFactorText = (tag: WorkoutSummarySignalTag) => {
+  const copy: Record<WorkoutSummarySignalTag, { symbol: string; title: string; text: string; impact: number }> = {
+    no_signal: { symbol: "→", title: "No strong signal", text: "The graph does not show a meaningful directional change.", impact: 0.28 },
+    finish_above_start: { symbol: "↗", title: "Finish above start", text: "The final output is above the starting point.", impact: 0.26 },
+    finish_below_start: { symbol: "↘", title: "Finish below start", text: "The final output is below the starting point.", impact: 0.28 },
+    late_average_above_early: { symbol: "↗", title: "Later average", text: "Later sessions average above the early-session baseline.", impact: 0.28 },
+    late_average_below_early: { symbol: "↘", title: "Later average", text: "Later sessions average below the early-session baseline.", impact: 0.3 },
+    weight_increased: { symbol: "◼", title: "Weight increase", text: "Difficulty increased during the recorded sessions.", impact: 0.22 },
+    three_weight_increases: { symbol: "◼", title: "Progression bias", text: "Three weight increases are a highlight worth noticing, even when they are not the reason for the label.", impact: 0.24 },
+    four_plus_weight_increases: { symbol: "★", title: "Exceptional progression", text: "Four or more weight increases show a strong workload progression pattern.", impact: 0.36 },
+    maintained_under_load: { symbol: "▣", title: "Maintained under load", text: "Performance was held while weight increased.", impact: 0.3 },
+    tradeoff_drop_under_load: { symbol: "↘", title: "Demand tradeoff", text: "Performance dipped after added weight, which reads as a tradeoff rather than a judgment.", impact: 0.2 },
+    recovered_after_tradeoff: { symbol: "↘↗", title: "Recovery after tradeoff", text: "Performance came back after a weight-based dip.", impact: 0.34 },
+    unrecovered_tradeoff: { symbol: "!", title: "Unrecovered tradeoff", text: "A weight-based dip did not fully rebound within the visible sessions.", impact: 0.3 },
+    major_set_gain: { symbol: "★", title: "Major output gain", text: "Performance increased by three or more sets.", impact: 0.34 },
+    controlled_major_set_gain: { symbol: "★", title: "Controlled-exercise gain", text: "A tempo, pause, eccentric, or isometric exercise improved by three or more sets.", impact: 0.38 },
+    strong_finish: { symbol: "↗", title: "Strong finish", text: "The graph closes meaningfully above the starting level.", impact: 0.32 },
+    volatile_without_resolution: { symbol: "~", title: "Unresolved volatility", text: "The graph moved sharply but did not settle into a higher range.", impact: 0.25 },
+    spike_not_retained: { symbol: "△", title: "Unretained spike", text: "A high point appeared, but the graph did not hold that level.", impact: 0.24 },
+    early_gain_then_plateau: { symbol: "→", title: "Early gain then plateau", text: "The graph improved early, then settled without continued progression.", impact: 0.22 },
+    late_spike_without_support: { symbol: "↗", title: "Late spike", text: "The graph finished sharply higher, but the spike needs more surrounding support.", impact: 0.22 },
+    plateau_after_progression: { symbol: "→", title: "Progression plateau", text: "Weight increased, but performance settled into a plateau rather than continuing upward.", impact: 0.24 },
+    no_output_progression_under_load: { symbol: "▣", title: "Load-led progress", text: "Weight increased while performance stayed mostly flat.", impact: 0.22 },
+    load_drop_observed: { symbol: "↘", title: "Load adjustment", text: "A later weight reduction softens the continuous-progression signal.", impact: 0.2 },
+    retained_meaningful_improvement: { symbol: "★", title: "Retained improvement", text: "A major gain was still meaningfully retained at the finish.", impact: 0.36 },
+    synchronized_plateau_breakthrough: { symbol: "★", title: "Plateau breakthrough", text: "Both exercises broke a stable plateau together with equal or heavier weight.", impact: 0.38 },
+  };
+
+  return copy[tag];
+};
+
+const buildWorkoutSummaryFactorsFromScorecard = (scorecard: WorkoutSummaryScorecard): WorkoutSummaryFactor[] => {
+  const priority: WorkoutSummarySignalTag[] = [
+    "synchronized_plateau_breakthrough",
+    "retained_meaningful_improvement",
+    "four_plus_weight_increases",
+    "controlled_major_set_gain",
+    "major_set_gain",
+    "recovered_after_tradeoff",
+    "maintained_under_load",
+    "late_average_above_early",
+    "finish_above_start",
+    "weight_increased",
+    "three_weight_increases",
+    "tradeoff_drop_under_load",
+    "spike_not_retained",
+    "volatile_without_resolution",
+    "unrecovered_tradeoff",
+    "late_average_below_early",
+    "finish_below_start",
+    "no_signal",
+  ];
+
+  const factors = priority
+    .filter((tag) => scorecard.tags.includes(tag))
+    .map((tag) => getWorkoutSummaryFactorText(tag));
+
+  return factors.length
+    ? factors.slice(0, 4)
+    : [{ symbol: "▣", title: "Scorecard", text: scorecard.primaryReason, impact: 0.3 }];
+};
+
+const buildWorkoutSummaryTextFromScorecard = (
+  scorecard: WorkoutSummaryScorecard,
+  series: GraphSeries,
+  stats: WorkoutSummaryTrendStats
+) => buildWorkoutSummaryTextFromSlots(scorecard, stats, series);
+
+const generateWorkoutSummaryInsightFromSeries = (
+  series: GraphSeries,
+  contextLabel = "this graph"
+): WorkoutSummaryInsight => {
+  const points = [...series.points].sort((a, b) => {
+    const timeA = Number.isFinite(getWorkoutSummaryPointTime(a.date)) ? getWorkoutSummaryPointTime(a.date) : a.sessionNumber;
+    const timeB = Number.isFinite(getWorkoutSummaryPointTime(b.date)) ? getWorkoutSummaryPointTime(b.date) : b.sessionNumber;
+    return timeA - timeB;
+  });
+
+  if (points.length < 2) {
+    return buildInsufficientWorkoutSummaryInsight(contextLabel);
+  }
+
+  const mode: WorkoutSummaryBlockMode = points[0]?.blockType === "single" ? "single" : "paired";
+  const stats = getWorkoutSummaryTrendStats(points);
+  const scorecard = buildWorkoutSummaryScorecard({ ...series, points }, mode);
+  const headline = scorecard.label;
+  const summary = buildWorkoutSummaryTextFromScorecard(scorecard, series, stats);
+  const reportAccuracy: ReportAccuracy = points.length < 4 ? "Low" : points.length < 6 ? "Moderate" : "High";
+  const accuracyReason = points.length < 4 ? "limited data" : mode === "single" ? "single-block graph" : "paired exercise line";
+  const achievement = undefined;
+
+  return {
+    id: `generated-${series.exerciseId}-${points.length}-${headline.replace(/\s+/g, "-").toLowerCase()}`,
+    isExperimental: true,
+    baseLabel: "Workout Summary",
     headline,
     summary,
-    tone: story.tone,
-    reportAccuracy: scorecard.dataConfidence,
-    accuracyReason: scorecard.dataConfidence === "High" ? "stable data set" : scorecard.dataConfidence === "Moderate" ? "developing data set" : "limited data",
-    achievements,
-    highlights,
-    markers: scorecard.markers,
-    slots,
+    achievement,
+    reportAccuracy,
+    accuracyReason,
+    trend: scorecard.trend,
+    factors: buildWorkoutSummaryFactorsFromScorecard(scorecard),
+    limitation: `Generated from the selected ${mode === "single" ? "single-block" : "paired-block"} graph. The label is scorecard-based; summary wording can be tuned separately.`,
   };
 };
 
-const getAISummaryToneClasses = (tone: AISummaryTone) => {
-  if (tone === "exceptional") return "bg-emerald-100 text-emerald-800 ring-emerald-200";
-  if (tone === "positive") return "bg-teal-100 text-teal-800 ring-teal-200";
-  if (tone === "contextual") return "bg-amber-100 text-amber-800 ring-amber-200";
-  if (tone === "baseline") return "bg-sky-100 text-sky-800 ring-sky-200";
-  return "bg-slate-100 text-slate-700 ring-slate-200";
+const getWorkoutSummarySeverityRank = (headline: string) => {
+  if (headline.includes("Contextual")) return 5;
+  if (headline.includes("Exceptional Growth")) return 4;
+  if (headline.includes("Moderate Growth")) return 3;
+  if (headline.includes("Baseline")) return 1;
+  return 0;
 };
 
-function AISummaryMiniCard({ title, detail }: { title: string; detail: string }) {
+const getWorkoutSummaryHeadlineRank = (headline: string) => {
+  if (headline.includes("Exceptional Growth")) return 4;
+  if (headline.includes("Moderate Growth")) return 3;
+  if (headline.includes("Contextual")) return 2;
+  if (headline.includes("Baseline")) return 1;
+  return 0;
+};
+
+const getWorkoutSummaryStatsForCombinedItem = (item: { series: GraphSeries; scorecard: WorkoutSummaryScorecard }) =>
+  getWorkoutSummaryTrendStats(item.series.points);
+
+const hasStrictRetainedMeaningfulImprovementQualifier = (
+  items: Array<{ series: GraphSeries; scorecard: WorkoutSummaryScorecard }>
+) => {
+  if (items.length < 2) return false;
+
+  const statItems = items.map((item) => ({ item, stats: getWorkoutSummaryStatsForCombinedItem(item) }));
+  const allSeriesHaveEnoughData = statItems.every(({ stats }) => stats.outputs.length >= 4);
+  if (!allSeriesHaveEnoughData) return false;
+
+  const finalGains = statItems.map(({ stats }) => stats.lastOutput - stats.firstOutput);
+  const allSeriesFinishMeaningfullyAboveBaseline = finalGains.every((gain) => gain >= 2);
+  const hasDemandContext = statItems.some(
+    ({ item, stats }) =>
+      item.scorecard.tags.includes("weight_increased") ||
+      stats.weightIncreaseCount > 0 ||
+      stats.weightDelta > 0
+  );
+  const hasStandoutRetainedGain = statItems.some(({ stats }) => {
+    const peakGain = stats.maxOutput - stats.firstOutput;
+    const finalGain = stats.lastOutput - stats.firstOutput;
+    const retentionRatio = peakGain > 0 ? finalGain / peakGain : 0;
+
+    return peakGain >= 4 && finalGain >= 2 && retentionRatio >= 0.5;
+  });
+  const hasHardLimiter = statItems.some(({ item, stats }) =>
+    item.scorecard.tags.includes("unrecovered_tradeoff") ||
+    item.scorecard.tags.includes("finish_below_start") ||
+    stats.lastOutput < stats.firstOutput
+  );
+
+  return allSeriesFinishMeaningfullyAboveBaseline && hasDemandContext && hasStandoutRetainedGain && !hasHardLimiter;
+};
+
+const hasSynchronizedPlateauBreakthroughQualifier = (
+  items: Array<{ series: GraphSeries; scorecard: WorkoutSummaryScorecard }>
+) => {
+  if (items.length < 2) return false;
+
+  return items.every((item) => {
+    const stats = getWorkoutSummaryStatsForCombinedItem(item);
+    if (stats.outputs.length < 5) return false;
+
+    const finalIndex = stats.outputs.length - 1;
+    const previousOutput = stats.outputs[finalIndex - 1];
+    const previousWeight = stats.weights[finalIndex - 1] || 0;
+    const finalWeight = stats.weights[finalIndex] || 0;
+    const priorWindow = stats.outputs.slice(Math.max(0, finalIndex - 3), finalIndex);
+    const priorRange = priorWindow.length ? Math.max(...priorWindow) - Math.min(...priorWindow) : 0;
+    const noMeaningfulRegressionInPlateau = priorWindow.every((value) => value >= previousOutput - 0.5);
+    const demandHeldOrIncreased = finalWeight === 0 || previousWeight === 0 || finalWeight >= previousWeight;
+
+    return (
+      priorWindow.length >= 3 &&
+      priorRange <= 0.5 &&
+      noMeaningfulRegressionInPlateau &&
+      stats.lastOutput >= previousOutput + 1 &&
+      stats.lastOutput > stats.firstOutput &&
+      demandHeldOrIncreased
+    );
+  });
+};
+
+const combineWorkoutSummaryScorecards = (
+  items: Array<{ series: GraphSeries; insight: WorkoutSummaryInsight; scorecard: WorkoutSummaryScorecard }>
+) => {
+  const growthScore = items.reduce((total, item) => total + item.scorecard.growthScore, 0);
+  const exceptionalScore = items.reduce((total, item) => total + item.scorecard.exceptionalScore, 0);
+  const riskScore = items.reduce((total, item) => total + item.scorecard.riskScore, 0);
+  const declineScore = items.reduce((total, item) => total + item.scorecard.declineScore, 0);
+  const finalScore = growthScore + exceptionalScore * 2 - riskScore;
+  const tags = items.flatMap((item) => item.scorecard.tags).filter((tag, index, list) => list.indexOf(tag) === index);
+
+  const strongCount = items.filter((item) => item.scorecard.label === "Exceptional Growth").length;
+  const moderateCount = items.filter((item) => item.scorecard.label === "Moderate Growth").length;
+  const contextualCount = items.filter((item) => item.scorecard.label === "Contextual Decline").length;
+  const positiveCount = strongCount + moderateCount;
+
+  const bothStrong = strongCount === items.length;
+  const bothContextual = contextualCount === items.length;
+  const anyExceptional = exceptionalScore >= 1;
+  const noUnresolvedTradeoff = !tags.includes("unrecovered_tradeoff");
+  const noHardDecline = !bothContextual && declineScore < 7;
+  const hasStrictRetainedMeaningfulImprovement = hasStrictRetainedMeaningfulImprovementQualifier(items);
+  const hasSynchronizedPlateauBreakthrough = hasSynchronizedPlateauBreakthroughQualifier(items);
+
+  if (hasStrictRetainedMeaningfulImprovement) addWorkoutSummaryTag(tags, "retained_meaningful_improvement");
+  if (hasSynchronizedPlateauBreakthrough) addWorkoutSummaryTag(tags, "synchronized_plateau_breakthrough");
+
+  const hasStrongCap =
+    tags.includes("late_spike_without_support") ||
+    tags.includes("plateau_after_progression") ||
+    tags.includes("no_output_progression_under_load") ||
+    tags.includes("load_drop_observed") ||
+    tags.includes("unrecovered_tradeoff") ||
+    items.some((item) =>
+      item.scorecard.tags.includes("finish_below_start") || item.scorecard.tags.includes("late_average_below_early")
+    );
+
+  const qualifiesByCleanOutstandingSignal =
+    (hasStrictRetainedMeaningfulImprovement || hasSynchronizedPlateauBreakthrough) &&
+    noHardDecline &&
+    noUnresolvedTradeoff;
+
+  const qualifiesByGeneralStrongSignal =
+    !hasStrongCap &&
+    noHardDecline &&
+    noUnresolvedTradeoff &&
+    (bothStrong || (anyExceptional && finalScore >= 8) || (growthScore >= 14 && riskScore <= 1));
+
+  let label: WorkoutSummaryLabel = "Neutral";
+
+  if (bothContextual || (contextualCount > 0 && positiveCount === 0)) {
+    label = "Contextual Decline";
+  } else if (qualifiesByCleanOutstandingSignal || qualifiesByGeneralStrongSignal) {
+    label = "Exceptional Growth";
+  } else if (positiveCount > 0 || finalScore >= 3) {
+    label = "Moderate Growth";
+  }
+
+  const combined: WorkoutSummaryScorecard = {
+    mode: "paired",
+    label,
+    growthScore,
+    exceptionalScore,
+    riskScore,
+    declineScore,
+    finalScore,
+    tags,
+    trend: "Generated Block",
+    primaryReason: "",
+  };
+
+  combined.primaryReason = getWorkoutSummaryPrimaryReason(combined);
+  return combined;
+};
+
+const generateWorkoutSummaryInsightFromSeriesSet = (
+  seriesList: GraphSeries[],
+  contextLabel = "this graph"
+): WorkoutSummaryInsight => {
+  const usableSeries = seriesList.filter((series) => series.points.length > 0);
+
+  if (!usableSeries.length) return buildInsufficientWorkoutSummaryInsight(contextLabel);
+  if (usableSeries.length === 1) return generateWorkoutSummaryInsightFromSeries(usableSeries[0], contextLabel);
+
+  const childItems = usableSeries.map((series) => {
+    const insight = generateWorkoutSummaryInsightFromSeries(series, series.exerciseName || contextLabel);
+    return {
+      series,
+      insight,
+      scorecard: buildWorkoutSummaryScorecard(series, "paired"),
+    };
+  });
+
+  const combinedScorecard = combineWorkoutSummaryScorecards(childItems);
+  const headline = combinedScorecard.label;
+  const sortedByImpact = childItems
+    .slice()
+    .sort((a, b) => getWorkoutSummaryHeadlineRank(b.insight.headline) - getWorkoutSummaryHeadlineRank(a.insight.headline));
+  const strongestInsight = sortedByImpact[0]?.insight;
+  const childStats = childItems.map(({ series }) => getWorkoutSummaryTrendStats(series.points));
+  const combinedStats = getWorkoutSummaryTrendStats(usableSeries.flatMap((series) => series.points));
+  const combinedOpening = getWorkoutSummaryMemberOpening(combinedScorecard, combinedStats, null);
+  const maxWeightGain = Math.max(0, ...childStats.map((stats) => stats.weightDelta));
+  const totalWeightIncreases = childStats.reduce((total, stats) => total + stats.weightIncreaseCount, 0);
+  const maxWeightRun = Math.max(0, ...childStats.map((stats) => stats.maxWeightRun));
+  const maxOutputDelta = Math.max(...childStats.map((stats) => stats.outputDelta));
+  const anyControlled = usableSeries.some((series) => isControlledWorkoutSummarySeries(series));
+  const anyCompletionFocused = usableSeries.some((series) => isCompletionFocusedWorkoutSummarySeries(series));
+  const anyFinishBelowStart = childStats.some((stats) => stats.outputDelta < 0);
+  const anyRecoveredTradeoff = childItems.some(({ scorecard }) => scorecard.tags.includes("recovered_after_tradeoff"));
+  const anyMaintainedUnderLoad = childItems.some(({ scorecard }) => scorecard.tags.includes("maintained_under_load"));
+  const allNeutral = childItems.every(({ scorecard }) => scorecard.label === "Neutral");
+  const bothPositive = childItems.every(({ scorecard }) => scorecard.label === "Moderate Growth" || scorecard.label === "Exceptional Growth");
+  const bothFinishAboveStart = childStats.every((stats) => stats.outputDelta > 0);
+  const bothStayAtOrAboveStart = childStats.every((stats) => stats.lastOutput >= stats.firstOutput - 0.25);
+  const bothTightRange = childStats.every((stats) => stats.outputRange <= 1.5);
+  const allLargeStartJump = childStats.every((stats) => stats.outputs.length >= 3 && stats.outputs[1] >= stats.firstOutput + Math.max(1, stats.outputRange * 0.35));
+  const loadWord = usableSeries.some((series) => /carry|farmer/i.test(series.exerciseName)) ? "load" : "weight";
+  const dominantWeightSeries = usableSeries[childStats.findIndex((stats) => stats.weightDelta === maxWeightGain)] || usableSeries[0];
+  const dominantWeightName = dominantWeightSeries?.exerciseName || "the weighted movement";
+  const combinedSlots: Array<string | undefined> = [combinedOpening];
+
+  if (anyCompletionFocused && combinedScorecard.label === "Neutral") {
+    combinedSlots.push(`This graph reads more like a consistency check than a progression-focused workout.`);
+    combinedSlots.push(`This type of exercise plays an important role in long-term progress despite having limited recordable data.`);
+  } else if (combinedScorecard.label === "Contextual Decline") {
+    combinedSlots.push(`The graph gradually moves downward through the program without showing signs of major instability or collapse.`);
+    combinedSlots.push(`Conditioning-based work can be influenced by recovery, environment, schedule, health, or outside fatigue.`);
+  } else if (combinedScorecard.label === "Exceptional Growth") {
+    if (anyControlled && maxOutputDelta >= 3) {
+      combinedSlots.push(`Explosive upward progression under ${usableSeries.map((series) => getWorkoutSummaryConstraintLabel(series)).filter((value, index, list) => value !== "controlled" && list.indexOf(value) === index).join("/") || "controlled"} constraints is extremely rare, making the acceleration shown here especially impressive.`);
+    } else if (allLargeStartJump || combinedScorecard.tags.includes("retained_meaningful_improvement")) {
+      combinedSlots.push(`You immediately created distance in both exercises, separating them from the starting baseline.`);
+    } else if (combinedScorecard.tags.includes("synchronized_plateau_breakthrough")) {
+      combinedSlots.push(`Both exercises broke through together, which gives this block a much stronger progression signal.`);
+    } else {
+      combinedSlots.push(`Both exercises built a stronger working range and kept that higher structure through the program.`);
+    }
+
+    if (maxWeightGain > 0 && bothStayAtOrAboveStart) {
+      combinedSlots.push(`You maintained that higher structure while continuing upward in ${loadWord}.`);
+    } else if (anyRecoveredTradeoff) {
+      combinedSlots.push(`Even after the tradeoff dip, both exercises recovered back into structure instead of collapsing backward.`);
+    }
+
+    if (bothFinishAboveStart) {
+      combinedSlots.push(`That level of retained adaptation reflects an exceptional performance.`);
+    }
+    combinedSlots.push(`Outstanding work.`);
+  } else if (combinedScorecard.label === "Moderate Growth") {
+    if (maxWeightRun >= 4) {
+      combinedSlots.push(`Both exercises established a stronger structure while continuing through ${maxWeightRun} consecutive ${loadWord} increases.`);
+    } else if (anyMaintainedUnderLoad && maxWeightGain > 0) {
+      combinedSlots.push(`Maintaining output while increasing ${loadWord} is what separates this block from a flatter progression pattern.`);
+    } else if (anyRecoveredTradeoff) {
+      combinedSlots.push(`Both exercises moved through a tradeoff phase and recovered back into range rather than collapsing backward.`);
+    } else if (bothTightRange && maxWeightGain > 0) {
+      combinedSlots.push(`Both exercises maintained a tightly controlled range while ${loadWord} increased throughout the program.`);
+    } else if (bothPositive) {
+      combinedSlots.push(`Both exercises showed positive structure without needing to force a bigger story than the graph supports.`);
+    } else if (allNeutral && anyFinishBelowStart) {
+      combinedSlots.push(`Both exercises point toward a steadier read, with later performance not fully recovering by the end of the block.`);
+    } else {
+      combinedSlots.push(`This block stayed controlled enough to keep the read positive.`);
+    }
+
+    if (anyControlled && maxWeightGain > 0 && !combinedSlots.some((sentence) => String(sentence || "").includes("constraints"))) {
+      combinedSlots.push(`The constraint work matters here because stable output becomes more valuable as ${loadWord} increases.`);
+    } else if (totalWeightIncreases >= 3 && maxWeightRun < 4) {
+      combinedSlots.push(`The repeated ${loadWord} increases add important context to the block.`);
+    } else if (maxWeightGain >= 10) {
+      combinedSlots.push(`The ${getWorkoutSummaryLoadScaleWord(maxWeightGain)} ${loadWord} increase, led by ${dominantWeightName}, gives the block more substance than output alone shows.`);
+    }
+
+    if (anyRecoveredTradeoff && !combinedSlots.some((sentence) => String(sentence || "").includes("recovered"))) {
+      combinedSlots.push(`The recovery after the dip reinforces the structure of the block.`);
+    }
+    combinedSlots.push(combinedScorecard.finalScore >= 6 ? `Great work.` : `Good work.`);
+  } else if (combinedScorecard.label === "Neutral") {
+    if (bothTightRange) {
+      combinedSlots.push(`Both exercises maintained a tightly controlled range, making consistency and workload management the defining traits of this block.`);
+    } else if (anyFinishBelowStart) {
+      combinedSlots.push(`The block stayed mixed, with later performance not fully recovering by the end.`);
+    } else {
+      combinedSlots.push(`The block stayed balanced without a clear move higher or lower.`);
+    }
+  }
+
+  let summary = joinWorkoutSummarySentences(combinedSlots, combinedScorecard.label === "Exceptional Growth" ? 4 : combinedScorecard.label === "Moderate Growth" ? 4 : 3);
+
+  const reportAccuracy: ReportAccuracy = childItems.some(({ insight }) => insight.reportAccuracy === "Low")
+    ? "Low"
+    : childItems.some(({ insight }) => insight.reportAccuracy === "Moderate")
+      ? "Moderate"
+      : "High";
+
+  const factors: WorkoutSummaryFactor[] = childItems
+    .sort((a, b) => getWorkoutSummarySeverityRank(b.insight.headline) - getWorkoutSummarySeverityRank(a.insight.headline))
+    .map(({ series, insight, scorecard }, index) => {
+      const primaryFactor = buildWorkoutSummaryFactorsFromScorecard(scorecard)[0];
+      return {
+        symbol: insight.headline.includes("Exceptional Growth")
+          ? "★"
+          : insight.headline.includes("Moderate Growth")
+            ? "↗"
+            : insight.headline.includes("Contextual")
+              ? "↘"
+              : "→",
+        title: series.exerciseName || `Exercise ${index + 1}`,
+        text: primaryFactor?.text || scorecard.primaryReason,
+        impact: index === 0 ? 0.36 : 0.28,
+      };
+    })
+    .slice(0, 2);
+
+  return {
+    id: `generated-block-${usableSeries.map((series) => series.exerciseId).join("-")}-${headline.replace(/\s+/g, "-").toLowerCase()}`,
+    isExperimental: true,
+    baseLabel: "Workout Summary",
+    headline,
+    summary,
+    achievement: strongestInsight?.achievement,
+    reportAccuracy,
+    accuracyReason: usableSeries.length > 1 ? "real block data · paired scorecard" : "real data",
+    trend: combinedScorecard.trend,
+    factors: factors.length
+      ? factors
+      : buildWorkoutSummaryFactorsFromScorecard(combinedScorecard),
+    limitation: "Generated from all visible series in this block graph. The highlighted exercise changes the visual layering only.",
+  };
+};
+const sortWorkoutSummaryFactorsByImpact = (factors: WorkoutSummaryFactor[]) =>
+  [...factors].sort((a, b) => Number(b.impact || 0) - Number(a.impact || 0));
+
+const getWorkoutSummaryPrimaryFactors = (insight: WorkoutSummaryInsight) =>
+  sortWorkoutSummaryFactorsByImpact(insight.factors).slice(0, PRIMARY_FACTOR_COUNT);
+
+const getWorkoutSummarySecondaryFactors = (insight: WorkoutSummaryInsight) =>
+  sortWorkoutSummaryFactorsByImpact(insight.factors)
+    .slice(PRIMARY_FACTOR_COUNT)
+    .filter((factor) => Number(factor.impact || 0) >= SECONDARY_FACTOR_THRESHOLD)
+    .slice(0, MAX_SECONDARY_FACTORS);
+
+const getWorkoutSummaryTone = (insight: WorkoutSummaryInsight): SummaryTone => {
+  if (insight.headline.includes("Exceptional Growth")) return "positive";
+  if (insight.headline.includes("Moderate Growth")) return "positiveContext";
+  if (["Positive Progress Under Weight", "Emerging Growth", "Sustained Performance"].includes(insight.headline)) return "positiveContext";
+  if (insight.headline.includes("Baseline")) return "baseline";
+  if (["Contextual Decline", "Temporary Decline", "Fatigue Impact"].includes(insight.headline)) return "contextual";
+  return "neutral";
+};
+
+const getWorkoutSummaryToneDotClass = (tone: SummaryTone) => {
+  if (tone === "positive") return "bg-emerald-200 ring-emerald-100";
+  if (tone === "positiveContext") return "bg-teal-200 ring-teal-100";
+  if (tone === "baseline") return "bg-sky-200 ring-sky-100";
+  if (tone === "contextual") return "bg-amber-200 ring-amber-100";
+  if (tone === "neutral") return "bg-violet-200 ring-violet-100";
+  return "bg-slate-400 ring-slate-300";
+};const workoutSummaryClosingStatementPools: Record<SummaryTone | "lowAccuracy", string[]> = {
+  positive: [
+    "The momentum you built here is incredible.",
+    "This is a great foundation to build from.",
+    "The work shows up clearly here.",
+  ],
+  positiveContext: [
+    "This is a great foundation to build from.",
+    "Several concrete positives showed up here.",
+  ],
+  contextual: [
+    "That context matters when reading the pattern.",
+    "This is worth watching without turning it into a judgment on the work.",
+    "The pattern deserves context before drawing a hard conclusion.",
+  ],
+  baseline: [
+    "As more sessions are recorded, the pattern will become easier to read.",
+    "This gives future reports a starting point for comparison.",
+  ],
+  lowAccuracy: [
+    "More data will help refine this picture.",
+    "As more sessions are recorded, the trend will become easier to trust.",
+    "This is an early read, and future sessions will make the pattern clearer.",
+  ],
+  neutral: ["That keeps the overall read grounded.", "This is still a useful baseline to compare against later."],
+};
+
+const getWorkoutSummaryClosingTone = (insight: WorkoutSummaryInsight): SummaryTone | "lowAccuracy" => {
+  if (insight.reportAccuracy === "Low") return "lowAccuracy";
+  return getWorkoutSummaryTone(insight);
+};
+
+const getWorkoutSummaryClosingStatement = (insight: WorkoutSummaryInsight) => {
+  const pool = workoutSummaryClosingStatementPools[getWorkoutSummaryClosingTone(insight)] || workoutSummaryClosingStatementPools.neutral;
+  const source = String(insight.id || insight.headline || "0");
+  let hash = 0;
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
+  }
+
+  return pool[hash % pool.length];
+};
+
+const buildWorkoutSummaryLabel = (insight: WorkoutSummaryInsight) =>
+  `${insight.isExperimental ? "Experimental " : ""}${insight.baseLabel}`;
+
+const buildWorkoutSummaryText = (insight: WorkoutSummaryInsight) => {
+  const baseSummary = String(insight.summary || "").trim();
+  const closingStatement = getWorkoutSummaryClosingStatement(insight);
+  return `${baseSummary} ${closingStatement}`.trim();
+};
+
+function WorkoutSummarySymbol({ symbol }: { symbol: string }) {
   return (
-    <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-3">
-      <div className="text-sm font-semibold text-zinc-900">{title}</div>
-      <p className="mt-1 text-xs leading-5 text-zinc-600">{detail}</p>
-    </div>
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-bold text-zinc-800">
+      {symbol}
+    </span>
   );
 }
 
-function GraphInsightCard({ insight }: { insight: WorkoutSummaryInsight | null }) {
+function WorkoutSummaryAccuracyBadge({ value, reason }: { value: ReportAccuracy; reason: string }) {
+  const tone =
+    value === "High"
+      ? "bg-emerald-100 text-emerald-800"
+      : value === "Low"
+        ? "bg-amber-100 text-amber-800"
+        : "bg-blue-100 text-blue-800";
+
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}>
+      Report Accuracy: {value}{reason ? ` · ${reason}` : ""}
+    </span>
+  );
+}
+
+function WorkoutSummaryFactorCard({
+  factor,
+  muted = false,
+}: {
+  factor: WorkoutSummaryFactor;
+  muted?: boolean;
+}) {
+  return (
+    <div className={muted ? "rounded-xl bg-zinc-50 p-3" : "rounded-xl border border-zinc-100 p-3"}>
+      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+        <WorkoutSummarySymbol symbol={factor.symbol} />
+        {factor.title}
+      </div>
+      <p className="mt-1 text-xs leading-5 text-zinc-600">{factor.text}</p>
+    </div>
+  );
+}
+function GraphInsightCard({ insight }: { insight?: WorkoutSummaryInsight }) {
   const [open, setOpen] = useState(false);
+  const [scenarioIndex, setScenarioIndex] = useState(0);
+  const activeInsight = insight || mockWorkoutSummaryInsights[scenarioIndex] || defaultWorkoutSummaryInsight;
+  const label = buildWorkoutSummaryLabel(activeInsight);
+  const composedSummary = buildWorkoutSummaryText(activeInsight);
+  const primaryFactors = useMemo(() => getWorkoutSummaryPrimaryFactors(activeInsight), [activeInsight]);
+  const secondaryFactors = useMemo(() => getWorkoutSummarySecondaryFactors(activeInsight), [activeInsight]);
+  const tone = getWorkoutSummaryTone(activeInsight);
 
   useEffect(() => {
     setOpen(false);
-  }, [insight?.id]);
+  }, [activeInsight.id]);
 
-  if (!insight) {
-    return (
-      <section className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-500">
-        Add more saved sessions to generate a workout summary for this graph.
-      </section>
-    );
-  }
+  const goPreviousScenario = () => {
+    setScenarioIndex((index) => (index - 1 + mockWorkoutSummaryInsights.length) % mockWorkoutSummaryInsights.length);
+  };
 
-  const toneClasses = getAISummaryToneClasses(insight.tone);
-  const secondaryDetails = insight.markers.slice(0, 5);
+  const goNextScenario = () => {
+    setScenarioIndex((index) => (index + 1) % mockWorkoutSummaryInsights.length);
+  };
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="flex items-start gap-3">
         <div className="rounded-2xl bg-zinc-950 px-3 py-2 text-sm font-bold text-white shadow-sm">AI</div>
+
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-bold uppercase tracking-wide text-zinc-700">Workout Summary</h3>
-            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${toneClasses}`}>{insight.label}</span>
-            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600">
-              Report Accuracy: {insight.reportAccuracy} · {insight.accuracyReason}
-            </span>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-zinc-700">{label}</h3>
+            <WorkoutSummaryAccuracyBadge value={activeInsight.reportAccuracy} reason={activeInsight.accuracyReason} />
           </div>
 
-          <p className="mt-2 text-lg font-semibold leading-snug text-zinc-950">{insight.headline}</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-700">{insight.summary}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className={`h-3 w-3 shrink-0 rounded-full ring-4 ${getWorkoutSummaryToneDotClass(tone)}`}
+            />
+            <p className="text-lg font-semibold leading-snug text-zinc-950">{activeInsight.headline}</p>
+          </div>
 
-          {insight.highlights.length ? (
-            <div className="mt-3">
-              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-zinc-500">Highlights</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {insight.highlights.slice(0, 2).map((highlight) => (
-                  <AISummaryMiniCard key={`${insight.id}-${highlight.title}`} title={highlight.title} detail={highlight.detail} />
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{composedSummary}</p>
 
-          {insight.achievements.length ? (
-            <div className="mt-3">
-              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-zinc-500">Key Factors</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {insight.achievements.slice(0, 2).map((achievement) => (
-                  <AISummaryMiniCard key={`${insight.id}-${achievement.id}`} title={achievement.title} detail={achievement.detail} />
-                ))}
-              </div>
+          <div className="mt-3">
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-zinc-500">Key Factors</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {primaryFactors.map((factor) => (
+                <WorkoutSummaryFactorCard key={`${activeInsight.id}-${factor.title}`} factor={factor} muted />
+              ))}
             </div>
-          ) : null}
+          </div>
 
-          {secondaryDetails.length ? (
-            <div className="mt-3">
-              <button type="button" onClick={() => setOpen((value) => !value)} className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                {open ? "Hide Details" : "Show Details"}
-              </button>
-              {open ? (
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {secondaryDetails.map((marker) => (
-                    <AISummaryMiniCard key={`${insight.id}-${marker.kind}-${marker.text}`} title={marker.kind.replace(/_/g, " ")} detail={marker.text} />
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="mt-3 inline-flex items-center gap-1 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+          >
+            {open ? "Hide Full Summary ▲" : "Full Summary ▼"}
+          </button>
         </div>
       </div>
+
+      {open && (
+        <div className="mt-4 border-t border-zinc-100 pt-4">
+          {secondaryFactors.length ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {secondaryFactors.map((factor) => (
+                <WorkoutSummaryFactorCard key={`${activeInsight.id}-${factor.title}`} factor={factor} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-600">
+              No additional factors met the current display threshold. The main factors carry most of this report.
+            </p>
+          )}
+
+          <p className="mt-4 rounded-xl bg-zinc-50 p-3 text-xs leading-5 text-zinc-600">{activeInsight.limitation}</p>
+
+          <p className="mt-3 text-right text-[11px] font-semibold text-zinc-400">– AI Generated</p>
+        </div>
+      )}
+
+      {!insight ? (
+        <div className="mt-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">Dev Scenario Toggle</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">{activeInsight.headline}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={goPreviousScenario}
+                className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={goNextScenario}
+                className="rounded-full bg-zinc-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-zinc-500">
+            Scenario {scenarioIndex + 1} of {mockWorkoutSummaryInsights.length}: {activeInsight.id}
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }
+
 
 export default function App() {
   const [members, setMembers] = useState<Member[]>(() => {
@@ -2601,11 +3678,6 @@ export default function App() {
       }),
     }));
   }, [savedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
-
-  const generatedWorkoutSummaryInsight = useMemo(
-    () => generateWorkoutSummaryInsightFromGraphData(graphData, selectedBlock?.type),
-    [graphData, selectedBlock?.type]
-  );
 
   const dateAxisMeta = useMemo(() => {
     const labels = Array.from(new Set(graphData.flatMap((series) => series.points.map((point) => point.date)))).sort(
@@ -2814,6 +3886,11 @@ export default function App() {
     [chartSeries]
   );
 
+
+  const generatedWorkoutSummaryInsight = useMemo(
+    () => generateWorkoutSummaryInsightFromSeriesSet(graphData, selectedBlock?.title || "this graph"),
+    [graphData, selectedBlock?.title]
+  );
 
   const weightLegendItems = useMemo(() => {
     const weights = Array.from(
