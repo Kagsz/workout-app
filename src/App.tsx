@@ -1689,7 +1689,7 @@ function PathBar({ items }: { items: { label: string; onClick?: () => void }[] }
 
 // ===== AI SUMMARY ARCHITECTURE =====
 
-type AISummaryLabel = "Exceptional Growth" | "Moderate Growth" | "Neutral" | "Contextual Decline";
+type AISummaryLabel = "Exceptional Growth" | "Moderate Growth" | "Stable Growth" | "Contextual Decline";
 type AISummaryTone = "exceptional" | "positive" | "neutral" | "contextual" | "baseline";
 type AISummaryReportAccuracy = "High" | "Moderate" | "Low";
 type AISummaryMarkerKind =
@@ -2329,10 +2329,10 @@ const buildAISummaryLegacySeriesScorecard = (
   if (dropUnderLoad && recoveredAfterLoadDrop) riskScore = Math.max(0, riskScore - 1);
 
   const finalScore = growthScore + exceptionalScore * 2 - riskScore;
-  let label: AISummaryLabel = "Neutral";
+  let label: AISummaryLabel = "Stable Growth";
 
   if (noSignal) {
-    label = "Neutral";
+    label = "Stable Growth";
   } else if (declineScore >= 5 && finalScore < 2) {
     label = "Contextual Decline";
   } else if (mode === "single") {
@@ -2345,7 +2345,7 @@ const buildAISummaryLegacySeriesScorecard = (
       (lateAverageUp || stats.maxOutputRun >= 3 || (strongFinishGain && stats.peakRetentionGap <= 1));
 
     if (singleFinishesBelowBaseline) {
-      label = "Neutral";
+      label = "Stable Growth";
     } else if (singleStrongEligible && finalScore >= 8) {
       label = "Exceptional Growth";
     } else if (finalScore >= 3 || meaningfulFinishGain) {
@@ -2457,7 +2457,7 @@ const combineAISummaryLegacyScorecards = (items: AISummaryLegacyScorecard[]): AI
   const qualifiesByGeneralStrongSignal =
     !hasStrongCap && noHardDecline && noUnresolvedTradeoff && (bothStrong || (anyExceptional && finalScore >= 8) || (growthScore >= 14 && riskScore <= 1));
 
-  let label: AISummaryLabel = "Neutral";
+  let label: AISummaryLabel = "Stable Growth";
   if (bothContextual || (contextualCount > 0 && positiveCount === 0)) {
     label = "Contextual Decline";
   } else if (qualifiesByCleanOutstandingSignal || qualifiesByGeneralStrongSignal) {
@@ -2503,10 +2503,7 @@ const classifyAISummaryLabel = (scorecard: AISummaryScorecard): AISummaryClassif
   const reasons = legacyScorecard.tags
     .map((tag) => getAISummaryMarkerFromLegacyTag(scorecard, tag))
     .filter((marker): marker is AISummaryMarker => marker !== null)
-.filter(
-  (marker, index, list) =>
-    list.findIndex((item) => item.kind === marker.kind) === index
-)
+    .filter((marker, index, list) => list.findIndex((item) => item.kind === marker.kind) === index)
     .slice(0, 5);
   const confidence = Math.max(0.58, Math.min(0.92, 0.62 + Math.abs(legacyScorecard.finalScore) * 0.03 + legacyScorecard.exceptionalScore * 0.04));
 
@@ -2581,7 +2578,7 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
   if (!achievements.length) {
     achievements.push({
       id: "primary-pattern",
-      title: classification.label === "Contextual Decline" ? "Primary decline pattern" : classification.label === "Neutral" ? "Controlled but unresolved pattern" : "Primary progress pattern",
+      title: classification.label === "Contextual Decline" ? "Primary decline pattern" : classification.label === "Stable Growth" ? "Stable growth pattern" : "Primary progress pattern",
       detail: classification.reasons[0]?.text || "The graph produced a readable pattern from the available sessions.",
       strength: 0.5,
       labelImpact: "supports",
@@ -2641,20 +2638,7 @@ const formatAISummaryNumber = (value: number) => {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 };
 
-const getAISummaryHeadline = (classification: AISummaryClassification, story: AISummaryStory) => {
-  if (classification.label === "Exceptional Growth") {
-    if (story.identity === "constraint_progression") return "Exceptional Growth Under Constraint";
-    if (story.identity === "synchronized_advancement") return "Exceptional Growth Across the Block";
-    return "Exceptional Growth";
-  }
-
-  if (classification.label === "Moderate Growth") {
-    if (story.identity === "stable_retention") return "Moderate Growth Through Retention";
-    return "Moderate Growth";
-  }
-
-  return classification.label;
-};
+const getAISummaryHeadline = (classification: AISummaryClassification, _story: AISummaryStory) => classification.label;
 
 const composeAISummarySlots = (
   scorecard: AISummaryScorecard,
@@ -2676,7 +2660,7 @@ const composeAISummarySlots = (
   } else if (classification.label === "Contextual Decline") {
     slots.push({ kind: "opener", text: "This trend is worth reading with context.", importance: 0.76 });
   } else {
-    slots.push({ kind: "opener", text: "This graph reads as a controlled but unresolved pattern.", importance: 0.68 });
+    slots.push({ kind: "opener", text: "This graph held a stable overall pattern.", importance: 0.68 });
   }
 
   if (primaryAchievement) {
@@ -2693,7 +2677,7 @@ const composeAISummarySlots = (
       text: "The progression comes from handling increased difficulty rather than needing a dramatic output spike.",
       importance: 0.64,
     });
-  } else if (strongestProfile && strongestProfile.outputDelta > 0 && classification.label !== "Neutral") {
+  } else if (strongestProfile && strongestProfile.outputDelta > 0 && classification.label !== "Stable Growth") {
     slots.push({
       kind: "supporting_context",
       text: `${strongestProfile.exerciseName} finished ${formatAISummaryNumber(strongestProfile.outputDelta)} above where it started.`,
@@ -2724,7 +2708,7 @@ const composeAISummarySlots = (
         ? "Good work."
         : classification.label === "Contextual Decline"
           ? "That context matters before drawing a hard conclusion."
-          : "This gives the next block a useful comparison point.";
+          : "This gives future sessions a useful comparison point.";
 
   slots.push({ kind: "closer", text: closer, importance: 0.35 });
 
@@ -3272,24 +3256,29 @@ export default function App() {
 
 
   const weightLegendItems = useMemo(() => {
-    const weights = Array.from(
-      new Set(
-        graphData
-          .flatMap((series) => series.points.map((point) => normalizeWeightInput(point.weight)))
-          .filter(Boolean)
-      )
-    ).sort((a, b) => {
-      if (a === "BW") return -1;
-      if (b === "BW") return 1;
-      return Number(a) - Number(b);
-    });
+    const items = chartSeries.flatMap((series) =>
+      series.points
+        .map((point) => normalizeWeightInput(point.weight))
+        .filter(Boolean)
+        .map((weight) => ({
+          key: `${series.exerciseId}-${series.shape}-${weight}`,
+          exerciseName: series.exerciseName,
+          shape: series.shape as "circle" | "square" | "triangle" | "diamond",
+          value: weight,
+          label: weight === "BW" ? "BW" : `${weight} lbs`,
+          color: getStableWeightColor(weight),
+        }))
+    );
 
-    return weights.map((weight) => ({
-      value: weight,
-      label: weight === "BW" ? "BW" : `${weight} lbs`,
-      color: getStableWeightColor(weight),
-    }));
-  }, [graphData]);
+    const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
+
+    return uniqueItems.sort((a, b) => {
+      if (a.exerciseName !== b.exerciseName) return a.exerciseName.localeCompare(b.exerciseName);
+      if (a.value === "BW") return -1;
+      if (b.value === "BW") return 1;
+      return Number(a.value) - Number(b.value);
+    });
+  }, [chartSeries]);
 
   const tooltipPosition = useMemo(() => getSmartTooltipPosition(lastHoveredGraphPoint, 320), [lastHoveredGraphPoint]);
 
@@ -4753,8 +4742,18 @@ export default function App() {
                         {weightLegendItems.length ? (
                           <div className="flex flex-wrap gap-2 text-sm text-zinc-700">
                             {weightLegendItems.map((item) => (
-                              <div key={item.value} className="graph-select-none inline-flex select-none items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
-                                <span className="inline-block h-3 w-3 rounded-full border border-zinc-300" style={{ backgroundColor: item.color }} />
+                              <div key={item.key} className="graph-select-none inline-flex select-none items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                <svg width="16" height="16" viewBox="0 0 16 16" className="shrink-0">
+                                  {item.shape === "triangle" ? (
+                                    <polygon points="8,3 4,13 12,13" fill={item.color} stroke={item.color} strokeWidth="1.25" />
+                                  ) : item.shape === "diamond" ? (
+                                    <polygon points="8,2 14,8 8,14 2,8" fill={item.color} stroke={item.color} strokeWidth="1.25" />
+                                  ) : item.shape === "square" ? (
+                                    <rect x="4" y="4" width="8" height="8" rx="1.5" fill={item.color} stroke={item.color} strokeWidth="1.25" />
+                                  ) : (
+                                    <circle cx="8" cy="8" r="4" fill={item.color} stroke={item.color} strokeWidth="1.25" />
+                                  )}
+                                </svg>
                                 <span>{item.label}</span>
                               </div>
                             ))}
