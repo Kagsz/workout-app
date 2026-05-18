@@ -2017,48 +2017,500 @@ const buildAISummaryScorecard = (graphData: GraphSeries[], blockType: BlockType)
 const getAISummaryMarker = (scorecard: AISummaryScorecard, kind: AISummaryMarkerKind) =>
   scorecard.markers.find((marker) => marker.kind === kind);
 
-const classifyAISummaryLabel = (scorecard: AISummaryScorecard): AISummaryClassification => {
-  const reasons: AISummaryMarker[] = [];
-  const outputRise = getAISummaryMarker(scorecard, "output_rise");
-  const outputDecline = getAISummaryMarker(scorecard, "output_decline");
-  const retainedUnderWeight = getAISummaryMarker(scorecard, "retained_output_under_weight");
-  const weightProgression = getAISummaryMarker(scorecard, "weight_progression");
-  const consecutiveWeightProgression = getAISummaryMarker(scorecard, "consecutive_weight_progression");
-  const explosiveJump = getAISummaryMarker(scorecard, "explosive_jump");
-  const synchronizedProgression = getAISummaryMarker(scorecard, "synchronized_progression");
-  const constraintPresent = getAISummaryMarker(scorecard, "constraint_present");
-  const strongAverageRise = scorecard.outputDeltaAverage >= Math.max(3, Math.abs(scorecard.startOutputAverage) * 0.25);
-  const meaningfulDecline = scorecard.outputDeltaAverage <= -Math.max(2, Math.abs(scorecard.startOutputAverage) * 0.2);
-  const heavyWeightProgression = scorecard.totalWeightIncreaseCount >= 4 || scorecard.maxConsecutiveWeightIncreaseCount >= 3;
-  const hiddenExceptional = Boolean(retainedUnderWeight && heavyWeightProgression && (scorecard.hasConstraints || scorecard.hasSynchronizedProgression));
-  const obviousExceptional = Boolean(explosiveJump && (strongAverageRise || scorecard.endOutputAverage >= scorecard.startOutputAverage + 8));
-  const synchronizedExceptional = Boolean(synchronizedProgression && heavyWeightProgression && scorecard.outputDeltaAverage >= 0 && scorecard.hasRebound);
+type AISummaryLegacySignalTag =
+  | "no_signal"
+  | "finish_above_start"
+  | "finish_below_start"
+  | "late_average_above_early"
+  | "late_average_below_early"
+  | "weight_increased"
+  | "three_weight_increases"
+  | "four_plus_weight_increases"
+  | "maintained_under_load"
+  | "tradeoff_drop_under_load"
+  | "recovered_after_tradeoff"
+  | "unrecovered_tradeoff"
+  | "major_set_gain"
+  | "controlled_major_set_gain"
+  | "strong_finish"
+  | "volatile_without_resolution"
+  | "spike_not_retained"
+  | "early_gain_then_plateau"
+  | "late_spike_without_support"
+  | "plateau_after_progression"
+  | "no_output_progression_under_load"
+  | "load_drop_observed"
+  | "retained_meaningful_improvement"
+  | "synchronized_plateau_breakthrough";
 
-  if (hiddenExceptional || obviousExceptional || synchronizedExceptional) {
-    [explosiveJump, retainedUnderWeight, consecutiveWeightProgression, synchronizedProgression, constraintPresent].forEach((marker) => {
-      if (marker) reasons.push(marker);
-    });
-    return { label: "Exceptional Growth", confidence: 0.86, reasons };
+type AISummaryLegacyStats = {
+  outputs: number[];
+  weights: number[];
+  firstOutput: number;
+  lastOutput: number;
+  firstWeight: number;
+  lastWeight: number;
+  minOutput: number;
+  maxOutput: number;
+  outputRange: number;
+  outputDelta: number;
+  weightDelta: number;
+  outputIncreaseCount: number;
+  weightIncreaseCount: number;
+  maxOutputRun: number;
+  maxWeightRun: number;
+  earlyAverage: number;
+  lateAverage: number;
+  averageDelta: number;
+  percentChange: number;
+  peakRetentionGap: number;
+  hasSignificantGap: boolean;
+};
+
+type AISummaryLegacyScorecard = {
+  label: AISummaryLabel;
+  growthScore: number;
+  exceptionalScore: number;
+  riskScore: number;
+  declineScore: number;
+  finalScore: number;
+  tags: AISummaryLegacySignalTag[];
+  profile: AISummarySeriesProfile | null;
+};
+
+const addAISummaryLegacyTag = (tags: AISummaryLegacySignalTag[], tag: AISummaryLegacySignalTag) => {
+  if (!tags.includes(tag)) tags.push(tag);
+};
+
+const getAISummaryLegacyAverage = (values: number[]) =>
+  values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+
+const countAISummaryLegacyIncreases = (values: number[]) => {
+  let count = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] > values[index - 1]) count += 1;
+  }
+  return count;
+};
+
+const getAISummaryLegacyMaxUpwardRun = (values: number[]) => {
+  let currentRun = 0;
+  let maxRun = 0;
+
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] > values[index - 1]) {
+      currentRun += 1;
+      maxRun = Math.max(maxRun, currentRun);
+    } else {
+      currentRun = 0;
+    }
   }
 
-  if (strongAverageRise || Boolean(retainedUnderWeight && weightProgression) || Boolean(weightProgression && scorecard.outputDeltaAverage >= -0.75)) {
-    [outputRise, retainedUnderWeight, weightProgression, synchronizedProgression, constraintPresent].forEach((marker) => {
-      if (marker) reasons.push(marker);
-    });
-    return { label: "Moderate Growth", confidence: 0.74, reasons };
-  }
+  return maxRun;
+};
 
-  if (meaningfulDecline && !retainedUnderWeight) {
-    [outputDecline, getAISummaryMarker(scorecard, "late_dip")].forEach((marker) => {
-      if (marker) reasons.push(marker);
-    });
-    return { label: "Contextual Decline", confidence: 0.68, reasons };
-  }
+const getAISummaryLegacyPointTime = (point: GraphPoint) => {
+  const value = getSafeDateTime(point.date);
+  return Number.isFinite(value) ? value : NaN;
+};
 
-  [getAISummaryMarker(scorecard, "output_plateau"), getAISummaryMarker(scorecard, "rebound"), weightProgression].forEach((marker) => {
-    if (marker) reasons.push(marker);
+const parseAISummaryLegacyWeight = (weight: string) => {
+  const normalized = normalizeWeightInput(weight);
+  if (!normalized || normalized === "BW") return 0;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : 0;
+};
+
+const isAISummaryLegacyControlledProfile = (profile: AISummarySeriesProfile | null | undefined) => {
+  const firstPoint = profile?.points?.[0];
+  const name = String(profile?.exerciseName || "").toLowerCase();
+  const target = String(firstPoint?.target || "").toLowerCase();
+  const combined = `${name} ${target}`;
+
+  return /\btempo\b/.test(combined) || /\bpause\b/.test(combined) || /\becc\b/.test(combined) || /eccentric/.test(combined) || /\biso\b/.test(combined);
+};
+
+const getAISummaryLegacyStats = (profile: AISummarySeriesProfile): AISummaryLegacyStats => {
+  const points = [...profile.points].sort((a, b) => {
+    const timeA = Number.isFinite(getAISummaryLegacyPointTime(a)) ? getAISummaryLegacyPointTime(a) : a.sessionNumber;
+    const timeB = Number.isFinite(getAISummaryLegacyPointTime(b)) ? getAISummaryLegacyPointTime(b) : b.sessionNumber;
+    return timeA - timeB;
   });
-  return { label: "Neutral", confidence: 0.62, reasons };
+  const outputs = points.map((point) => Number(point.y)).filter((value) => Number.isFinite(value));
+  const weights = points.map((point) => parseAISummaryLegacyWeight(point.weight));
+  const firstOutput = outputs[0] || 0;
+  const lastOutput = outputs[outputs.length - 1] || 0;
+  const firstWeight = weights[0] || 0;
+  const lastWeight = weights[weights.length - 1] || 0;
+  const minOutput = outputs.length ? Math.min(...outputs) : 0;
+  const maxOutput = outputs.length ? Math.max(...outputs) : 0;
+  const outputRange = maxOutput - minOutput;
+  const outputDelta = lastOutput - firstOutput;
+  const weightDelta = lastWeight - firstWeight;
+  const outputIncreaseCount = countAISummaryLegacyIncreases(outputs);
+  const weightIncreaseCount = countAISummaryLegacyIncreases(weights);
+  const maxOutputRun = getAISummaryLegacyMaxUpwardRun(outputs);
+  const maxWeightRun = getAISummaryLegacyMaxUpwardRun(weights);
+  const windowSize = Math.min(3, Math.max(1, Math.ceil(outputs.length / 3)));
+  const earlyAverage = getAISummaryLegacyAverage(outputs.slice(0, windowSize));
+  const lateAverage = getAISummaryLegacyAverage(outputs.slice(-windowSize));
+  const averageDelta = lateAverage - earlyAverage;
+  const percentChange = firstOutput ? outputDelta / Math.max(1, Math.abs(firstOutput)) : 0;
+  const peakRetentionGap = maxOutput - lastOutput;
+  const timePoints = points.map((point) => getAISummaryLegacyPointTime(point)).filter((value) => Number.isFinite(value));
+  const gaps = timePoints.slice(1).map((time, index) => time - timePoints[index]);
+  const averageGap = getAISummaryLegacyAverage(gaps);
+  const hasSignificantGap = Boolean(gaps.length && averageGap > 0 && gaps.some((gap) => gap > averageGap * 1.75));
+
+  return {
+    outputs,
+    weights,
+    firstOutput,
+    lastOutput,
+    firstWeight,
+    lastWeight,
+    minOutput,
+    maxOutput,
+    outputRange,
+    outputDelta,
+    weightDelta,
+    outputIncreaseCount,
+    weightIncreaseCount,
+    maxOutputRun,
+    maxWeightRun,
+    earlyAverage,
+    lateAverage,
+    averageDelta,
+    percentChange,
+    peakRetentionGap,
+    hasSignificantGap,
+  };
+};
+
+const hasAISummaryLegacyDropAfterLoadIncrease = (stats: AISummaryLegacyStats) => {
+  for (let index = 1; index < stats.outputs.length; index += 1) {
+    if (stats.weights[index] > stats.weights[index - 1] && stats.outputs[index] <= stats.outputs[index - 1] - 1) return true;
+  }
+  return false;
+};
+
+const hasAISummaryLegacyRecoveryAfterLoadDrop = (stats: AISummaryLegacyStats) => {
+  for (let index = 1; index < stats.outputs.length - 1; index += 1) {
+    const droppedUnderLoad = stats.weights[index] > stats.weights[index - 1] && stats.outputs[index] <= stats.outputs[index - 1] - 1;
+    if (!droppedUnderLoad) continue;
+
+    const nextOutputs = stats.outputs.slice(index + 1);
+    const recoveryTarget = Math.max(stats.firstOutput, stats.outputs[index - 1] - 0.5);
+    if (nextOutputs.some((output) => output >= recoveryTarget)) return true;
+  }
+  return false;
+};
+
+const hasAISummaryLegacyWeightDrop = (stats: AISummaryLegacyStats) => {
+  for (let index = 1; index < stats.weights.length; index += 1) {
+    if (stats.weights[index] > 0 && stats.weights[index - 1] > 0 && stats.weights[index] < stats.weights[index - 1]) return true;
+  }
+  return false;
+};
+
+const getAISummaryLegacyPreviousOutput = (stats: AISummaryLegacyStats) =>
+  stats.outputs.length >= 2 ? stats.outputs[stats.outputs.length - 2] : stats.lastOutput;
+
+const buildAISummaryLegacySeriesScorecard = (
+  profile: AISummarySeriesProfile,
+  mode: BlockType
+): AISummaryLegacyScorecard => {
+  const stats = getAISummaryLegacyStats(profile);
+  const controlled = isAISummaryLegacyControlledProfile(profile);
+  const tags: AISummaryLegacySignalTag[] = [];
+  let growthScore = 0;
+  let exceptionalScore = 0;
+  let riskScore = 0;
+  let declineScore = 0;
+
+  const hasWeightIncrease = stats.weightIncreaseCount > 0 || stats.weightDelta > 0;
+  const noSignal = stats.outputs.length < 3 || (stats.outputRange <= 0.1 && !hasWeightIncrease);
+  const meaningfulFinishGain = mode === "single"
+    ? stats.outputDelta >= 1 || (stats.outputDelta >= 0.75 && stats.averageDelta >= 0.5 && stats.firstOutput >= 8)
+    : stats.outputDelta >= 1;
+  const strongFinishGain = mode === "single"
+    ? stats.outputDelta >= 3 || stats.averageDelta >= 2 || stats.percentChange >= 0.18
+    : stats.outputDelta >= 3 || stats.averageDelta >= 2;
+  const lateAverageUp = mode === "single" ? stats.averageDelta >= 1 : stats.averageDelta >= 0.5;
+  const lateAverageDown = mode === "single" ? stats.averageDelta <= -1 : stats.averageDelta <= -0.75;
+  const finishBelowStart = stats.outputDelta <= -1;
+  const maintainedUnderLoad = hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 0.25 && stats.lateAverage >= stats.earlyAverage - 0.5;
+  const dropUnderLoad = hasAISummaryLegacyDropAfterLoadIncrease(stats);
+  const recoveredAfterLoadDrop = hasAISummaryLegacyRecoveryAfterLoadDrop(stats);
+  const unrecoveredTradeoff = dropUnderLoad && !recoveredAfterLoadDrop && stats.lastOutput < stats.firstOutput;
+  const spikeNotRetained = stats.maxOutput >= stats.firstOutput + 2 && stats.peakRetentionGap >= 2 && stats.lastOutput < stats.maxOutput - 1;
+  const volatileWithoutResolution = stats.outputRange >= 3 && !meaningfulFinishGain && !lateAverageUp;
+  const controlledMajorSetGain = controlled && stats.outputDelta >= 3;
+  const majorSetGain = stats.outputDelta >= 3;
+  const previousOutput = getAISummaryLegacyPreviousOutput(stats);
+  const loadDropObserved = mode === "paired" && hasAISummaryLegacyWeightDrop(stats);
+  const finalPointIsPeak = stats.lastOutput >= stats.maxOutput - 0.1;
+  const finalSpikeWithoutSupport =
+    finalPointIsPeak &&
+    stats.outputs.length >= 5 &&
+    stats.lastOutput - previousOutput >= Math.max(2, stats.outputRange * 0.35) &&
+    stats.lateAverage <= stats.lastOutput - 1.25 &&
+    stats.maxOutputRun < 3;
+  const earlyGainThenPlateau =
+    mode === "single" &&
+    meaningfulFinishGain &&
+    stats.outputRange <= 1.5 &&
+    stats.maxOutput <= stats.lastOutput + 0.25 &&
+    stats.lateAverage <= stats.maxOutput - 0.1;
+  const noOutputProgressionUnderLoad =
+    mode === "paired" && hasWeightIncrease && stats.outputDelta < 1 && stats.averageDelta < 0.5;
+  const plateauAfterProgression =
+    mode === "paired" &&
+    hasWeightIncrease &&
+    maintainedUnderLoad &&
+    stats.outputDelta <= 1 &&
+    stats.averageDelta <= 0.75 &&
+    stats.outputRange <= 1.5;
+
+  if (noSignal) addAISummaryLegacyTag(tags, "no_signal");
+  if (meaningfulFinishGain) addAISummaryLegacyTag(tags, "finish_above_start");
+  if (finishBelowStart) addAISummaryLegacyTag(tags, "finish_below_start");
+  if (lateAverageUp) addAISummaryLegacyTag(tags, "late_average_above_early");
+  if (lateAverageDown) addAISummaryLegacyTag(tags, "late_average_below_early");
+  if (hasWeightIncrease) addAISummaryLegacyTag(tags, "weight_increased");
+  if (stats.maxWeightRun >= 3) addAISummaryLegacyTag(tags, "three_weight_increases");
+  if (stats.maxWeightRun >= 4) addAISummaryLegacyTag(tags, "four_plus_weight_increases");
+  if (maintainedUnderLoad) addAISummaryLegacyTag(tags, "maintained_under_load");
+  if (dropUnderLoad) addAISummaryLegacyTag(tags, "tradeoff_drop_under_load");
+  if (recoveredAfterLoadDrop) addAISummaryLegacyTag(tags, "recovered_after_tradeoff");
+  if (unrecoveredTradeoff) addAISummaryLegacyTag(tags, "unrecovered_tradeoff");
+  if (majorSetGain) addAISummaryLegacyTag(tags, "major_set_gain");
+  if (controlledMajorSetGain) addAISummaryLegacyTag(tags, "controlled_major_set_gain");
+  if (strongFinishGain) addAISummaryLegacyTag(tags, "strong_finish");
+  if (volatileWithoutResolution) addAISummaryLegacyTag(tags, "volatile_without_resolution");
+  if (spikeNotRetained) addAISummaryLegacyTag(tags, "spike_not_retained");
+  if (earlyGainThenPlateau) addAISummaryLegacyTag(tags, "early_gain_then_plateau");
+  if (finalSpikeWithoutSupport) addAISummaryLegacyTag(tags, "late_spike_without_support");
+  if (plateauAfterProgression) addAISummaryLegacyTag(tags, "plateau_after_progression");
+  if (noOutputProgressionUnderLoad) addAISummaryLegacyTag(tags, "no_output_progression_under_load");
+  if (loadDropObserved) addAISummaryLegacyTag(tags, "load_drop_observed");
+
+  if (meaningfulFinishGain) growthScore += 2;
+  if (lateAverageUp) growthScore += mode === "single" ? 3 : 2;
+  if (hasWeightIncrease) growthScore += 1;
+  if (stats.maxWeightRun >= 3) growthScore += 2;
+  if (stats.maxWeightRun >= 4) {
+    growthScore += 3;
+    exceptionalScore += 1;
+  }
+  if (maintainedUnderLoad) growthScore += 2;
+  if (recoveredAfterLoadDrop) growthScore += 2;
+  if (strongFinishGain) growthScore += mode === "single" ? 4 : 3;
+  if (majorSetGain && mode === "paired") growthScore += 2;
+  if (controlledMajorSetGain && mode === "paired") exceptionalScore += 1;
+  if (stats.outputIncreaseCount >= 3 && stats.lastOutput >= stats.firstOutput) growthScore += 1;
+
+  if (spikeNotRetained) riskScore += 2;
+  if (volatileWithoutResolution) riskScore += 2;
+  if (unrecoveredTradeoff) riskScore += 3;
+  if (earlyGainThenPlateau) riskScore += 2;
+  if (finalSpikeWithoutSupport) riskScore += 3;
+  if (plateauAfterProgression) riskScore += 2;
+  if (noOutputProgressionUnderLoad && !controlled) riskScore += 2;
+  if (noOutputProgressionUnderLoad && controlled) riskScore += 1;
+  if (loadDropObserved) riskScore += 2;
+  if (stats.hasSignificantGap && stats.outputDelta < 0) riskScore += 1;
+
+  if (finishBelowStart) declineScore += 2;
+  if (lateAverageDown) declineScore += 2;
+  if (!hasWeightIncrease && finishBelowStart && lateAverageDown) declineScore += 2;
+  if (unrecoveredTradeoff) declineScore += 1;
+
+  if (dropUnderLoad && recoveredAfterLoadDrop) riskScore = Math.max(0, riskScore - 1);
+
+  const finalScore = growthScore + exceptionalScore * 2 - riskScore;
+  let label: AISummaryLabel = "Neutral";
+
+  if (noSignal) {
+    label = "Neutral";
+  } else if (declineScore >= 5 && finalScore < 2) {
+    label = "Contextual Decline";
+  } else if (mode === "single") {
+    const singleFinishesBelowBaseline = stats.lastOutput < stats.firstOutput;
+    const singleStrongEligible =
+      !singleFinishesBelowBaseline &&
+      !volatileWithoutResolution &&
+      !finalSpikeWithoutSupport &&
+      !earlyGainThenPlateau &&
+      (lateAverageUp || stats.maxOutputRun >= 3 || (strongFinishGain && stats.peakRetentionGap <= 1));
+
+    if (singleFinishesBelowBaseline) {
+      label = "Neutral";
+    } else if (singleStrongEligible && finalScore >= 8) {
+      label = "Exceptional Growth";
+    } else if (finalScore >= 3 || meaningfulFinishGain) {
+      label = "Moderate Growth";
+    }
+  } else {
+    const strongCap =
+      finalSpikeWithoutSupport ||
+      plateauAfterProgression ||
+      noOutputProgressionUnderLoad ||
+      loadDropObserved ||
+      (lateAverageDown && stats.outputDelta <= 0);
+    const canReachStrong = !strongCap && (exceptionalScore >= 1 || (growthScore >= 9 && riskScore <= 1));
+
+    if (canReachStrong && finalScore >= 7) {
+      label = "Exceptional Growth";
+    } else if (finalScore >= 3 || (hasWeightIncrease && stats.lastOutput >= stats.firstOutput - 1)) {
+      label = "Moderate Growth";
+    }
+  }
+
+  return { label, growthScore, exceptionalScore, riskScore, declineScore, finalScore, tags, profile };
+};
+
+const hasAISummaryStrictRetainedMeaningfulImprovement = (items: AISummaryLegacyScorecard[]) => {
+  if (items.length < 2) return false;
+
+  const statItems = items
+    .filter((item) => item.profile)
+    .map((item) => ({ item, stats: getAISummaryLegacyStats(item.profile as AISummarySeriesProfile) }));
+  if (!statItems.length || !statItems.every(({ stats }) => stats.outputs.length >= 4)) return false;
+
+  const allSeriesFinishMeaningfullyAboveBaseline = statItems.every(({ stats }) => stats.lastOutput - stats.firstOutput >= 2);
+  const hasDemandContext = statItems.some(
+    ({ item, stats }) => item.tags.includes("weight_increased") || stats.weightIncreaseCount > 0 || stats.weightDelta > 0
+  );
+  const hasStandoutRetainedGain = statItems.some(({ stats }) => {
+    const peakGain = stats.maxOutput - stats.firstOutput;
+    const finalGain = stats.lastOutput - stats.firstOutput;
+    const retentionRatio = peakGain > 0 ? finalGain / peakGain : 0;
+    return peakGain >= 4 && finalGain >= 2 && retentionRatio >= 0.5;
+  });
+  const hasHardLimiter = statItems.some(
+    ({ item, stats }) => item.tags.includes("unrecovered_tradeoff") || item.tags.includes("finish_below_start") || stats.lastOutput < stats.firstOutput
+  );
+
+  return allSeriesFinishMeaningfullyAboveBaseline && hasDemandContext && hasStandoutRetainedGain && !hasHardLimiter;
+};
+
+const hasAISummarySynchronizedPlateauBreakthrough = (items: AISummaryLegacyScorecard[]) => {
+  if (items.length < 2) return false;
+
+  return items.every((item) => {
+    if (!item.profile) return false;
+    const stats = getAISummaryLegacyStats(item.profile);
+    if (stats.outputs.length < 5) return false;
+
+    const finalIndex = stats.outputs.length - 1;
+    const previousOutput = stats.outputs[finalIndex - 1];
+    const previousWeight = stats.weights[finalIndex - 1] || 0;
+    const finalWeight = stats.weights[finalIndex] || 0;
+    const priorWindow = stats.outputs.slice(Math.max(0, finalIndex - 3), finalIndex);
+    const priorRange = priorWindow.length ? Math.max(...priorWindow) - Math.min(...priorWindow) : 0;
+    const noMeaningfulRegressionInPlateau = priorWindow.every((value) => value >= previousOutput - 0.5);
+    const demandHeldOrIncreased = finalWeight === 0 || previousWeight === 0 || finalWeight >= previousWeight;
+
+    return (
+      priorWindow.length >= 3 &&
+      priorRange <= 0.5 &&
+      noMeaningfulRegressionInPlateau &&
+      stats.lastOutput >= previousOutput + 1 &&
+      stats.lastOutput > stats.firstOutput &&
+      demandHeldOrIncreased
+    );
+  });
+};
+
+const combineAISummaryLegacyScorecards = (items: AISummaryLegacyScorecard[]): AISummaryLegacyScorecard => {
+  const growthScore = items.reduce((total, item) => total + item.growthScore, 0);
+  const exceptionalScore = items.reduce((total, item) => total + item.exceptionalScore, 0);
+  const riskScore = items.reduce((total, item) => total + item.riskScore, 0);
+  const declineScore = items.reduce((total, item) => total + item.declineScore, 0);
+  const finalScore = growthScore + exceptionalScore * 2 - riskScore;
+  const tags = items.flatMap((item) => item.tags).filter((tag, index, list) => list.indexOf(tag) === index);
+  const strongCount = items.filter((item) => item.label === "Exceptional Growth").length;
+  const moderateCount = items.filter((item) => item.label === "Moderate Growth").length;
+  const contextualCount = items.filter((item) => item.label === "Contextual Decline").length;
+  const positiveCount = strongCount + moderateCount;
+  const bothStrong = strongCount === items.length;
+  const bothContextual = contextualCount === items.length;
+  const anyExceptional = exceptionalScore >= 1;
+  const noUnresolvedTradeoff = !tags.includes("unrecovered_tradeoff");
+  const noHardDecline = !bothContextual && declineScore < 7;
+  const hasStrictRetainedMeaningfulImprovement = hasAISummaryStrictRetainedMeaningfulImprovement(items);
+  const hasSynchronizedPlateauBreakthrough = hasAISummarySynchronizedPlateauBreakthrough(items);
+
+  if (hasStrictRetainedMeaningfulImprovement) addAISummaryLegacyTag(tags, "retained_meaningful_improvement");
+  if (hasSynchronizedPlateauBreakthrough) addAISummaryLegacyTag(tags, "synchronized_plateau_breakthrough");
+
+  const hasStrongCap =
+    tags.includes("late_spike_without_support") ||
+    tags.includes("plateau_after_progression") ||
+    tags.includes("no_output_progression_under_load") ||
+    tags.includes("load_drop_observed") ||
+    tags.includes("unrecovered_tradeoff") ||
+    items.some((item) => item.tags.includes("finish_below_start") || item.tags.includes("late_average_below_early"));
+  const qualifiesByCleanOutstandingSignal =
+    (hasStrictRetainedMeaningfulImprovement || hasSynchronizedPlateauBreakthrough) && noHardDecline && noUnresolvedTradeoff;
+  const qualifiesByGeneralStrongSignal =
+    !hasStrongCap && noHardDecline && noUnresolvedTradeoff && (bothStrong || (anyExceptional && finalScore >= 8) || (growthScore >= 14 && riskScore <= 1));
+
+  let label: AISummaryLabel = "Neutral";
+  if (bothContextual || (contextualCount > 0 && positiveCount === 0)) {
+    label = "Contextual Decline";
+  } else if (qualifiesByCleanOutstandingSignal || qualifiesByGeneralStrongSignal) {
+    label = "Exceptional Growth";
+  } else if (positiveCount > 0 || finalScore >= 3) {
+    label = "Moderate Growth";
+  }
+
+  return { label, growthScore, exceptionalScore, riskScore, declineScore, finalScore, tags, profile: null };
+};
+
+const getAISummaryMarkerFromLegacyTag = (scorecard: AISummaryScorecard, tag: AISummaryLegacySignalTag): AISummaryMarker | null => {
+  const lookup: Partial<Record<AISummaryLegacySignalTag, AISummaryMarkerKind>> = {
+    finish_above_start: "output_rise",
+    finish_below_start: "output_decline",
+    late_average_above_early: "output_rise",
+    late_average_below_early: "output_decline",
+    weight_increased: "weight_progression",
+    three_weight_increases: "consecutive_weight_progression",
+    four_plus_weight_increases: "consecutive_weight_progression",
+    maintained_under_load: "retained_output_under_weight",
+    recovered_after_tradeoff: "rebound",
+    tradeoff_drop_under_load: "late_dip",
+    unrecovered_tradeoff: "late_dip",
+    major_set_gain: "output_rise",
+    controlled_major_set_gain: "constraint_present",
+    strong_finish: "strong_finish",
+    volatile_without_resolution: "output_volatility",
+    late_spike_without_support: "strong_finish",
+    retained_meaningful_improvement: "synchronized_progression",
+    synchronized_plateau_breakthrough: "synchronized_progression",
+  };
+
+  const markerKind = lookup[tag];
+  return markerKind ? getAISummaryMarker(scorecard, markerKind) || null : null;
+};
+
+const classifyAISummaryLabel = (scorecard: AISummaryScorecard): AISummaryClassification => {
+  const perSeriesScorecards = scorecard.seriesProfiles.map((profile) =>
+    buildAISummaryLegacySeriesScorecard(profile, scorecard.mode === "single" ? "single" : "paired")
+  );
+  const legacyScorecard = perSeriesScorecards.length > 1 ? combineAISummaryLegacyScorecards(perSeriesScorecards) : perSeriesScorecards[0];
+  const reasons = legacyScorecard.tags
+    .map((tag) => getAISummaryMarkerFromLegacyTag(scorecard, tag))
+    .filter((marker, index, list): marker is AISummaryMarker => Boolean(marker) && list.findIndex((item) => item.kind === marker.kind) === index)
+    .slice(0, 5);
+  const confidence = Math.max(0.58, Math.min(0.92, 0.62 + Math.abs(legacyScorecard.finalScore) * 0.03 + legacyScorecard.exceptionalScore * 0.04));
+
+  return {
+    label: legacyScorecard.label,
+    confidence,
+    reasons: reasons.length ? reasons : scorecard.markers.slice(0, 3),
+  };
 };
 
 const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryAchievement[] => {
