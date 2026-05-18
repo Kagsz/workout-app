@@ -2502,7 +2502,11 @@ const classifyAISummaryLabel = (scorecard: AISummaryScorecard): AISummaryClassif
   const legacyScorecard = perSeriesScorecards.length > 1 ? combineAISummaryLegacyScorecards(perSeriesScorecards) : perSeriesScorecards[0];
   const reasons = legacyScorecard.tags
     .map((tag) => getAISummaryMarkerFromLegacyTag(scorecard, tag))
-    .filter((marker, index, list): marker is AISummaryMarker => Boolean(marker) && list.findIndex((item) => item.kind === marker.kind) === index)
+    .filter((marker): marker is AISummaryMarker => marker !== null)
+.filter(
+  (marker, index, list) =>
+    list.findIndex((item) => item.kind === marker.kind) === index
+)
     .slice(0, 5);
   const confidence = Math.max(0.58, Math.min(0.92, 0.62 + Math.abs(legacyScorecard.finalScore) * 0.03 + legacyScorecard.exceptionalScore * 0.04));
 
