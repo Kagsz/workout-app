@@ -2660,27 +2660,6 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
   }).slice(0, 4);
 };
 
-const buildAISummaryHighlights = (achievements: AISummaryAchievement[], scorecard: AISummaryScorecard): AISummaryHighlight[] => {
-  const highlights = achievements
-    .filter((achievement) => achievement.labelImpact === "carries" || achievement.strength >= 0.82)
-    .map((achievement) => ({
-      title: achievement.title,
-      detail: achievement.detail,
-      strength: achievement.strength,
-    }));
-
-  const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
-  if (bestOutputProfile && bestOutputProfile.outputDelta >= 4 && highlights.length < 2) {
-    highlights.push({
-      title: `Finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above baseline`,
-      detail: `${bestOutputProfile.exerciseName} closed the program well above its starting point.`,
-      strength: Math.min(0.84, 0.58 + bestOutputProfile.outputDelta * 0.035),
-    });
-  }
-
-  return highlights.slice(0, 2);
-};
-
 // ===== AI SUMMARY INTERPRETED ACHIEVEMENTS =====
 
 const getAISummaryImpactRank = (impact: "supports" | "promotes" | "carries") => {
