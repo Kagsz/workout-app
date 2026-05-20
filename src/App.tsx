@@ -2751,11 +2751,6 @@ const hasAISummaryLargeRelativeGain = (profile: AISummarySeriesProfile | null | 
   return profile.endOutput >= profile.startOutput * 1.65 || profile.peakOutput >= profile.startOutput * 1.85;
 };
 
-const hasAISummaryMeaningfulEndpointGain = (profile: AISummarySeriesProfile | null | undefined) => {
-  if (!profile) return false;
-  return profile.outputDelta >= Math.max(2, Math.abs(profile.startOutput) * 0.15);
-};
-
 const isAISummaryWeightedConditioningProfile = (profile: AISummarySeriesProfile | null | undefined) => {
   if (!profile?.points.length) return false;
   const metricText = `${profile.points.map((point) => `${point.target} ${point.metric}`).join(" ")}`.toLowerCase();
