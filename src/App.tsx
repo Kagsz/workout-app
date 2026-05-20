@@ -1745,12 +1745,23 @@ type AISummaryAchievement = {
 };
 
 type AISummaryInterpretedAchievementKind =
+  | "exceptional_fallback"
+  | "explosive_continuity"
+  | "dominant_baseline_separation"
+  | "breakout_range"
+  | "elevated_floor"
   | "retained_adaptation"
   | "hidden_progression"
   | "repeated_demand"
   | "retained_separation"
   | "tradeoff_recovery"
   | "controlled_progression"
+  | "controlled_workflow"
+  | "balanced_volatility"
+  | "constraint_floor"
+  | "exercise_change_stability"
+  | "weighted_conditioning"
+  | "significant_weight_gain"
   | "true_consistency_check"
   | "contextual_decline"
   | "baseline_support";
@@ -1774,6 +1785,8 @@ type AISummaryHighlight = {
 type AISummarySeriesProfile = {
   exerciseName: string;
   points: GraphPoint[];
+  exerciseNameVariants: string[];
+  hasExerciseChange: boolean;
   startOutput: number;
   endOutput: number;
   peakOutput: number;
@@ -1882,6 +1895,8 @@ const getAISummarySeriesProfile = (series: GraphSeries): AISummarySeriesProfile 
   const outputPercentChange = Math.abs(startOutput) > 0 ? outputDelta / Math.abs(startOutput) : outputDelta;
   const numericWeights = points.map((point) => getAISummaryNumericWeight(point.weight)).filter((value): value is number => value != null);
   const uniqueNumericWeights = getAISummaryUniqueValues(numericWeights).sort((a, b) => a - b);
+  const exerciseNameVariants = getAISummaryUniqueValues(points.map((point) => String(point.exerciseName || series.exerciseName).trim()).filter(Boolean));
+  const hasExerciseChange = exerciseNameVariants.length > 1;
 
   let weightIncreaseCount = 0;
   let consecutiveWeightIncreaseCount = 0;
@@ -1924,6 +1939,8 @@ const getAISummarySeriesProfile = (series: GraphSeries): AISummarySeriesProfile 
   return {
     exerciseName: series.exerciseName,
     points,
+    exerciseNameVariants,
+    hasExerciseChange,
     startOutput,
     endOutput,
     peakOutput,
@@ -2560,8 +2577,8 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
       title: "Explosive output jump",
       detail:
         bestOutputProfile.endsAtPeak
-          ? `${bestOutputProfile.exerciseName} launched into a higher working range and finished at its highest output, ending ${delta} above where it started.`
-          : `${bestOutputProfile.exerciseName} created clear separation from its starting baseline and retained much of that gain.`,
+          ? `After an explosive start, you kept climbing and finished ${formatAISummaryDeltaWithMetric(bestOutputProfile.outputDelta, bestOutputProfile)} above where you started.`
+          : `You created clear separation from your starting baseline and retained much of that gain.`,
       strength: 0.96,
       labelImpact: "carries",
       markerKinds: ["explosive_jump", "output_rise", "strong_finish"],
@@ -2576,7 +2593,7 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
     achievements.push({
       id: "retained-output-under-weight",
       title: "Output held under rising demand",
-      detail: `${bestWeightProfile.exerciseName} maintained its working range${weightText}${constraints}.`,
+      detail: `You maintained output${weightText}${constraints}.`,
       strength: classification.label === "Exceptional Growth" ? 0.94 : 0.8,
       labelImpact: classification.label === "Exceptional Growth" ? "carries" : "promotes",
       markerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
@@ -2618,7 +2635,7 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
     achievements.push({
       id: "finished-above-start",
       title: `Finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above baseline`,
-      detail: `${bestOutputProfile.exerciseName} finished clearly above where it started, which keeps the read pointed upward.`,
+      detail: `You finished ${formatAISummaryDeltaWithMetric(bestOutputProfile.outputDelta, bestOutputProfile)} above where you started.`,
       strength: Math.min(0.82, 0.56 + bestOutputProfile.outputDelta * 0.04),
       labelImpact: bestOutputProfile.outputDelta >= 4 ? "promotes" : "supports",
       markerKinds: ["output_rise", "strong_finish"],
@@ -2641,7 +2658,7 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
       classification.label === "Contextual Decline"
         ? "The graph moved downward enough to deserve context, but not enough to turn the effort into a simple negative read."
         : classification.label === "Stable Growth"
-          ? "The graph stayed controlled enough to read more like a consistency check than a dramatic progression window."
+          ? "You established a controlled baseline for future comparison."
           : classification.reasons[0]?.text || "The graph produced a readable pattern from the available sessions.";
 
     achievements.push({
@@ -2694,6 +2711,94 @@ const getAISummaryControlledProgressionProfile = (scorecard: AISummaryScorecard)
   return hasGradualPositiveDrift || hasUsefulRebound || hasStableWeightProgression ? bestOutputProfile : null;
 };
 
+
+const getAISummaryConstraintOccurrenceCount = (scorecard: AISummaryScorecard) => {
+  const names = scorecard.seriesProfiles.flatMap((profile) => profile.points.map((point) => String(point.exerciseName || profile.exerciseName).toUpperCase()));
+  return names.reduce((count, name) => {
+    return count + AI_SUMMARY_CONSTRAINT_PATTERNS.reduce((inner, tag) => inner + (name.includes(tag.replace(".", "")) || name.includes(tag) ? 1 : 0), 0);
+  }, 0);
+};
+
+const getAISummaryConstraintPhrase = (scorecard: AISummaryScorecard) => {
+  if (!scorecard.hasConstraints) return "";
+  const occurrenceCount = getAISummaryConstraintOccurrenceCount(scorecard);
+  const tagText = scorecard.constraintTags.length ? scorecard.constraintTags.join("/") : "constraint";
+  if (occurrenceCount >= 2) return `under double ${tagText} constraints`;
+  return `under a ${tagText} constraint`;
+};
+
+const getAISummaryOutputMetricLabel = (profile: AISummarySeriesProfile | null | undefined) => {
+  if (!profile?.points.length) return "";
+  const lastPoint = profile.points[profile.points.length - 1];
+  const rawMetric = String(lastPoint.metric || "").trim();
+  const rawTarget = String(lastPoint.target || "").trim();
+  const combined = `${rawMetric} ${rawTarget}`.toLowerCase();
+
+  if (/calorie/.test(combined)) return "calories";
+  if (/lap/.test(combined)) return "laps";
+  if (/yard/.test(combined)) return "yards";
+  if (/rep/.test(combined)) return "reps";
+  if (lastPoint.blockType === "paired") return "sets";
+  return rawMetric && rawMetric !== "output" ? rawMetric : "";
+};
+
+const formatAISummaryDeltaWithMetric = (value: number, profile?: AISummarySeriesProfile | null) => {
+  const metric = getAISummaryOutputMetricLabel(profile);
+  return `${formatAISummaryNumber(value)}${metric ? ` ${metric}` : ""}`;
+};
+
+const getAISummaryOutputRatio = (profile: AISummarySeriesProfile | null | undefined) => {
+  if (!profile || Math.abs(profile.startOutput) < 0.1) return 0;
+  return profile.endOutput / profile.startOutput;
+};
+
+const hasAISummaryLargeRelativeGain = (profile: AISummarySeriesProfile | null | undefined) => {
+  if (!profile || Math.abs(profile.startOutput) < 0.1) return false;
+  return profile.endOutput >= profile.startOutput * 1.65 || profile.peakOutput >= profile.startOutput * 1.85;
+};
+
+const hasAISummaryMeaningfulEndpointGain = (profile: AISummarySeriesProfile | null | undefined) => {
+  if (!profile) return false;
+  return profile.outputDelta >= Math.max(2, Math.abs(profile.startOutput) * 0.15);
+};
+
+const isAISummaryWeightedConditioningProfile = (profile: AISummarySeriesProfile | null | undefined) => {
+  if (!profile?.points.length) return false;
+  const metricText = `${profile.points.map((point) => `${point.target} ${point.metric}`).join(" ")}`.toLowerCase();
+  const isConditioningMetric = /calorie|lap|yard|carry|rower|bike|run|walk|slam/.test(metricText) || profile.points.some((point) => point.blockType === "single");
+  return isConditioningMetric && profile.totalWeightIncrease > 0;
+};
+
+const hasAISummarySignificantWeightGain = (profile: AISummarySeriesProfile | null | undefined) => {
+  if (!profile) return false;
+  const first = profile.numericWeights[0];
+  if (first == null) return false;
+  return profile.totalWeightIncrease >= Math.max(7.5, Math.abs(first) * 0.25);
+};
+
+const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
+  const target = profile || getAISummaryBestWeightProfile(scorecard) || getAISummaryBestOutputProfile(scorecard);
+  if (!target || target.points.length < 3 || target.totalWeightIncrease <= 0) return false;
+  const points = target.points;
+  for (let index = 1; index < points.length; index += 1) {
+    const currentWeight = getAISummaryNumericWeight(points[index].weight);
+    const previousWeight = getAISummaryNumericWeight(points[index - 1].weight);
+    if (currentWeight == null || previousWeight == null || currentWeight <= previousWeight) continue;
+    const outputDrop = points[index].y < points[index - 1].y - 0.5;
+    const recoveredNext = index < points.length - 1 && points[index + 1].y >= points[index].y + 0.5;
+    if (outputDrop && (recoveredNext || index >= points.length - 2)) return true;
+  }
+  return scorecard.hasLateDip && scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0;
+};
+
+const pushAISummaryInterpretation = (
+  interpreted: AISummaryInterpretedAchievement[],
+  item: AISummaryInterpretedAchievement
+) => {
+  const alreadyHasKind = interpreted.some((existing) => existing.kind === item.kind);
+  if (!alreadyHasKind) interpreted.push(item);
+};
+
 const buildAISummaryInterpretedAchievements = (
   scorecard: AISummaryScorecard,
   classification: AISummaryClassification,
@@ -2703,120 +2808,221 @@ const buildAISummaryInterpretedAchievements = (
   const bestWeightProfile = getAISummaryBestWeightProfile(scorecard);
   const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
   const controlledProgressionProfile = getAISummaryControlledProgressionProfile(scorecard);
-  const constraints = getAISummaryConstraintText(scorecard);
-  const hasWeightTradeoff = scorecard.hasLateDip && scorecard.totalWeightIncreaseCount > 0;
+  const constraintPhrase = getAISummaryConstraintPhrase(scorecard);
+  const constraintSuffix = constraintPhrase ? ` ${constraintPhrase}` : "";
   const trueConsistencyCheck = isAISummaryTrueConsistencyCheck(scorecard);
+  const blockNoun = getAISummaryBlockNoun(scorecard);
+  const bestProfile = bestOutputProfile || bestWeightProfile;
+  const weightedConditioning = isAISummaryWeightedConditioningProfile(bestWeightProfile) || isAISummaryWeightedConditioningProfile(bestOutputProfile);
+  const relevantTradeoff = hasAISummaryRelevantTradeoff(scorecard, bestWeightProfile || bestOutputProfile);
+  const significantWeightGain = scorecard.seriesProfiles.some(hasAISummarySignificantWeightGain);
+  const hasExerciseChange = scorecard.seriesProfiles.some((profile) => profile.hasExerciseChange);
+  const largeRelativeGain = hasAISummaryLargeRelativeGain(bestOutputProfile);
+  const endpointGain = hasAISummaryMeaningfulEndpointGain(bestOutputProfile);
 
-  if (scorecard.hasRetainedOutputUnderWeight && bestWeightProfile) {
-    const increaseText =
-      bestWeightProfile.weightIncreaseCount >= 3
-        ? `${bestWeightProfile.weightIncreaseCount} weight increases`
-        : "rising weight";
-    interpreted.push({
-      kind: "retained_adaptation",
-      title: "Retained adaptation under rising demand",
-      meaning: "The output did not need to spike for the block to progress; the athlete kept the structure intact while the workload climbed.",
-      summarySentence: `${bestWeightProfile.exerciseName} kept the output structure intact through ${increaseText}${constraints}, which is the real achievement underneath the graph shape.`,
-      strength: classification.label === "Exceptional Growth" ? 0.96 : 0.84,
-      labelImpact: classification.label === "Exceptional Growth" ? "carries" : "promotes",
-      evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
-    });
+  if (classification.label === "Exceptional Growth") {
+    if (largeRelativeGain && bestOutputProfile) {
+      const deltaText = formatAISummaryDeltaWithMetric(bestOutputProfile.outputDelta, bestOutputProfile);
+      pushAISummaryInterpretation(interpreted, {
+        kind: "dominant_baseline_separation",
+        title: "Dominant baseline separation",
+        meaning: "The athlete created immediate distance from the starting baseline and kept operating from that higher level.",
+        summarySentence: `You created major separation from your starting baseline and never gave that ground back. Finishing ${deltaText} above where you started reflects textbook elite-tier progress.`,
+        strength: 0.99,
+        labelImpact: "carries",
+        evidenceMarkerKinds: ["explosive_jump", "output_rise", "strong_finish"],
+      });
+    } else if (scorecard.hasExplosiveJump && bestOutputProfile) {
+      const deltaText = formatAISummaryDeltaWithMetric(bestOutputProfile.outputDelta, bestOutputProfile);
+      pushAISummaryInterpretation(interpreted, {
+        kind: "explosive_continuity",
+        title: "Explosive acceleration with retention",
+        meaning: "The graph broke away early and continued building without giving the progression back.",
+        summarySentence: bestOutputProfile.endsAtPeak
+          ? `After an explosive start, you kept climbing until finishing at your highest output of the ${blockNoun}. That is ${deltaText} above where you started and reflects an exceptional progression window.`
+          : `After an explosive start, you established a much higher working range and kept the progression alive through the rest of the ${blockNoun}.`,
+        strength: 0.97,
+        labelImpact: "carries",
+        evidenceMarkerKinds: ["explosive_jump", "output_rise"],
+      });
+    }
+
+    if (scorecard.hasRetainedOutputUnderWeight && bestWeightProfile) {
+      const increaseText = bestWeightProfile.weightIncreaseCount >= 3 ? `${bestWeightProfile.weightIncreaseCount} weight increases` : "repeated weight increases";
+      pushAISummaryInterpretation(interpreted, {
+        kind: "retained_adaptation",
+        title: "Retained adaptation under rising demand",
+        meaning: "The athlete maintained output while demand continued rising.",
+        summarySentence: `You maintained the higher output structure through ${increaseText}${constraintSuffix}. This kind of progression window is difficult to replicate.`,
+        strength: 0.94,
+        labelImpact: interpreted.length ? "promotes" : "carries",
+        evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
+      });
+    }
+
+    if (!interpreted.length) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "exceptional_fallback",
+        title: "High-octane performance window",
+        meaning: "The classifier detected an exceptional performance even though the exact story needs broad framing.",
+        summarySentence: "Your stand-out moment here really exemplifies high-octane performance. You kept this progression moving at a very high level.",
+        strength: 0.88,
+        labelImpact: "carries",
+        evidenceMarkerKinds: classification.reasons.map((reason) => reason.kind),
+      });
+    }
   }
 
-  if (scorecard.hasRetainedOutputUnderWeight && scorecard.hasConstraints && bestWeightProfile?.isFlatOrControlled) {
-    interpreted.push({
-      kind: "hidden_progression",
-      title: "Hidden progression under constraint",
-      meaning: "The graph can look flat because the improvement happened through increased difficulty rather than increased output.",
-      summarySentence: `The growth here is more subtle than it appears: the block stayed controlled while the difficulty kept rising${constraints}.`,
-      strength: classification.label === "Exceptional Growth" ? 0.94 : 0.82,
-      labelImpact: classification.label === "Exceptional Growth" ? "carries" : "promotes",
-      evidenceMarkerKinds: ["retained_output_under_weight", "constraint_present", "weight_progression"],
-    });
+  if (classification.label === "Moderate Growth") {
+    if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrControlled) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "exercise_change_stability",
+        title: "Hidden stability through exercise change",
+        meaning: "The athlete maintained the baseline despite a mid-program exercise change and constraint demand.",
+        summarySentence: `On the surface this may seem quiet, but maintaining the established baseline${constraintSuffix} through a mid-program exercise change is a major feat here.`,
+        strength: 0.88,
+        labelImpact: "promotes",
+        evidenceMarkerKinds: ["constraint_present", "output_plateau"],
+      });
+    }
+
+    if (scorecard.hasRetainedOutputUnderWeight && scorecard.hasConstraints && bestWeightProfile?.isFlatOrControlled) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "constraint_floor",
+        title: "Workable floor under constraint",
+        meaning: "The athlete maintained a usable output floor while the constraint and weight demand increased.",
+        summarySentence: `You maintained a workable floor${constraintSuffix} while consistently moving up in weight. Great workflow, great job.`,
+        strength: 0.86,
+        labelImpact: "promotes",
+        evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
+      });
+    }
+
+    if (relevantTradeoff && bestWeightProfile) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "tradeoff_recovery",
+        title: "Trade-off managed under higher demand",
+        meaning: "The output fluctuations were tied to added demand rather than a loss of structure.",
+        summarySentence: `You managed the trade-off in output for additional weight${constraintSuffix}, keeping the ${blockNoun} structurally intact while demand increased.`,
+        strength: 0.8,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["late_dip", "rebound", "weight_progression"],
+      });
+    }
+
+    if (weightedConditioning && bestWeightProfile) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "weighted_conditioning",
+        title: "Weighted conditioning progress",
+        meaning: "Adding weight while preserving conditioning-style output carries extra value.",
+        summarySentence: `After the early-to-mid-program surge, your performance held with additional weight increases. Great growth for weight-involved cardio.`,
+        strength: 0.82,
+        labelImpact: "promotes",
+        evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
+      });
+    }
+
+    if (significantWeightGain && bestWeightProfile && !weightedConditioning) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "significant_weight_gain",
+        title: "Significant weight gains",
+        meaning: "The weight progression was large enough to matter as more than a minor support note.",
+        summarySentence: `You maintained solid output through meaningful weight gains. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
+        strength: 0.78,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
+      });
+    }
+
+    if (scorecard.hasExplosiveJump && bestOutputProfile && !largeRelativeGain) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "elevated_floor",
+        title: "Elevated floor established",
+        meaning: "The athlete established a higher working range early and maintained it.",
+        summarySentence: `You established a higher working range early and maintained it through the rest of the ${blockNoun}.`,
+        strength: 0.78,
+        labelImpact: "promotes",
+        evidenceMarkerKinds: ["explosive_jump", "output_plateau"],
+      });
+    }
+
+    if (!interpreted.length && scorecard.hasRetainedOutputUnderWeight && bestWeightProfile) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "controlled_workflow",
+        title: "Solid workflow",
+        meaning: "The athlete established a stable working range and maintained it while demand rose.",
+        summarySentence: `You established a solid workflow this program and maintained it with repeated weight increases.`,
+        strength: 0.74,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression"],
+      });
+    }
+
+    if (!interpreted.length && controlledProgressionProfile) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "controlled_progression",
+        title: "Controlled upward progression",
+        meaning: "The graph stayed controlled while gradually moving in a positive direction.",
+        summarySentence: `You maintained a tightly controlled range while gradually trending upward over the later sessions.`,
+        strength: 0.7,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["output_rise", "output_plateau"],
+      });
+    }
   }
 
-  if (scorecard.maxConsecutiveWeightIncreaseCount >= 4 && bestWeightProfile) {
-    interpreted.push({
-      kind: "repeated_demand",
-      title: `${scorecard.maxConsecutiveWeightIncreaseCount} consecutive weight increases`,
-      meaning: "Repeated weight progression matters most when it does not break the working structure of the block.",
-      summarySentence: `You moved through ${scorecard.maxConsecutiveWeightIncreaseCount} consecutive weight increases while keeping the block structurally intact.`,
-      strength: Math.min(0.98, 0.74 + scorecard.maxConsecutiveWeightIncreaseCount * 0.05),
-      labelImpact: scorecard.maxConsecutiveWeightIncreaseCount >= 5 || classification.label === "Exceptional Growth" ? "carries" : "promotes",
-      evidenceMarkerKinds: ["consecutive_weight_progression", "weight_progression"],
-    });
-  }
+  if (classification.label === "Stable Growth") {
+    if (!trueConsistencyCheck && controlledProgressionProfile && controlledProgressionProfile.outputDelta > 0) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "controlled_progression",
+        title: "Controlled upward drift",
+        meaning: "The graph remained stable while gradually trending upward.",
+        summarySentence: `You did well. The graph maintained a tightly controlled range while gradually trending upward over the later sessions. This is a good foundation to build from.`,
+        strength: 0.72,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["output_rise", "output_plateau"],
+      });
+    }
 
-  if (scorecard.hasExplosiveJump && bestOutputProfile) {
-    const delta = formatAISummaryNumber(bestOutputProfile.outputDelta);
-    interpreted.push({
-      kind: "retained_separation",
-      title: "Retained separation from baseline",
-      meaning: "The early jump mattered because the graph never fully returned to the original baseline.",
-      summarySentence:
-        bestOutputProfile.endsAtPeak
-          ? `After the early jump, you kept climbing and finished at the highest output of the block, ending ${delta} above where you started.`
-          : `After the early jump, you never gave the higher range back, which is what makes the progression stand out.`,
-      strength: 0.95,
-      labelImpact: "carries",
-      evidenceMarkerKinds: ["explosive_jump", "output_rise", "strong_finish"],
-    });
-  }
+    if (!interpreted.length && scorecard.hasRebound && Math.abs(scorecard.outputDeltaAverage) <= Math.max(1.5, scorecard.outputRangeAverage * 0.4)) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "balanced_volatility",
+        title: "Balanced volatility",
+        meaning: "The baseline and endpoint anchor the volatility between peak and valley.",
+        summarySentence: `The baseline and endpoint anchor the volatility between peak and valley, forming a balanced progressional flow. This is a good foundation to build from.`,
+        strength: 0.68,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["output_volatility", "rebound"],
+      });
+    }
 
-  if (scorecard.hasLateDip && scorecard.hasRebound) {
-    interpreted.push({
-      kind: "tradeoff_recovery",
-      title: hasWeightTradeoff ? "Tradeoff recovery under heavier demand" : "Recovery after disruption",
-      meaning: hasWeightTradeoff
-        ? "The dip reads more like an adaptation cost to heavier demand than a breakdown."
-        : "The dip mattered less because the following sessions recovered the structure.",
-      summarySentence: hasWeightTradeoff
-        ? "The dip reads more like an output tradeoff with heavier demand than a collapse, especially because the block recovered afterward."
-        : "The dip recovered instead of turning into a sustained breakdown, which keeps the overall read grounded.",
-      strength: hasWeightTradeoff ? 0.8 : 0.66,
-      labelImpact: hasWeightTradeoff ? "promotes" : "supports",
-      evidenceMarkerKinds: ["late_dip", "rebound", "weight_progression"],
-    });
-  }
-
-  if (classification.label === "Stable Growth" && controlledProgressionProfile && !trueConsistencyCheck) {
-    interpreted.push({
-      kind: "controlled_progression",
-      title: "Controlled stable progression",
-      meaning: "This was not just a maintenance read; the graph stayed controlled while still showing useful progression structure.",
-      summarySentence: `${controlledProgressionProfile.exerciseName} stayed in a controlled range while still building enough structure to read as steady progress, not just a consistency check.`,
-      strength: 0.72,
-      labelImpact: "carries",
-      evidenceMarkerKinds: ["output_plateau", "output_rise", "rebound"],
-    });
-  }
-
-  if (classification.label === "Stable Growth" && trueConsistencyCheck) {
-    interpreted.push({
-      kind: "true_consistency_check",
-      title: "True consistency check",
-      meaning: "The value of this graph is mostly its stability and future comparison point rather than a clear progression story.",
-      summarySentence: "This graph reads more like a consistency check than a progression-focused block, which can still be useful for tracking long-term baseline control.",
-      strength: 0.62,
-      labelImpact: "carries",
-      evidenceMarkerKinds: ["output_plateau"],
-    });
+    if (!interpreted.length && trueConsistencyCheck) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "true_consistency_check",
+        title: "True consistency check",
+        meaning: "This block was mainly useful for controlled baseline comparison.",
+        summarySentence: "This graph reads more like a true consistency check than a progression-focused block, which can still be useful for future comparison.",
+        strength: 0.54,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["output_plateau"],
+      });
+    }
   }
 
   if (classification.label === "Contextual Decline") {
-    interpreted.push({
+    pushAISummaryInterpretation(interpreted, {
       kind: "contextual_decline",
-      title: "Contextual decline pattern",
-      meaning: "The graph declined, but the interpretation should stay cautious because conditioning and recovery variables can influence the read.",
-      summarySentence: "The downward movement is clear enough to note, but conditioning-based outputs can fluctuate with recovery, stress, schedule, or outside fatigue.",
-      strength: 0.74,
-      labelImpact: "carries",
-      evidenceMarkerKinds: ["output_decline", "late_dip"],
+      title: "Contextual downward drift",
+      meaning: "The downward movement is worth reading with context rather than judgment.",
+      summarySentence: "The gradual downward trend is worth reading with context. Conditioning-based outputs can fluctuate with recovery, stress, schedule, or outside fatigue, so this type of decline deserves further assessment before drawing a hard conclusion.",
+      strength: 0.72,
+      labelImpact: "supports",
+      evidenceMarkerKinds: ["output_decline"],
     });
   }
 
   if (!interpreted.length && achievements[0]) {
-    interpreted.push({
+    pushAISummaryInterpretation(interpreted, {
       kind: "baseline_support",
       title: achievements[0].title,
       meaning: achievements[0].detail,
@@ -2829,7 +3035,7 @@ const buildAISummaryInterpretedAchievements = (
 
   return interpreted
     .sort((a, b) => getAISummaryImpactRank(b.labelImpact) - getAISummaryImpactRank(a.labelImpact) || b.strength - a.strength)
-    .slice(0, 4);
+    .slice(0, classification.label === "Exceptional Growth" ? 3 : 2);
 };
 
 const buildAISummaryHighlightsFromInterpretations = (interpretedAchievements: AISummaryInterpretedAchievement[]): AISummaryHighlight[] =>
@@ -2849,25 +3055,22 @@ const shouldUseAISummaryHighlightSlot = (classification: AISummaryClassification
   return false;
 };
 
+
 const buildAISummaryHighlightSentence = (highlight: AISummaryHighlight, scorecard: AISummaryScorecard) => {
   const title = highlight.title.trim();
   const detail = highlight.detail.trim();
-  const constraints = getAISummaryConstraintText(scorecard);
+  const constraintPhrase = getAISummaryConstraintPhrase(scorecard);
 
   if (/consecutive weight increases/i.test(title)) {
-    return `The clearest highlight was ${title.toLowerCase()}, which set the tone for the entire ${getAISummaryBlockNoun(scorecard)}.`;
+    return `You set the tone with ${title.toLowerCase()}${constraintPhrase ? ` ${constraintPhrase}` : ""}.`;
   }
 
   if (/above baseline/i.test(title)) {
-    return `${title} is the clearest sign that the work carried forward instead of fading out.`;
+    return `${title} gives the work a clear positive finish.`;
   }
 
-  if (/output held|rising demand/i.test(title)) {
-    return `The clearest win was holding the working range while the demand kept increasing${constraints}.`;
-  }
-
-  if (/explosive/i.test(title)) {
-    return `The big separator was the early jump into a higher working range and the fact that you never gave that ground back.`;
+  if (/explosive|baseline separation|retained/i.test(title)) {
+    return detail || "You created separation from your baseline and kept building from there.";
   }
 
   return detail || title;
@@ -2905,35 +3108,29 @@ const formatAISummaryNumber = (value: number) => {
 
 const getAISummaryHeadline = (classification: AISummaryClassification, _story: AISummaryStory) => classification.label;
 
+
 const buildAISummaryOpeningSlot = (scorecard: AISummaryScorecard, classification: AISummaryClassification, story: AISummaryStory): AISummaryResolvedSlot => {
   const blockNoun = getAISummaryBlockNoun(scorecard);
 
   if (classification.label === "Exceptional Growth") {
-    if (story.identity === "constraint_progression") {
-      return { kind: "opener", text: `You crushed this ${blockNoun}.`, importance: 1 };
-    }
-    if (story.identity === "stacked_progression") {
-      return { kind: "opener", text: `You crushed this ${blockNoun}.`, importance: 1 };
-    }
-    return { kind: "opener", text: `This was an impressive performance.`, importance: 0.96 };
+    return { kind: "opener", text: `You crushed this ${blockNoun}!`, importance: 1 };
   }
 
   if (classification.label === "Moderate Growth") {
-    if (scorecard.hasRetainedOutputUnderWeight || scorecard.maxConsecutiveWeightIncreaseCount >= 3) {
-      return { kind: "opener", text: `This was a strong ${blockNoun}.`, importance: 0.86 };
-    }
-    return { kind: "opener", text: `This was a solid showing.`, importance: 0.82 };
+    const elevatedModerate = scorecard.hasConstraints || scorecard.hasRetainedOutputUnderWeight || scorecard.maxConsecutiveWeightIncreaseCount >= 3 || scorecard.hasExplosiveJump;
+    if (elevatedModerate) return { kind: "opener", text: "This is a strong performance.", importance: 0.9 };
+    return { kind: "opener", text: "You performed well here.", importance: 0.82 };
   }
 
   if (classification.label === "Contextual Decline") {
-    return { kind: "opener", text: "This trend is worth reading with context.", importance: 0.76 };
+    return { kind: "opener", text: "The gradual downward trend is worth reading with context.", importance: 0.76 };
   }
 
   if (isAISummaryTrueConsistencyCheck(scorecard)) {
-    return { kind: "opener", text: "This graph reads more like a consistency check than a progression-focused workout.", importance: 0.68 };
+    return { kind: "opener", text: "This graph reads more like a true consistency check than a progression-focused block.", importance: 0.68 };
   }
 
-  return { kind: "opener", text: "This was a solid showing.", importance: 0.72 };
+  return { kind: "opener", text: "You did well.", importance: 0.72 };
 };
 
 const buildAISummaryAchievementSentence = (
@@ -2970,41 +3167,67 @@ const buildAISummaryAchievementSentence = (
   return achievement.detail;
 };
 
+
 const buildAISummaryStructuralSentence = (
   scorecard: AISummaryScorecard,
   classification: AISummaryClassification,
-  story: AISummaryStory
+  story: AISummaryStory,
+  interpretedAchievements: AISummaryInterpretedAchievement[] = []
 ) => {
   const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
+  const primaryKind = interpretedAchievements[0]?.kind;
 
   if (classification.label === "Contextual Decline") {
-    return "Conditioning-based outputs can fluctuate with recovery, stress, schedule, or outside fatigue, so this type of decline deserves context before drawing a hard conclusion.";
+    return "";
   }
 
   if (classification.label === "Stable Growth") {
-    if (isAISummaryTrueConsistencyCheck(scorecard)) {
-      return "This type of controlled range can still play an important role in long-term progress, even when the recordable data is limited.";
-    }
-    if (scorecard.hasLateDip && scorecard.hasRebound) {
-      return "The recovery after the dip matters more than the dip itself because it kept the overall structure from breaking down.";
+    return "";
+  }
+
+  if (classification.label === "Exceptional Growth") {
+    const hasPrimaryMagnitude = primaryKind === "dominant_baseline_separation" || primaryKind === "explosive_continuity";
+    if (!hasPrimaryMagnitude && bestOutputProfile && bestOutputProfile.outputDelta > 0) {
+      return `You kept pressure on the progression from start to finish.`;
     }
     return "";
   }
 
-  if (story.needsStructuralExplanation && scorecard.hasRetainedOutputUnderWeight) {
-    return "That means the meaningful progress came from preserving output under harder conditions, not from forcing a dramatic spike.";
-  }
-
-  if (scorecard.hasLateDip && scorecard.hasRebound) {
-    return "Even with the temporary dip, the recovery kept the overall structure intact.";
-  }
-
-  if (bestOutputProfile && bestOutputProfile.outputDelta > 0) {
-    return `${bestOutputProfile.exerciseName} finished ${formatAISummaryNumber(bestOutputProfile.outputDelta)} above where it started.`;
+  if (classification.label === "Moderate Growth") {
+    const hasInterpretation = interpretedAchievements.length > 0;
+    if (hasInterpretation) return "";
+    if (story.needsStructuralExplanation && scorecard.hasRetainedOutputUnderWeight) {
+      return "The work became meaningful through the higher demand you handled, not just the output line.";
+    }
+    if (bestOutputProfile && bestOutputProfile.outputDelta > 0 && !scorecard.hasLateDip) {
+      return `${bestOutputProfile.exerciseName} finished ${formatAISummaryDeltaWithMetric(bestOutputProfile.outputDelta, bestOutputProfile)} above where it started.`;
+    }
   }
 
   return "";
 };
+
+const getAISummaryCloserText = (
+  scorecard: AISummaryScorecard,
+  classification: AISummaryClassification,
+  interpretedAchievements: AISummaryInterpretedAchievement[]
+) => {
+  if (classification.label === "Exceptional Growth") return "Outstanding work!";
+  if (classification.label === "Contextual Decline") return "";
+  if (classification.label === "Stable Growth") {
+    if (interpretedAchievements.some((item) => item.kind === "true_consistency_check")) return "";
+    if (interpretedAchievements.some((item) => item.kind === "controlled_progression" || item.kind === "balanced_volatility")) return "";
+    return "";
+  }
+
+  const kinds = interpretedAchievements.map((item) => item.kind);
+  if (kinds.includes("constraint_floor") || kinds.includes("controlled_workflow")) return "";
+  if (kinds.includes("weighted_conditioning")) return "Good work.";
+  if (kinds.includes("tradeoff_recovery")) return "Solid work.";
+  if (scorecard.hasConstraints || scorecard.hasRetainedOutputUnderWeight) return "Great work.";
+  return "Good work.";
+};
+
 
 const composeAISummarySlots = (
   scorecard: AISummaryScorecard,
@@ -3017,6 +3240,7 @@ const composeAISummarySlots = (
   const slots: AISummaryResolvedSlot[] = [];
   const primaryAchievement = achievements[0];
   const primaryInterpretation = interpretedAchievements[0];
+  const secondaryInterpretations = interpretedAchievements.slice(1);
   const primaryHighlight = highlights[0];
 
   slots.push(buildAISummaryOpeningSlot(scorecard, classification, story));
@@ -3030,14 +3254,22 @@ const composeAISummarySlots = (
     });
   }
 
-  if (!primaryInterpretation && shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
+  const usefulSecondary = secondaryInterpretations.find((item) => {
+    if (classification.label === "Exceptional Growth") return item.strength >= 0.9 || item.labelImpact !== "supports";
+    if (classification.label === "Moderate Growth") return item.strength >= 0.82 && item.kind !== primaryInterpretation?.kind;
+    return false;
+  });
+
+  if (usefulSecondary && usefulSecondary.summarySentence !== achievementSentence) {
+    slots.push({ kind: "highlight", text: usefulSecondary.summarySentence, importance: usefulSecondary.strength });
+  } else if (!primaryInterpretation && shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
     const highlightText = buildAISummaryHighlightSentence(primaryHighlight, scorecard);
     if (highlightText && highlightText !== achievementSentence) {
       slots.push({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
     }
   }
 
-  const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story);
+  const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story, interpretedAchievements);
   if (structuralSentence) {
     slots.push({
       kind: classification.label === "Contextual Decline" || classification.label === "Stable Growth" ? "structural_explanation" : "supporting_context",
@@ -3046,24 +3278,14 @@ const composeAISummarySlots = (
     });
   }
 
-  const closer =
-    classification.label === "Exceptional Growth"
-      ? "Outstanding work."
-      : classification.label === "Moderate Growth"
-        ? "Good work."
-        : classification.label === "Contextual Decline"
-          ? "That context matters before turning the pattern into a judgment on the work."
-          : "This gives future sessions a useful comparison point.";
-
-  if (classification.label !== "Stable Growth" || scorecard.dataConfidence !== "Low") {
-    slots.push({ kind: "closer", text: closer, importance: 0.35 });
-  }
+  const closer = getAISummaryCloserText(scorecard, classification, interpretedAchievements);
+  if (closer) slots.push({ kind: "closer", text: closer, importance: 0.35 });
 
   const seen = new Set<string>();
   return slots.filter((slot) => {
     const normalized = slot.text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const shortKey = normalized
-      .replace(/\b(the|a|an|this|that|with|while|under|through|and|or|but|it|its|you|your)\b/g, "")
+      .replace(/\b(the|a|an|this|that|with|while|under|through|and|or|but|it|its|you|your|graph|block|exercise)\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
     if (!normalized || seen.has(normalized) || seen.has(shortKey)) return false;
@@ -3073,8 +3295,9 @@ const composeAISummarySlots = (
   });
 };
 
-const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) =>
-  slots
+
+const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) => {
+  const sentence = slots
     .sort((a, b) => {
       const order: Record<AISummarySlotKind, number> = {
         opener: 1,
@@ -3091,9 +3314,16 @@ const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) =>
     .join(" ")
     .replace(/\bThe graph rose early, dipped[^.]*\./gi, "")
     .replace(/\bThe graph increased early, dipped[^.]*\./gi, "")
+    .replace(/\bThe clearest (highlight|win) was\b/gi, "")
+    .replace(/\bthe read pointed upward\b/gi, "the progression stayed positive")
     .replace(/\bthen\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  return sentence
+    .replace(/\.\s+Outstanding work\.$/, ". Outstanding work!")
+    .replace(/\.\s+Outstanding job\.$/, ". Outstanding job!");
+};
 
 const generateWorkoutSummaryInsightFromGraphData = (graphData: GraphSeries[], blockType?: BlockType): WorkoutSummaryInsight | null => {
   if (!graphData.length || !blockType) return null;
