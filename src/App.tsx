@@ -2571,7 +2571,6 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
   const constraints = getAISummaryConstraintText(scorecard);
 
   if (scorecard.hasExplosiveJump && bestOutputProfile) {
-    const delta = formatAISummaryNumber(bestOutputProfile.outputDelta);
     achievements.push({
       id: "explosive-output-jump",
       title: "Explosive output jump",
@@ -2747,11 +2746,6 @@ const formatAISummaryDeltaWithMetric = (value: number, profile?: AISummarySeries
   return `${formatAISummaryNumber(value)}${metric ? ` ${metric}` : ""}`;
 };
 
-const getAISummaryOutputRatio = (profile: AISummarySeriesProfile | null | undefined) => {
-  if (!profile || Math.abs(profile.startOutput) < 0.1) return 0;
-  return profile.endOutput / profile.startOutput;
-};
-
 const hasAISummaryLargeRelativeGain = (profile: AISummarySeriesProfile | null | undefined) => {
   if (!profile || Math.abs(profile.startOutput) < 0.1) return false;
   return profile.endOutput >= profile.startOutput * 1.65 || profile.peakOutput >= profile.startOutput * 1.85;
@@ -2818,7 +2812,6 @@ const buildAISummaryInterpretedAchievements = (
   const significantWeightGain = scorecard.seriesProfiles.some(hasAISummarySignificantWeightGain);
   const hasExerciseChange = scorecard.seriesProfiles.some((profile) => profile.hasExerciseChange);
   const largeRelativeGain = hasAISummaryLargeRelativeGain(bestOutputProfile);
-  const endpointGain = hasAISummaryMeaningfulEndpointGain(bestOutputProfile);
 
   if (classification.label === "Exceptional Growth") {
     if (largeRelativeGain && bestOutputProfile) {
@@ -3109,7 +3102,7 @@ const formatAISummaryNumber = (value: number) => {
 const getAISummaryHeadline = (classification: AISummaryClassification, _story: AISummaryStory) => classification.label;
 
 
-const buildAISummaryOpeningSlot = (scorecard: AISummaryScorecard, classification: AISummaryClassification, story: AISummaryStory): AISummaryResolvedSlot => {
+const buildAISummaryOpeningSlot = (scorecard: AISummaryScorecard, classification: AISummaryClassification, _story: AISummaryStory): AISummaryResolvedSlot => {
   const blockNoun = getAISummaryBlockNoun(scorecard);
 
   if (classification.label === "Exceptional Growth") {
