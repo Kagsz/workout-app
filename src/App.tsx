@@ -2864,7 +2864,6 @@ const buildAISummaryInterpretedAchievements = (
 
   if (classification.label === "Exceptional Growth") {
     if (largeRelativeGain && bestOutputProfile) {
-      const deltaText = formatAISummaryDeltaWithMetric(bestOutputProfile.outputDelta, bestOutputProfile);
       pushAISummaryInterpretation(interpreted, {
         kind: "dominant_baseline_separation",
         title: "Dominant baseline separation",
