@@ -2730,6 +2730,13 @@ const formatAISummaryConstraintTagList = (tags: string[]) => {
   return `${uniqueTags.slice(0, -1).join(", ")}, and ${uniqueTags[uniqueTags.length - 1]}`;
 };
 
+const formatAISummaryCompactConstraintTagList = (tags: string[]) => {
+  const uniqueTags = getAISummaryUniqueValues(tags.map(normalizeAISummaryConstraintTag));
+  if (!uniqueTags.length) return "constraint";
+  if (uniqueTags.length === 1) return uniqueTags[0];
+  return uniqueTags.join(" + ");
+};
+
 const getAISummaryConstraintOccurrenceCount = (scorecard: AISummaryScorecard) => {
   const tags = getAISummaryConstraintTags(scorecard);
   if (!tags.length) return 0;
@@ -2743,11 +2750,13 @@ const getAISummaryConstraintOccurrenceCount = (scorecard: AISummaryScorecard) =>
 const getAISummaryConstraintPhrase = (scorecard: AISummaryScorecard) => {
   if (!scorecard.hasConstraints) return "";
   const occurrenceCount = getAISummaryConstraintOccurrenceCount(scorecard);
-  const tagText = formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard));
+  const tags = getAISummaryConstraintTags(scorecard);
+  const tagText = formatAISummaryConstraintTagList(tags);
+  const compactTagText = formatAISummaryCompactConstraintTagList(tags);
 
   if (occurrenceCount >= 2) {
-    return getAISummaryConstraintTags(scorecard).length > 1
-      ? `under a double constraint, ${tagText}`
+    return tags.length > 1
+      ? `under ${compactTagText} constraints`
       : `under double ${tagText} constraints`;
   }
 
@@ -2757,11 +2766,13 @@ const getAISummaryConstraintPhrase = (scorecard: AISummaryScorecard) => {
 const getAISummaryWorkingWithConstraintPhrase = (scorecard: AISummaryScorecard) => {
   if (!scorecard.hasConstraints) return "";
   const occurrenceCount = getAISummaryConstraintOccurrenceCount(scorecard);
-  const tagText = formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard));
+  const tags = getAISummaryConstraintTags(scorecard);
+  const tagText = formatAISummaryConstraintTagList(tags);
+  const compactTagText = formatAISummaryCompactConstraintTagList(tags);
 
   if (occurrenceCount >= 2) {
-    return getAISummaryConstraintTags(scorecard).length > 1
-      ? `while working with double constraints, ${tagText}`
+    return tags.length > 1
+      ? `while working with ${compactTagText} constraints`
       : `while working with double ${tagText} constraints`;
   }
 
@@ -2863,12 +2874,69 @@ const hasAISummaryTightBaselineRange = (profile?: AISummarySeriesProfile | null)
   return stayedAheadOfBaseline && tightWorkRange && notTrajectoryDriven;
 };
 
+const hasAISummaryRecoveredHiccup = (profile?: AISummarySeriesProfile | null) => {
+  if (!profile || profile.points.length < 5 || !profile.endsAtPeak || profile.outputDelta <= 0.75) return false;
+
+  const values = profile.points.map((point) => point.y);
+  const meaningfulDrop = Math.max(2, profile.outputRange * 0.45);
+
+  for (let index = 1; index < values.length - 1; index += 1) {
+    const previous = values[index - 1];
+    const current = values[index];
+    const next = values[index + 1];
+    const singlePointDrop = previous - current >= meaningfulDrop && next - current >= meaningfulDrop * 0.75;
+    const recoveredPastPrevious = next >= previous || profile.endOutput >= profile.peakOutput - 0.25;
+
+    if (singlePointDrop && recoveredPastPrevious && current < profile.startOutput - 0.5) return true;
+  }
+
+  return false;
+};
+
 const hasAISummaryEscalatingConstrainedProgression = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
   if (!profile || !scorecard.hasConstraints || profile.startOutput <= 0) return false;
-  const nearDouble = profile.endOutput >= profile.startOutput * 1.45 && profile.endOutput < profile.startOutput * 2;
+  const nearDouble = profile.endOutput >= profile.startOutput * 1.45 && profile.endOutput <= profile.startOutput * 2.1;
   const meaningfulRise = profile.outputDelta >= Math.max(1.5, profile.startOutput * 0.45);
   const demandPresent = scorecard.totalWeightIncreaseCount > 0 || scorecard.hasRetainedOutputUnderWeight;
   return nearDouble && meaningfulRise && demandPresent;
+};
+
+const hasAISummaryDominantBaselineSeparation = (profile?: AISummarySeriesProfile | null) => {
+  if (!profile || profile.startOutput <= 0 || profile.points.length < 5) return false;
+
+  const values = profile.points.map((point) => point.y).filter((value) => Number.isFinite(value));
+  if (values.length < 5) return false;
+
+  const start = values[0];
+  const minimumBreakoutGain = Math.max(2, Math.abs(start) * 0.45);
+  const allowableEarlyDip = Math.max(0.5, Math.abs(start) * 0.15);
+  const retainedFloor = start + minimumBreakoutGain * 0.7;
+  const maxPostBreakoutEscalation = Math.max(1, Math.abs(start) * 0.25);
+
+  for (let index = 1; index <= values.length - 3; index += 1) {
+    const priorValues = values.slice(0, index);
+    const priorHadRecoveryDip = priorValues.some((value) => value < start - allowableEarlyDip);
+    if (priorHadRecoveryDip) continue;
+
+    const comparisonWindow = priorValues.slice(-3);
+    const comparisonAverage = comparisonWindow.length
+      ? comparisonWindow.reduce((sum, value) => sum + value, 0) / comparisonWindow.length
+      : start;
+
+    const breakoutFromStart = values[index] - start;
+    const breakoutFromRecentStructure = values[index] - comparisonAverage;
+    const compressedBreakout = index <= 2 || breakoutFromRecentStructure >= Math.max(1.5, Math.abs(start) * 0.3);
+    const retainedWindow = values.slice(index, index + 3);
+    const retainedElevation = retainedWindow.length >= 3 && retainedWindow.every((value) => value >= retainedFloor);
+    const afterRetainedWindow = values.slice(index + 3);
+    const keepsEscalatingAfterBreakout = afterRetainedWindow.some((value) => value - values[index] > maxPostBreakoutEscalation);
+
+    if (breakoutFromStart >= minimumBreakoutGain && compressedBreakout && retainedElevation && !keepsEscalatingAfterBreakout) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 const buildAISummaryInterpretedAchievements = (
@@ -2890,13 +2958,14 @@ const buildAISummaryInterpretedAchievements = (
   const weightedConditioning = isAISummaryWeightedConditioningProfile(bestWeightProfile) || isAISummaryWeightedConditioningProfile(bestOutputProfile);
   const relevantTradeoff = hasAISummaryRelevantTradeoff(scorecard, bestWeightProfile || bestOutputProfile);
   const significantWeightGain = scorecard.seriesProfiles.some(hasAISummarySignificantWeightGain);
-  const weightProgressionPhrase = significantWeightGain ? "making meaningful weight gains" : "moving up in weight";
+  const weightProgressionPhrase = significantWeightGain ? "making significant weight gains" : "moving up in weight";
   const hasExerciseChange = scorecard.seriesProfiles.some((profile) => profile.hasExerciseChange);
   const largeRelativeGain = hasAISummaryLargeRelativeGain(bestOutputProfile);
+  const dominantBaselineSeparation = hasAISummaryDominantBaselineSeparation(bestOutputProfile);
   const tightBaselineRange = hasAISummaryTightBaselineRange(bestOutputProfile);
   const escalatingConstrainedProgression = hasAISummaryEscalatingConstrainedProgression(scorecard, bestOutputProfile);
   const sustainedPerformance = hasAISummarySustainedPerformancePattern(scorecard, bestOutputProfile);
-  const outlierHiccup = Boolean(bestOutputProfile?.endsAtPeak && bestOutputProfile.outputDelta > 0.75 && scorecard.hasLateDip && !relevantTradeoff);
+  const outlierHiccup = hasAISummaryRecoveredHiccup(bestOutputProfile) && !relevantTradeoff;
 
   if (classification.label === "Exceptional Growth") {
     if (escalatingConstrainedProgression && bestOutputProfile) {
@@ -2909,7 +2978,7 @@ const buildAISummaryInterpretedAchievements = (
         labelImpact: "carries",
         evidenceMarkerKinds: ["output_rise", "weight_progression", "constraint_present"],
       });
-    } else if (largeRelativeGain && bestOutputProfile) {
+    } else if (largeRelativeGain && dominantBaselineSeparation && bestOutputProfile) {
       pushAISummaryInterpretation(interpreted, {
         kind: "dominant_baseline_separation",
         title: "Dominant baseline separation",
@@ -3080,7 +3149,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "constraint_floor",
         title: "Solid output range under constraint",
         meaning: "The athlete maintained a controlled working range while handling constraint demand.",
-        summarySentence: `While working with ${getAISummaryConstraintTags(scorecard).length > 1 ? `${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraints` : `a ${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraint`}, you maintained a solid output range throughout the program. Great work.`,
+        summarySentence: `While working with ${getAISummaryConstraintTags(scorecard).length > 1 ? `${formatAISummaryCompactConstraintTagList(getAISummaryConstraintTags(scorecard))} constraints` : `a ${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraint`}, you maintained a solid output range throughout the program. Great work.`,
         strength: 0.73,
         labelImpact: "supports",
         evidenceMarkerKinds: ["constraint_present", "output_plateau"],
@@ -3356,10 +3425,6 @@ const buildAISummaryStructuralSentence = (
   }
 
   if (classification.label === "Exceptional Growth") {
-    const hasPrimaryMagnitude = primaryKind === "dominant_baseline_separation" || primaryKind === "explosive_continuity";
-    if (!hasPrimaryMagnitude && bestOutputProfile && bestOutputProfile.outputDelta > 0) {
-      return `You kept pressure on the progression from start to finish.`;
-    }
     return "";
   }
 
@@ -3398,6 +3463,18 @@ const getAISummaryCloserText = (
   if (kinds.includes("tradeoff_recovery")) return "Solid work.";
   if (scorecard.hasConstraints || scorecard.hasRetainedOutputUnderWeight) return "Great work.";
   return "Good work.";
+};
+
+const adjustAISummaryCloserForThemeRepetition = (closer: string, existingSlots: AISummaryResolvedSlot[]) => {
+  if (!closer) return closer;
+  const priorText = existingSlots.map((slot) => slot.text).join(" ").toLowerCase();
+  const lowerCloser = closer.toLowerCase();
+
+  if (/\bwork\b/.test(lowerCloser) && /\bwork\b/.test(priorText)) return "Good job.";
+  if (/\bsolid\b/.test(lowerCloser) && /\bsolid\b/.test(priorText)) return closer.replace(/Solid/i, "Good");
+  if (/\bstrong\b/.test(lowerCloser) && /\bstrong\b/.test(priorText)) return "Great job.";
+
+  return closer;
 };
 
 
@@ -3453,7 +3530,7 @@ const composeAISummarySlots = (
     });
   }
 
-  const closer = getAISummaryCloserText(scorecard, classification, interpretedAchievements);
+  const closer = adjustAISummaryCloserForThemeRepetition(getAISummaryCloserText(scorecard, classification, interpretedAchievements), slots);
   if (closer) slots.push({ kind: "closer", text: closer, importance: 0.35 });
 
   const seen = new Set<string>();
