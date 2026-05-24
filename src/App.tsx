@@ -3414,7 +3414,6 @@ const buildAISummaryStructuralSentence = (
   interpretedAchievements: AISummaryInterpretedAchievement[] = []
 ) => {
   const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
-  const primaryKind = interpretedAchievements[0]?.kind;
 
   if (classification.label === "Contextual Decline") {
     return "";
