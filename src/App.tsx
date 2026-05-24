@@ -2688,15 +2688,17 @@ const getAISummaryImpactRank = (impact: "supports" | "promotes" | "carries") => 
 
 const isAISummaryTrueConsistencyCheck = (scorecard: AISummaryScorecard) => {
   const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
-  const hasLittleOutputMovement = Math.abs(scorecard.outputDeltaAverage) < 0.75;
-  const hasTightRange = scorecard.outputRangeAverage <= 1.25;
+  const hasLittleOutputMovement = Math.abs(scorecard.outputDeltaAverage) < 0.25;
+  const hasTightRange = scorecard.outputRangeAverage <= 0.75;
   const hasNoMeaningfulWeightProgression = scorecard.totalWeightIncreaseCount === 0;
   const hasNoStructuralRebound = !scorecard.hasRebound && !scorecard.hasExplosiveJump;
   const singleLowMovement =
     scorecard.mode === "single" &&
     bestOutputProfile != null &&
-    Math.abs(bestOutputProfile.outputDelta) < 0.75 &&
-    bestOutputProfile.outputRange <= 1.25;
+    Math.abs(bestOutputProfile.outputDelta) < 0.25 &&
+    bestOutputProfile.outputRange <= 0.75 &&
+    hasNoMeaningfulWeightProgression &&
+    hasNoStructuralRebound;
 
   return (hasLittleOutputMovement && hasTightRange && hasNoMeaningfulWeightProgression && hasNoStructuralRebound) || singleLowMovement;
 };
@@ -2807,15 +2809,21 @@ const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: A
   const target = profile || getAISummaryBestWeightProfile(scorecard) || getAISummaryBestOutputProfile(scorecard);
   if (!target || target.points.length < 3 || target.totalWeightIncrease <= 0) return false;
   const points = target.points;
+  const meaningfulDropThreshold = Math.max(0.75, target.outputRange * 0.22);
+
   for (let index = 1; index < points.length; index += 1) {
     const currentWeight = getAISummaryNumericWeight(points[index].weight);
     const previousWeight = getAISummaryNumericWeight(points[index - 1].weight);
     if (currentWeight == null || previousWeight == null || currentWeight <= previousWeight) continue;
-    const outputDrop = points[index].y < points[index - 1].y - 0.5;
-    const recoveredNext = index < points.length - 1 && points[index + 1].y >= points[index].y + 0.5;
-    if (outputDrop && (recoveredNext || index >= points.length - 2)) return true;
+
+    const outputDropAmount = points[index - 1].y - points[index].y;
+    const recoveredNext = index < points.length - 1 && points[index + 1].y >= points[index].y + meaningfulDropThreshold * 0.6;
+    const lateStructuralDrop = index >= points.length - 2 && points[index].y < target.peakOutput - meaningfulDropThreshold;
+
+    if (outputDropAmount >= meaningfulDropThreshold && (recoveredNext || lateStructuralDrop)) return true;
   }
-  return scorecard.hasLateDip && scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0;
+
+  return scorecard.hasLateDip && scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0 && scorecard.outputRangeAverage > 1.5;
 };
 
 const pushAISummaryInterpretation = (
@@ -2834,8 +2842,15 @@ const hasAISummarySustainedPerformancePattern = (scorecard: AISummaryScorecard, 
   const belowBaselineCount = target.points.filter((point) => point.y < toleratedFloor).length;
   const finishesPositive = target.outputDelta > 0.75;
   const hasDemandProgression = target.totalWeightIncrease > 0 || scorecard.totalWeightIncreaseCount > 0;
+  const outputValues = target.points.map((point) => point.y);
+  const maxStepRegression = outputValues.reduce((largestDrop, value, index) => {
+    if (index === 0) return largestDrop;
+    return Math.max(largestDrop, outputValues[index - 1] - value);
+  }, 0);
+  const givebackFromPeak = target.peakOutput - target.endOutput;
+  const noMeaningfulGiveback = maxStepRegression <= 0.5 && givebackFromPeak <= 0.5;
 
-  return finishesPositive && hasDemandProgression && belowBaselineCount <= 1 && !scorecard.hasLateDip;
+  return finishesPositive && hasDemandProgression && belowBaselineCount === 0 && noMeaningfulGiveback && !scorecard.hasLateDip && !scorecard.hasRebound;
 };
 
 const buildAISummaryInterpretedAchievements = (
@@ -2857,6 +2872,7 @@ const buildAISummaryInterpretedAchievements = (
   const weightedConditioning = isAISummaryWeightedConditioningProfile(bestWeightProfile) || isAISummaryWeightedConditioningProfile(bestOutputProfile);
   const relevantTradeoff = hasAISummaryRelevantTradeoff(scorecard, bestWeightProfile || bestOutputProfile);
   const significantWeightGain = scorecard.seriesProfiles.some(hasAISummarySignificantWeightGain);
+  const weightProgressionPhrase = significantWeightGain ? "making meaningful weight gains" : "moving up in weight";
   const hasExerciseChange = scorecard.seriesProfiles.some((profile) => profile.hasExerciseChange);
   const largeRelativeGain = hasAISummaryLargeRelativeGain(bestOutputProfile);
   const sustainedPerformance = hasAISummarySustainedPerformancePattern(scorecard, bestOutputProfile);
@@ -2891,12 +2907,14 @@ const buildAISummaryInterpretedAchievements = (
     }
 
     if (scorecard.hasRetainedOutputUnderWeight && bestWeightProfile) {
-      const increaseText = bestWeightProfile.weightIncreaseCount >= 3 ? `${bestWeightProfile.weightIncreaseCount} weight increases` : "repeated weight increases";
+      const retainedSentence = bestWeightProfile.weightIncreaseCount <= 1 && bestOutputProfile && scorecard.hasConstraints
+        ? `You established a higher output ceiling ${constraintPhrase} and sustained it with added weight. Maintaining that elevated level after the jump is a strong sign of progress.`
+        : `You maintained the higher output structure while ${bestWeightProfile.weightIncreaseCount >= 3 ? "making meaningful weight gains" : "adding weight"}${constraintSuffix}.`;
       pushAISummaryInterpretation(interpreted, {
         kind: "retained_adaptation",
         title: "Retained adaptation under rising demand",
         meaning: "The athlete maintained output while demand continued rising.",
-        summarySentence: `You maintained the higher output structure through ${increaseText}${constraintSuffix}. This kind of progression window is difficult to replicate.`,
+        summarySentence: retainedSentence,
         strength: 0.94,
         labelImpact: interpreted.length ? "promotes" : "carries",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
@@ -2946,7 +2964,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "sustained_performance",
         title: "Sustained performance",
         meaning: "The athlete sustained the output structure while demand increased instead of giving ground back.",
-        summarySentence: `You established a solid workflow this program and maintained it with repeated weight increases. Sustaining and expanding output despite weight is high-level performance.`,
+        summarySentence: `You established a solid workflow this program and maintained it with repeated weight increases. Sustaining and expanding output despite weight increases is high-level performance.`,
         strength: 0.84,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "output_rise"],
@@ -2958,7 +2976,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "constraint_floor",
         title: "Workable floor under constraint",
         meaning: "The athlete maintained a usable output floor while the constraint and weight demand increased.",
-        summarySentence: `You maintained a solid output range${workingWithConstraintSuffix || constraintSuffix} while moving up in weight. Great workflow, great job.`,
+        summarySentence: `You maintained a solid output range${workingWithConstraintSuffix || constraintSuffix} and ${weightProgressionPhrase}. Great workflow, great job.`,
         strength: 0.86,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
@@ -2970,7 +2988,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "tradeoff_recovery",
         title: "Trade-off managed under higher demand",
         meaning: "The output fluctuations were tied to added demand rather than a loss of structure.",
-        summarySentence: `You maintained a solid output range${constraintSuffix}, with the only notable deviation coming from a trade-off for increased weight.`,
+        summarySentence: `You had a solid upward trajectory with weight increases until the gains made in weight led to a trade-off. This type of workflow is a sign of high-level progress.`,
         strength: 0.8,
         labelImpact: "supports",
         evidenceMarkerKinds: ["late_dip", "rebound", "weight_progression"],
@@ -3030,7 +3048,9 @@ const buildAISummaryInterpretedAchievements = (
         kind: "controlled_progression",
         title: "Controlled upward progression",
         meaning: "The graph stayed controlled while gradually moving in a positive direction.",
-        summarySentence: `With a gradual upward trend, you finished beyond where you started.`,
+        summarySentence: bestOutputProfile?.endsAtPeak
+          ? `With a gradual upward trend, you finished at your peak, beyond where you started.`
+          : `With a gradual upward trend, you finished beyond where you started.`,
         strength: 0.7,
         labelImpact: "supports",
         evidenceMarkerKinds: ["output_rise", "output_plateau"],
@@ -3056,7 +3076,9 @@ const buildAISummaryInterpretedAchievements = (
         kind: "controlled_progression",
         title: "Controlled upward drift",
         meaning: "The graph remained stable while gradually trending upward.",
-        summarySentence: `With a gradual upward trend, you finished at a stronger point than where you started. This is a good foundation to build from.`,
+        summarySentence: controlledProgressionProfile.endsAtPeak
+          ? `With a gradual upward trend, you finished at your peak, beyond where you started. This is a good foundation to build from.`
+          : `With a gradual upward trend, you finished at a stronger point than where you started. This is a good foundation to build from.`,
         strength: 0.72,
         labelImpact: "supports",
         evidenceMarkerKinds: ["output_rise", "output_plateau"],
@@ -3336,8 +3358,11 @@ const composeAISummarySlots = (
   }
 
   const usefulSecondary = secondaryInterpretations.find((item) => {
-    if (classification.label === "Exceptional Growth") return item.strength >= 0.9 || item.labelImpact !== "supports";
-    if (classification.label === "Moderate Growth") return item.strength >= 0.82 && item.kind !== primaryInterpretation?.kind;
+    if (classification.label === "Exceptional Growth") {
+      const primaryIsPrestige = primaryInterpretation?.kind === "dominant_baseline_separation" || primaryInterpretation?.kind === "explosive_continuity";
+      if (primaryIsPrestige && item.kind === "retained_adaptation") return false;
+      return !primaryIsPrestige && (item.strength >= 0.9 || item.labelImpact !== "supports");
+    }
     return false;
   });
 
