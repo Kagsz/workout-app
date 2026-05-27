@@ -3011,7 +3011,6 @@ const buildAISummaryInterpretedAchievements = (
   const relevantTradeoff = hasAISummaryRelevantTradeoff(scorecard, bestWeightProfile || bestOutputProfile);
   const significantWeightGain = scorecard.seriesProfiles.some(hasAISummarySignificantWeightGain);
   const weightProgressionPhrase = getAISummaryWeightProgressionPhrase(scorecard, bestWeightProfile);
-  const weightProgressionSeriesCount = scorecard.seriesProfiles.filter((profile) => profile.totalWeightIncrease > 0).length;
   const hasExerciseChange = scorecard.seriesProfiles.some((profile) => profile.hasExerciseChange);
   const largeRelativeGain = hasAISummaryLargeRelativeGain(bestOutputProfile);
   const dominantBaselineSeparation = hasAISummaryDominantBaselineSeparation(bestOutputProfile);
