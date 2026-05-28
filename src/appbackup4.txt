@@ -1770,6 +1770,7 @@ type AISummaryInterpretedAchievementKind =
   | "substantial_weight_tradeoff"
   | "constraint_work_area"
   | "strong_output_ceiling"
+  | "strong_output_floor"
   | "preserved_volatility"
   | "explosive_conditioning_climb"
   | "vertical_relaunch_conditioning"
@@ -2877,9 +2878,10 @@ const hasAISummarySustainedPerformancePattern = (scorecard: AISummaryScorecard, 
     return Math.max(largestDrop, outputValues[index - 1] - value);
   }, 0);
   const givebackFromPeak = target.peakOutput - target.endOutput;
-  const noMeaningfulGiveback = maxStepRegression <= 0.5 && givebackFromPeak <= 0.5;
+  const noMeaningfulGiveback = maxStepRegression <= 0.75 && givebackFromPeak <= 0.75;
+  const structureStayedIntact = belowBaselineCount <= 1 && target.endOutput >= target.startOutput;
 
-  return finishesPositive && hasDemandProgression && belowBaselineCount === 0 && noMeaningfulGiveback && !scorecard.hasLateDip && !scorecard.hasRebound;
+  return finishesPositive && hasDemandProgression && structureStayedIntact && noMeaningfulGiveback;
 };
 
 const hasAISummaryTightBaselineRange = (profile?: AISummarySeriesProfile | null) => {
@@ -2969,6 +2971,29 @@ const hasAISummaryPreservedVolatility = (scorecard: AISummaryScorecard, profile?
   const isMostlyFlatStructure = profile.isFlatOrControlled && profile.outputRange <= Math.max(1.25, Math.abs(profile.outputDelta) + 0.75);
 
   return demandProgressed && !collapsed && finishedNearStructure && notClearDecline && !isMostlyFlatStructure;
+};
+
+const hasAISummaryStrongOutputFloor = (profile?: AISummarySeriesProfile | null) => {
+  if (!profile || profile.points.length < 4) return false;
+  const retainedBaseline = profile.lowOutput >= profile.startOutput - 0.5;
+  const controlledRange = profile.outputRange <= Math.max(1.5, Math.abs(profile.outputDelta) + 1);
+  const finishHeld = profile.endOutput >= profile.startOutput - 0.25;
+  return retainedBaseline && controlledRange && finishHeld;
+};
+
+const hasAISummaryVisibleFluctuation = (profile?: AISummarySeriesProfile | null) =>
+  !!profile && profile.outputRange > Math.max(0.5, Math.abs(profile.outputDelta) + 0.25);
+
+const getAISummaryDemandDisciplinePayoff = (scorecard: AISummaryScorecard, variant: "workflow" | "discipline" = "workflow") => {
+  if (variant === "discipline") return "That type of discipline is what drives long-term progress.";
+  if (scorecard.hasConstraints) return "That level of structure under rising demand reflects excellent discipline.";
+  return "This style of workflow defines a great workout.";
+};
+
+const getAISummaryEscalationTierPhrase = (scorecard: AISummaryScorecard) => {
+  if (scorecard.maxConsecutiveWeightIncreaseCount >= 5) return "consecutive and substantial weight increases";
+  if (scorecard.maxConsecutiveWeightIncreaseCount >= 3) return "consecutive and impactful weight gains";
+  return "impactful weight increases";
 };
 
 const buildAISummaryInterpretedAchievements = (
@@ -3127,7 +3152,9 @@ const buildAISummaryInterpretedAchievements = (
         kind: "controlled_progression",
         title: "Controlled upward progression",
         meaning: "The conditioning output stayed compressed by the short time window while still moving upward.",
-        summarySentence: `Despite minor fluctuation, the overall trend moved gradually upward and finished at the highest point of the block.`,
+        summarySentence: hasAISummaryVisibleFluctuation(controlledProgressionProfile)
+          ? `Despite minor fluctuation, the overall trend moved gradually upward and finished at the highest point of the block.`
+          : `The overall trend moved gradually upward and finished at the highest point of the block.`,
         strength: 0.82,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["output_rise", "strong_finish"],
@@ -3139,7 +3166,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "constraint_work_area",
         title: "Solid work area under constraint",
         meaning: "The athlete preserved a controlled work area while moving through multiple weight increases under constraint demand.",
-        summarySentence: `You maintained a solid work area ${constraintPhrase || "under constraint"} while progressing through multiple weight increases. Great workflow, great job.`,
+        summarySentence: `You maintained a solid work area ${constraintPhrase || "under constraint"} while progressing through multiple weight increases. ${getAISummaryDemandDisciplinePayoff(scorecard, "discipline")}`,
         strength: 0.86,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["constraint_present", "weight_progression", "output_plateau"],
@@ -3151,7 +3178,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "substantial_weight_tradeoff",
         title: "Substantial weight increases with structure retained",
         meaning: "The athlete retained the structure of the block while the weight increases became a major part of the story.",
-        summarySentence: `You carved out a strong work area while making substantial weight increases. Retaining that structure with continually rising demand is what makes this performance stand out.`,
+        summarySentence: `You carved out a strong work area while making substantial weight increases. Retaining that structure as demand rose is what makes this performance stand out.`,
         strength: 0.88,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight", "late_dip"],
@@ -3163,7 +3190,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "sustained_performance",
         title: "Sustained performance",
         meaning: "The athlete sustained the output structure while demand increased instead of giving ground back.",
-        summarySentence: `You established a solid workflow this program and managed it through continual weight increases. That structure under rising demand reflects high-level performance.`,
+        summarySentence: `You established a solid workflow this program and managed it through continual weight increases. ${getAISummaryDemandDisciplinePayoff(scorecard, "discipline")}`,
         strength: 0.84,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "output_rise"],
@@ -3177,9 +3204,9 @@ const buildAISummaryInterpretedAchievements = (
         meaning: "The athlete maintained a usable output floor while the constraint and weight demand increased.",
         summarySentence: relevantTradeoff
           ? weightProgressionSeriesCount >= 2
-            ? `You maintained a solid output range with a late-program trade-off for a dual weight increase. Great workflow, great job.`
-            : `You maintained solid output ${constraintPhrase || "under constraint"} while increasing demand, until the final weight increase created a trade-off. Great work.`
-          : `You maintained a solid output range${workingWithConstraintSuffix || constraintSuffix} and ${weightProgressionPhrase}. Great workflow, great job.`,
+            ? `You maintained a solid output range with a late-program trade-off for a dual weight increase. ${getAISummaryDemandDisciplinePayoff(scorecard)}`
+            : `You maintained solid output ${constraintPhrase || "under constraint"} while increasing demand, until the final weight increase created a trade-off. ${getAISummaryDemandDisciplinePayoff(scorecard, "discipline")}`
+          : `You maintained a solid output range${workingWithConstraintSuffix || constraintSuffix} and ${weightProgressionPhrase}. ${getAISummaryDemandDisciplinePayoff(scorecard, "discipline")}`,
         strength: relevantTradeoff ? 0.88 : 0.86,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "constraint_present"],
@@ -3191,7 +3218,9 @@ const buildAISummaryInterpretedAchievements = (
         kind: "preserved_volatility",
         title: "Preserved structure through volatility",
         meaning: "The block moved through volatility without losing its working structure while weight gradually increased.",
-        summarySentence: `You moved through volatility and maintained a solid output range while gradually increasing weight.`,
+        summarySentence: relevantTradeoff
+          ? `You carved out a strong work area while controlling volatility through trade-offs.`
+          : `You moved through volatility and maintained a solid output range while gradually increasing weight.`,
         strength: 0.83,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["output_volatility", "weight_progression"],
@@ -3203,7 +3232,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "tradeoff_recovery",
         title: "Trade-off managed under higher demand",
         meaning: "The output fluctuations were tied to added demand rather than a loss of structure.",
-        summarySentence: `You had a solid upward trajectory with weight increases until the gains made in weight led to a trade-off. This type of workflow is a sign of high-level progress.`,
+        summarySentence: `You had a great upward trajectory with increased demand until that demand led to a trade-off. ${getAISummaryDemandDisciplinePayoff(scorecard)}`,
         strength: 0.8,
         labelImpact: "supports",
         evidenceMarkerKinds: ["late_dip", "rebound", "weight_progression"],
@@ -3217,19 +3246,24 @@ const buildAISummaryInterpretedAchievements = (
         meaning: "Adding weight while preserving conditioning-style output carries extra value.",
         summarySentence: preservedVolatility
           ? `Moving through volatility while progressing upward in weight during cardio is what defines this performance.`
-          : `Progressing upward in weight during cardio while preserving output is what defines this performance.`,
-        strength: 0.82,
+          : `This is a cardio-plus-weight read: progressing upward in weight while preserving conditioning output gives the exercise more value than the output line alone shows.`,
+        strength: 0.87,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
       });
     }
 
     if (!scorecard.hasConstraints && scorecard.hasRetainedOutputUnderWeight && significantWeightGain && bestOutputProfile?.isFlatOrControlled) {
+      const floorDominant = hasAISummaryStrongOutputFloor(bestOutputProfile);
       pushAISummaryInterpretation(interpreted, {
-        kind: "strong_output_ceiling",
-        title: "Strong output ceiling",
-        meaning: "The athlete established a strong output ceiling and held it while weight progressed.",
-        summarySentence: `You established a strong output ceiling and sustained it while progressing upward in weight. That combination reflects high-level consistency.`,
+        kind: floorDominant ? "strong_output_floor" : "strong_output_ceiling",
+        title: floorDominant ? "Strong output floor" : "Strong output ceiling",
+        meaning: floorDominant
+          ? "The athlete established a workable output floor and sustained it while weight progressed."
+          : "The athlete established a strong output ceiling and held it while weight progressed.",
+        summarySentence: floorDominant
+          ? `You established a workable floor and sustained it while progressing upward in weight. That combination reflects high-level consistency.`
+          : `You established a strong output ceiling and sustained it while progressing upward in weight. That combination reflects high-level consistency.`,
         strength: 0.84,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "output_plateau"],
@@ -3242,10 +3276,10 @@ const buildAISummaryInterpretedAchievements = (
         title: "Substantial weight increases",
         meaning: "The weight progression was substantial enough to shape how the graph should be read.",
         summarySentence: scorecard.hasConstraints
-          ? `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making consecutive and impactful weight gains" : "handling substantial weight increases"}. Handling that demand and output ${constraintPhrase || "under constraint"} is what makes this performance stand out.`
+          ? `You carved out a strong work area while ${getAISummaryEscalationTierPhrase(scorecard)}. Handling that demand and output ${constraintPhrase || "under constraint"} is what makes this performance stand out.`
           : scorecard.maxConsecutiveWeightIncreaseCount >= 5
-            ? `You established a workable floor and sustained it through consecutive impactful weight increases. That type of workflow reflects high-level effort.`
-            : `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making continual weight gains" : significantWeightGain ? "handling impactful weight increases" : "making meaningful weight gains"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
+            ? `You established a workable floor and sustained it through ${getAISummaryEscalationTierPhrase(scorecard)}. ${getAISummaryDemandDisciplinePayoff(scorecard)}`
+            : `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making consecutive and impactful weight gains" : significantWeightGain ? "handling impactful weight increases" : "making meaningful weight gains"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
         strength: 0.78,
         labelImpact: "supports",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
@@ -3271,7 +3305,7 @@ const buildAISummaryInterpretedAchievements = (
         meaning: "The athlete established a stable working range and maintained it while demand rose.",
         summarySentence: scorecard.totalWeightIncreaseCount <= 1
           ? `You established a stable output structure early and managed it while moving up in weight.`
-          : `You established a solid workflow this program and managed it through continual weight increases.`,
+          : `You established a solid workflow this program and managed it through continual weight increases. ${getAISummaryDemandDisciplinePayoff(scorecard, "discipline")}`,
         strength: 0.74,
         labelImpact: "supports",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression"],
@@ -3694,6 +3728,9 @@ const adjustAISummaryCloserForThemeRepetition = (closer: string, existingSlots: 
   const priorText = existingSlots.map((slot) => slot.text).join(" ").toLowerCase();
   const lowerCloser = closer.toLowerCase();
 
+  if (/\b(good|great|outstanding)\s+(job|work)\b[.!]?\s*$/.test(priorText)) return "";
+  if (/\bthis style of workflow defines a great workout\b/.test(priorText)) return "";
+  if (/\bthis type of discipline\b/.test(priorText)) return "";
   if (/\bwork\b/.test(lowerCloser) && /\bwork\b/.test(priorText)) return "Good job.";
   if (/\bsolid\b/.test(lowerCloser) && /\bsolid\b/.test(priorText)) return closer.replace(/Solid/i, "Good");
   if (/\bstrong\b/.test(lowerCloser) && /\bstrong\b/.test(priorText)) return "Great job.";
