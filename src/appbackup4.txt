@@ -1854,6 +1854,14 @@ type AISummaryStory = {
   needsStructuralExplanation: boolean;
 };
 
+type AISummarySlotPlan = {
+  allowSecondaryHighlight: boolean;
+  secondaryHighlightMinStrength: number;
+  allowFallbackHighlight: boolean;
+  allowStructuralExplanation: boolean;
+  allowCloser: boolean;
+};
+
 type AISummaryResolvedSlot = {
   kind: AISummarySlotKind;
   text: string;
@@ -2958,8 +2966,9 @@ const hasAISummaryPreservedVolatility = (scorecard: AISummaryScorecard, profile?
   const finishedNearStructure = end >= retainedFloor;
   const demandProgressed = scorecard.totalWeightIncreaseCount > 0 || profile.hasWeightProgression;
   const notClearDecline = profile.outputDelta >= -Math.max(0.75, profile.outputRange * 0.35);
+  const isMostlyFlatStructure = profile.isFlatOrControlled && profile.outputRange <= Math.max(1.25, Math.abs(profile.outputDelta) + 0.75);
 
-  return demandProgressed && !collapsed && finishedNearStructure && notClearDecline;
+  return demandProgressed && !collapsed && finishedNearStructure && notClearDecline && !isMostlyFlatStructure;
 };
 
 const buildAISummaryInterpretedAchievements = (
@@ -3019,7 +3028,7 @@ const buildAISummaryInterpretedAchievements = (
         title: "Dominant baseline separation",
         meaning: "The athlete created immediate distance from the starting baseline and kept operating from that higher level.",
         summarySentence: hasAISummaryLargeRelativeGain(bestOutputProfile) && bestOutputProfile.endOutput < bestOutputProfile.startOutput * 2 && bestOutputProfile.endOutput >= bestOutputProfile.startOutput * 1.65
-          ? `Your upward trajectory did not let up this program, nearly doubling your total output from your baseline at higher demands. This kind of progression${constraintSuffix ? `, especially ${constraintPhrase},` : ""} is textbook elite-tier progress.`
+          ? `Your upward trajectory did not let up this program, nearly doubling your total output from your baseline. This kind of progression${constraintSuffix ? `, especially ${constraintPhrase},` : ""} is textbook elite-tier progress.`
           : `You created major separation from your starting baseline and never let up. Doubling your output${scorecard.totalWeightIncreaseCount > 0 ? ` while handling ${significantWeightGain ? "significant weight increases" : "more weight"}` : ""} reflects textbook elite-tier progress.`,
         strength: 0.99,
         labelImpact: "carries",
@@ -3130,7 +3139,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "constraint_work_area",
         title: "Solid work area under constraint",
         meaning: "The athlete preserved a controlled work area while moving through multiple weight increases under constraint demand.",
-        summarySentence: `You maintained a solid work area ${constraintPhrase || "under constraint"} while moving through multiple weight increases. The final recovery reinforces the strength of the block.`,
+        summarySentence: `You maintained a solid work area ${constraintPhrase || "under constraint"} while progressing through multiple weight increases. Great workflow, great job.`,
         strength: 0.86,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["constraint_present", "weight_progression", "output_plateau"],
@@ -3142,7 +3151,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "substantial_weight_tradeoff",
         title: "Substantial weight increases with structure retained",
         meaning: "The athlete retained the structure of the block while the weight increases became a major part of the story.",
-        summarySentence: `You carved out a strong work area while making substantial weight increases. Each dip connects to rising demand, and retaining the overall structure is what makes this performance stand out.`,
+        summarySentence: `You carved out a strong work area while making substantial weight increases. Retaining that structure with continually rising demand is what makes this performance stand out.`,
         strength: 0.88,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight", "late_dip"],
@@ -3154,7 +3163,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "sustained_performance",
         title: "Sustained performance",
         meaning: "The athlete sustained the output structure while demand increased instead of giving ground back.",
-        summarySentence: `You established a solid workflow this program and maintained it with repeated weight increases. Sustaining structure while still expanding output through weight increases is high-level performance.`,
+        summarySentence: `You established a solid workflow this program and managed it through continual weight increases. That structure under rising demand reflects high-level performance.`,
         strength: 0.84,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "output_rise"],
@@ -3182,7 +3191,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "preserved_volatility",
         title: "Preserved structure through volatility",
         meaning: "The block moved through volatility without losing its working structure while weight gradually increased.",
-        summarySentence: `While moving through volatility, you maintained a solid output range while gradually increasing weight.`,
+        summarySentence: `You moved through volatility and maintained a solid output range while gradually increasing weight.`,
         strength: 0.83,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["output_volatility", "weight_progression"],
@@ -3207,8 +3216,8 @@ const buildAISummaryInterpretedAchievements = (
         title: "Weighted conditioning progress",
         meaning: "Adding weight while preserving conditioning-style output carries extra value.",
         summarySentence: preservedVolatility
-          ? `Moving through volatility while managing weight-involved cardio is what defines this performance.`
-          : `Managing weight-involved cardio while preserving output is what defines this performance.`,
+          ? `Moving through volatility while progressing upward in weight during cardio is what defines this performance.`
+          : `Progressing upward in weight during cardio while preserving output is what defines this performance.`,
         strength: 0.82,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
@@ -3234,7 +3243,9 @@ const buildAISummaryInterpretedAchievements = (
         meaning: "The weight progression was substantial enough to shape how the graph should be read.",
         summarySentence: scorecard.hasConstraints
           ? `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making consecutive and impactful weight gains" : "handling substantial weight increases"}. Handling that demand and output ${constraintPhrase || "under constraint"} is what makes this performance stand out.`
-          : `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 5 ? "making consecutive and impactful weight gains" : scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making consecutive weight gains" : significantWeightGain ? "handling substantial weight increases" : "making meaningful weight gains"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
+          : scorecard.maxConsecutiveWeightIncreaseCount >= 5
+            ? `You established a workable floor and sustained it through consecutive impactful weight increases. That type of workflow reflects high-level effort.`
+            : `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making continual weight gains" : significantWeightGain ? "handling impactful weight increases" : "making meaningful weight gains"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
         strength: 0.78,
         labelImpact: "supports",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
@@ -3260,7 +3271,7 @@ const buildAISummaryInterpretedAchievements = (
         meaning: "The athlete established a stable working range and maintained it while demand rose.",
         summarySentence: scorecard.totalWeightIncreaseCount <= 1
           ? `You established a stable output structure early and managed it while moving up in weight.`
-          : `You established a solid workflow this program and maintained it with repeated weight increases.`,
+          : `You established a solid workflow this program and managed it through continual weight increases.`,
         strength: 0.74,
         labelImpact: "supports",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression"],
@@ -3272,7 +3283,7 @@ const buildAISummaryInterpretedAchievements = (
         kind: "constraint_floor",
         title: "Solid output range under constraint",
         meaning: "The athlete maintained a controlled working range while handling constraint demand.",
-        summarySentence: `While working with ${getAISummaryConstraintTags(scorecard).length > 1 ? `${formatAISummaryCompactConstraintTagList(getAISummaryConstraintTags(scorecard))} constraints` : `a ${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraint`}, you maintained a solid output range throughout the program. Great work.`,
+        summarySentence: `Under ${getAISummaryConstraintTags(scorecard).length > 1 ? `${formatAISummaryCompactConstraintTagList(getAISummaryConstraintTags(scorecard))} constraints` : `a ${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraint`}, you maintained a solid output range throughout the program. Great work.`,
         strength: 0.73,
         labelImpact: "supports",
         evidenceMarkerKinds: ["constraint_present", "output_plateau"],
@@ -3436,6 +3447,97 @@ const buildAISummaryHighlightSentence = (highlight: AISummaryHighlight, scorecar
 
   return detail || title;
 };
+
+const getAISummarySlotPlan = (classification: AISummaryClassification, story: AISummaryStory): AISummarySlotPlan => {
+  const basePlan: AISummarySlotPlan = {
+    allowSecondaryHighlight: false,
+    secondaryHighlightMinStrength: 0.9,
+    allowFallbackHighlight: classification.label === "Exceptional Growth" || classification.label === "Moderate Growth",
+    allowStructuralExplanation: story.needsStructuralExplanation,
+    allowCloser: classification.label !== "Contextual Decline",
+  };
+
+  if (classification.label === "Exceptional Growth") {
+    return {
+      ...basePlan,
+      allowSecondaryHighlight: true,
+      secondaryHighlightMinStrength:
+        story.identity === "stacked_progression" ||
+        story.identity === "synchronized_advancement" ||
+        story.identity === "constraint_progression"
+          ? 0.86
+          : 0.92,
+      allowFallbackHighlight: true,
+      allowStructuralExplanation: story.needsStructuralExplanation,
+      allowCloser: true,
+    };
+  }
+
+  if (classification.label === "Moderate Growth") {
+    return {
+      ...basePlan,
+      allowSecondaryHighlight: false,
+      secondaryHighlightMinStrength: 0.78,
+      allowFallbackHighlight: true,
+      allowStructuralExplanation: story.needsStructuralExplanation,
+      allowCloser: true,
+    };
+  }
+
+  if (classification.label === "Stable Growth") {
+    return {
+      ...basePlan,
+      allowFallbackHighlight: false,
+      allowStructuralExplanation: story.needsStructuralExplanation,
+      allowCloser: false,
+    };
+  }
+
+  return {
+    ...basePlan,
+    allowFallbackHighlight: false,
+    allowStructuralExplanation: true,
+    allowCloser: false,
+  };
+};
+
+const isAISummaryPrestigeInterpretation = (interpretation?: AISummaryInterpretedAchievement) =>
+  !!interpretation &&
+  (
+    interpretation.kind === "dominant_baseline_separation" ||
+    interpretation.kind === "explosive_continuity" ||
+    interpretation.kind === "escalating_constrained_progression" ||
+    interpretation.kind === "explosive_constrained_progression" ||
+    interpretation.kind === "explosive_conditioning_climb" ||
+    interpretation.kind === "vertical_relaunch_conditioning"
+  );
+
+const selectAISummarySecondarySlotCandidate = (
+  classification: AISummaryClassification,
+  slotPlan: AISummarySlotPlan,
+  primaryInterpretation: AISummaryInterpretedAchievement | undefined,
+  secondaryInterpretations: AISummaryInterpretedAchievement[]
+) => {
+  if (!slotPlan.allowSecondaryHighlight) return undefined;
+
+  const primaryIsPrestige = isAISummaryPrestigeInterpretation(primaryInterpretation);
+
+  return secondaryInterpretations.find((item) => {
+    if (primaryIsPrestige && item.kind === "retained_adaptation") return false;
+    if (classification.label === "Exceptional Growth") {
+      return !primaryIsPrestige && (item.strength >= slotPlan.secondaryHighlightMinStrength || item.labelImpact !== "supports");
+    }
+    return item.strength >= slotPlan.secondaryHighlightMinStrength;
+  });
+};
+
+const normalizeAISummarySlotText = (text: string) =>
+  text
+    .replace(/\bThe clearest (highlight|win) was\b/gi, "")
+    .replace(/\bdouble ([A-Z]+)\/\1 constraints\b/g, "double $1 constraints")
+    .replace(/\bthe read pointed upward\b/gi, "the progression stayed positive")
+    .replace(/\s+/g, " ")
+    .trim();
 
 const locateAISummaryStory = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryStory => {
   if (classification.label === "Exceptional Growth") {
@@ -3609,51 +3711,61 @@ const composeAISummarySlots = (
   highlights: AISummaryHighlight[]
 ): AISummaryResolvedSlot[] => {
   const slots: AISummaryResolvedSlot[] = [];
+  const slotPlan = getAISummarySlotPlan(classification, story);
   const primaryAchievement = achievements[0];
   const primaryInterpretation = interpretedAchievements[0];
   const secondaryInterpretations = interpretedAchievements.slice(1);
   const primaryHighlight = highlights[0];
 
-  slots.push(buildAISummaryOpeningSlot(scorecard, classification, story));
+  const addSlot = (slot: AISummaryResolvedSlot | null | undefined) => {
+    if (!slot?.text.trim()) return;
+    const normalizedText = normalizeAISummarySlotText(slot.text);
+    if (!normalizedText) return;
+    slots.push({ ...slot, text: normalizedText });
+  };
+
+  addSlot(buildAISummaryOpeningSlot(scorecard, classification, story));
 
   const achievementSentence = primaryInterpretation?.summarySentence || buildAISummaryAchievementSentence(scorecard, classification, primaryAchievement);
   if (achievementSentence) {
-    slots.push({
+    addSlot({
       kind: "dominant_achievement",
       text: achievementSentence,
       importance: primaryInterpretation?.strength || primaryAchievement?.strength || 0.7,
     });
   }
 
-  const usefulSecondary = secondaryInterpretations.find((item) => {
-    if (classification.label === "Exceptional Growth") {
-      const primaryIsPrestige = primaryInterpretation?.kind === "dominant_baseline_separation" || primaryInterpretation?.kind === "explosive_continuity" || primaryInterpretation?.kind === "escalating_constrained_progression" || primaryInterpretation?.kind === "explosive_constrained_progression" || primaryInterpretation?.kind === "explosive_conditioning_climb" || primaryInterpretation?.kind === "vertical_relaunch_conditioning";
-      if (primaryIsPrestige && item.kind === "retained_adaptation") return false;
-      return !primaryIsPrestige && (item.strength >= 0.9 || item.labelImpact !== "supports");
-    }
-    return false;
-  });
+  const usefulSecondary = selectAISummarySecondarySlotCandidate(
+    classification,
+    slotPlan,
+    primaryInterpretation,
+    secondaryInterpretations
+  );
 
   if (usefulSecondary && usefulSecondary.summarySentence !== achievementSentence) {
-    slots.push({ kind: "highlight", text: usefulSecondary.summarySentence, importance: usefulSecondary.strength });
-  } else if (!primaryInterpretation && shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
+    addSlot({ kind: "highlight", text: usefulSecondary.summarySentence, importance: usefulSecondary.strength });
+  } else if (slotPlan.allowFallbackHighlight && !primaryInterpretation && shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
     const highlightText = buildAISummaryHighlightSentence(primaryHighlight, scorecard);
     if (highlightText && highlightText !== achievementSentence) {
-      slots.push({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
+      addSlot({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
     }
   }
 
-  const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story, interpretedAchievements);
-  if (structuralSentence) {
-    slots.push({
-      kind: classification.label === "Contextual Decline" || classification.label === "Stable Growth" ? "structural_explanation" : "supporting_context",
-      text: structuralSentence,
-      importance: 0.58,
-    });
+  if (slotPlan.allowStructuralExplanation) {
+    const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story, interpretedAchievements);
+    if (structuralSentence) {
+      addSlot({
+        kind: classification.label === "Contextual Decline" || classification.label === "Stable Growth" ? "structural_explanation" : "supporting_context",
+        text: structuralSentence,
+        importance: 0.58,
+      });
+    }
   }
 
-  const closer = adjustAISummaryCloserForThemeRepetition(getAISummaryCloserText(scorecard, classification, interpretedAchievements), slots);
-  if (closer) slots.push({ kind: "closer", text: closer, importance: 0.35 });
+  if (slotPlan.allowCloser) {
+    const closer = adjustAISummaryCloserForThemeRepetition(getAISummaryCloserText(scorecard, classification, interpretedAchievements), slots);
+    if (closer) addSlot({ kind: "closer", text: closer, importance: 0.35 });
+  }
 
   const seen = new Set<string>();
   return slots.filter((slot) => {
@@ -3668,7 +3780,6 @@ const composeAISummarySlots = (
     return true;
   });
 };
-
 
 const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) => {
   const sentence = slots
@@ -3686,14 +3797,6 @@ const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) => {
     .map((slot) => slot.text.trim())
     .filter(Boolean)
     .join(" ")
-    .replace(/\bThe graph rose early, dipped[^.]*\./gi, "")
-    .replace(/\bThe graph increased early, dipped[^.]*\./gi, "")
-    .replace(/\bThe clearest (highlight|win) was\b/gi, "")
-    .replace(/This graph reads more like a true consistency check than a progression-focused block\.?\s*/gi, "")
-    .replace(/which can still be useful for future comparison\.?/gi, "")
-    .replace(/\bdouble ([A-Z]+)\/\1 constraints\b/g, "double $1 constraints")
-    .replace(/\bthe read pointed upward\b/gi, "the progression stayed positive")
-    .replace(/\bthen\b/gi, "")
     .replace(/You performed well here\. Despite a hiccup, you performed well here\./g, "Despite a hiccup, you performed well here.")
     .replace(/\s+/g, " ")
     .trim();
@@ -4595,6 +4698,12 @@ export default function App() {
   const selectedBlockIndex = selectedRoutine?.blocks.findIndex((block) => block.id === selectedBlock?.id) ?? -1;
   const canGoToPreviousBlock = selectedBlockIndex > 0;
   const canGoToNextBlock = !!selectedRoutine && selectedBlockIndex >= 0 && selectedBlockIndex < selectedRoutine.blocks.length - 1;
+  const selectedGraphPositionLabel =
+    selectedRoutine && selectedBlockIndex >= 0
+      ? `Graph ${selectedBlockIndex + 1} of ${selectedRoutine.blocks.length}`
+      : "Graph";
+  const previousGraphBlockTitle = selectedRoutine && canGoToPreviousBlock ? selectedRoutine.blocks[selectedBlockIndex - 1]?.title : "";
+  const nextGraphBlockTitle = selectedRoutine && canGoToNextBlock ? selectedRoutine.blocks[selectedBlockIndex + 1]?.title : "";
 
   const stepGraphBlock = (direction: "previous" | "next") => {
     if (!selectedRoutine || selectedBlockIndex < 0) return;
@@ -5507,6 +5616,31 @@ export default function App() {
                       <ToggleButton active={graphAxis === "session"} onClick={() => setGraphAxis("session")}>By Session #</ToggleButton>
                     </div>
 
+                    {selectedRoutine.blocks.length > 1 ? (
+                      <div className="hidden sm:flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("previous")}
+                          disabled={!canGoToPreviousBlock}
+                          className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                        >
+                          ← Previous
+                        </button>
+                        <div className="min-w-0 text-center">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{selectedGraphPositionLabel}</div>
+                          <div className="truncate text-sm font-semibold text-zinc-900">{selectedBlock.title}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("next")}
+                          disabled={!canGoToNextBlock}
+                          className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    ) : null}
+
                     <div className="graph-ui-lock space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : graphLegendItems.length === 1 ? 96 : 76 }}>
                         <style>{GRAPH_UI_LOCK_CSS}</style>
@@ -5721,6 +5855,33 @@ export default function App() {
                     </div>
 
                     <GraphInsightCard insight={generatedWorkoutSummaryInsight} />
+
+                    {selectedRoutine.blocks.length > 1 ? (
+                      <div className="sticky bottom-3 z-20 hidden sm:flex items-center justify-between gap-3 rounded-2xl border border-zinc-300 bg-white/95 p-3 shadow-lg backdrop-blur">
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("previous")}
+                          disabled={!canGoToPreviousBlock}
+                          className="rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                          title={previousGraphBlockTitle ? `Previous: ${previousGraphBlockTitle}` : "Previous graph"}
+                        >
+                          ← Previous Graph
+                        </button>
+                        <div className="min-w-0 text-center">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{selectedGraphPositionLabel}</div>
+                          <div className="truncate text-sm font-semibold text-zinc-900">{selectedBlock.title}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("next")}
+                          disabled={!canGoToNextBlock}
+                          className="rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                          title={nextGraphBlockTitle ? `Next: ${nextGraphBlockTitle}` : "Next graph"}
+                        >
+                          Next Graph →
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </SectionCard>
               )}
