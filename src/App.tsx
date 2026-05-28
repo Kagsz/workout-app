@@ -2981,13 +2981,6 @@ const hasAISummaryStrongOutputFloor = (profile?: AISummarySeriesProfile | null) 
   return retainedBaseline && controlledRange && finishHeld;
 };
 
-const hasAISummaryStrongOutputCeiling = (profile?: AISummarySeriesProfile | null) => {
-  if (!profile || profile.points.length < 4) return false;
-  const meaningfulPeak = profile.peakOutput >= profile.startOutput + Math.max(1.25, profile.outputRange * 0.45);
-  const retainedPeak = profile.endOutput >= profile.peakOutput - Math.max(0.75, profile.outputRange * 0.25);
-  return meaningfulPeak && retainedPeak && !hasAISummaryStrongOutputFloor(profile);
-};
-
 const hasAISummaryVisibleFluctuation = (profile?: AISummarySeriesProfile | null) =>
   !!profile && profile.outputRange > Math.max(0.5, Math.abs(profile.outputDelta) + 0.25);
 
