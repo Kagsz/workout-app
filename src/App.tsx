@@ -1854,6 +1854,14 @@ type AISummaryStory = {
   needsStructuralExplanation: boolean;
 };
 
+type AISummarySlotPlan = {
+  allowSecondaryHighlight: boolean;
+  secondaryHighlightMinStrength: number;
+  allowFallbackHighlight: boolean;
+  allowStructuralExplanation: boolean;
+  allowCloser: boolean;
+};
+
 type AISummaryResolvedSlot = {
   kind: AISummarySlotKind;
   text: string;
@@ -3440,6 +3448,97 @@ const buildAISummaryHighlightSentence = (highlight: AISummaryHighlight, scorecar
   return detail || title;
 };
 
+const getAISummarySlotPlan = (classification: AISummaryClassification, story: AISummaryStory): AISummarySlotPlan => {
+  const basePlan: AISummarySlotPlan = {
+    allowSecondaryHighlight: false,
+    secondaryHighlightMinStrength: 0.9,
+    allowFallbackHighlight: classification.label === "Exceptional Growth" || classification.label === "Moderate Growth",
+    allowStructuralExplanation: story.needsStructuralExplanation,
+    allowCloser: classification.label !== "Contextual Decline",
+  };
+
+  if (classification.label === "Exceptional Growth") {
+    return {
+      ...basePlan,
+      allowSecondaryHighlight: true,
+      secondaryHighlightMinStrength:
+        story.identity === "stacked_progression" ||
+        story.identity === "synchronized_advancement" ||
+        story.identity === "constraint_progression"
+          ? 0.86
+          : 0.92,
+      allowFallbackHighlight: true,
+      allowStructuralExplanation: story.needsStructuralExplanation,
+      allowCloser: true,
+    };
+  }
+
+  if (classification.label === "Moderate Growth") {
+    return {
+      ...basePlan,
+      allowSecondaryHighlight: false,
+      secondaryHighlightMinStrength: 0.78,
+      allowFallbackHighlight: true,
+      allowStructuralExplanation: story.needsStructuralExplanation,
+      allowCloser: true,
+    };
+  }
+
+  if (classification.label === "Stable Growth") {
+    return {
+      ...basePlan,
+      allowFallbackHighlight: false,
+      allowStructuralExplanation: story.needsStructuralExplanation,
+      allowCloser: false,
+    };
+  }
+
+  return {
+    ...basePlan,
+    allowFallbackHighlight: false,
+    allowStructuralExplanation: true,
+    allowCloser: false,
+  };
+};
+
+const isAISummaryPrestigeInterpretation = (interpretation?: AISummaryInterpretedAchievement) =>
+  !!interpretation &&
+  (
+    interpretation.kind === "dominant_baseline_separation" ||
+    interpretation.kind === "explosive_continuity" ||
+    interpretation.kind === "escalating_constrained_progression" ||
+    interpretation.kind === "explosive_constrained_progression" ||
+    interpretation.kind === "explosive_conditioning_climb" ||
+    interpretation.kind === "vertical_relaunch_conditioning"
+  );
+
+const selectAISummarySecondarySlotCandidate = (
+  classification: AISummaryClassification,
+  slotPlan: AISummarySlotPlan,
+  primaryInterpretation: AISummaryInterpretedAchievement | undefined,
+  secondaryInterpretations: AISummaryInterpretedAchievement[]
+) => {
+  if (!slotPlan.allowSecondaryHighlight) return undefined;
+
+  const primaryIsPrestige = isAISummaryPrestigeInterpretation(primaryInterpretation);
+
+  return secondaryInterpretations.find((item) => {
+    if (primaryIsPrestige && item.kind === "retained_adaptation") return false;
+    if (classification.label === "Exceptional Growth") {
+      return !primaryIsPrestige && (item.strength >= slotPlan.secondaryHighlightMinStrength || item.labelImpact !== "supports");
+    }
+    return item.strength >= slotPlan.secondaryHighlightMinStrength;
+  });
+};
+
+const normalizeAISummarySlotText = (text: string) =>
+  text
+    .replace(/\bThe clearest (highlight|win) was\b/gi, "")
+    .replace(/\bdouble ([A-Z]+)\/\1 constraints\b/g, "double $1 constraints")
+    .replace(/\bthe read pointed upward\b/gi, "the progression stayed positive")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const locateAISummaryStory = (scorecard: AISummaryScorecard, classification: AISummaryClassification): AISummaryStory => {
   if (classification.label === "Exceptional Growth") {
     if (scorecard.hasRetainedOutputUnderWeight && scorecard.hasConstraints) {
@@ -3612,51 +3711,61 @@ const composeAISummarySlots = (
   highlights: AISummaryHighlight[]
 ): AISummaryResolvedSlot[] => {
   const slots: AISummaryResolvedSlot[] = [];
+  const slotPlan = getAISummarySlotPlan(classification, story);
   const primaryAchievement = achievements[0];
   const primaryInterpretation = interpretedAchievements[0];
   const secondaryInterpretations = interpretedAchievements.slice(1);
   const primaryHighlight = highlights[0];
 
-  slots.push(buildAISummaryOpeningSlot(scorecard, classification, story));
+  const addSlot = (slot: AISummaryResolvedSlot | null | undefined) => {
+    if (!slot?.text.trim()) return;
+    const normalizedText = normalizeAISummarySlotText(slot.text);
+    if (!normalizedText) return;
+    slots.push({ ...slot, text: normalizedText });
+  };
+
+  addSlot(buildAISummaryOpeningSlot(scorecard, classification, story));
 
   const achievementSentence = primaryInterpretation?.summarySentence || buildAISummaryAchievementSentence(scorecard, classification, primaryAchievement);
   if (achievementSentence) {
-    slots.push({
+    addSlot({
       kind: "dominant_achievement",
       text: achievementSentence,
       importance: primaryInterpretation?.strength || primaryAchievement?.strength || 0.7,
     });
   }
 
-  const usefulSecondary = secondaryInterpretations.find((item) => {
-    if (classification.label === "Exceptional Growth") {
-      const primaryIsPrestige = primaryInterpretation?.kind === "dominant_baseline_separation" || primaryInterpretation?.kind === "explosive_continuity" || primaryInterpretation?.kind === "escalating_constrained_progression" || primaryInterpretation?.kind === "explosive_constrained_progression" || primaryInterpretation?.kind === "explosive_conditioning_climb" || primaryInterpretation?.kind === "vertical_relaunch_conditioning";
-      if (primaryIsPrestige && item.kind === "retained_adaptation") return false;
-      return !primaryIsPrestige && (item.strength >= 0.9 || item.labelImpact !== "supports");
-    }
-    return false;
-  });
+  const usefulSecondary = selectAISummarySecondarySlotCandidate(
+    classification,
+    slotPlan,
+    primaryInterpretation,
+    secondaryInterpretations
+  );
 
   if (usefulSecondary && usefulSecondary.summarySentence !== achievementSentence) {
-    slots.push({ kind: "highlight", text: usefulSecondary.summarySentence, importance: usefulSecondary.strength });
-  } else if (!primaryInterpretation && shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
+    addSlot({ kind: "highlight", text: usefulSecondary.summarySentence, importance: usefulSecondary.strength });
+  } else if (slotPlan.allowFallbackHighlight && !primaryInterpretation && shouldUseAISummaryHighlightSlot(classification, primaryHighlight)) {
     const highlightText = buildAISummaryHighlightSentence(primaryHighlight, scorecard);
     if (highlightText && highlightText !== achievementSentence) {
-      slots.push({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
+      addSlot({ kind: "highlight", text: highlightText, importance: primaryHighlight.strength });
     }
   }
 
-  const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story, interpretedAchievements);
-  if (structuralSentence) {
-    slots.push({
-      kind: classification.label === "Contextual Decline" || classification.label === "Stable Growth" ? "structural_explanation" : "supporting_context",
-      text: structuralSentence,
-      importance: 0.58,
-    });
+  if (slotPlan.allowStructuralExplanation) {
+    const structuralSentence = buildAISummaryStructuralSentence(scorecard, classification, story, interpretedAchievements);
+    if (structuralSentence) {
+      addSlot({
+        kind: classification.label === "Contextual Decline" || classification.label === "Stable Growth" ? "structural_explanation" : "supporting_context",
+        text: structuralSentence,
+        importance: 0.58,
+      });
+    }
   }
 
-  const closer = adjustAISummaryCloserForThemeRepetition(getAISummaryCloserText(scorecard, classification, interpretedAchievements), slots);
-  if (closer) slots.push({ kind: "closer", text: closer, importance: 0.35 });
+  if (slotPlan.allowCloser) {
+    const closer = adjustAISummaryCloserForThemeRepetition(getAISummaryCloserText(scorecard, classification, interpretedAchievements), slots);
+    if (closer) addSlot({ kind: "closer", text: closer, importance: 0.35 });
+  }
 
   const seen = new Set<string>();
   return slots.filter((slot) => {
@@ -3671,7 +3780,6 @@ const composeAISummarySlots = (
     return true;
   });
 };
-
 
 const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) => {
   const sentence = slots
@@ -3689,14 +3797,6 @@ const cleanupAISummaryText = (slots: AISummaryResolvedSlot[]) => {
     .map((slot) => slot.text.trim())
     .filter(Boolean)
     .join(" ")
-    .replace(/\bThe graph rose early, dipped[^.]*\./gi, "")
-    .replace(/\bThe graph increased early, dipped[^.]*\./gi, "")
-    .replace(/\bThe clearest (highlight|win) was\b/gi, "")
-    .replace(/This graph reads more like a true consistency check than a progression-focused block\.?\s*/gi, "")
-    .replace(/which can still be useful for future comparison\.?/gi, "")
-    .replace(/\bdouble ([A-Z]+)\/\1 constraints\b/g, "double $1 constraints")
-    .replace(/\bthe read pointed upward\b/gi, "the progression stayed positive")
-    .replace(/\bthen\b/gi, "")
     .replace(/You performed well here\. Despite a hiccup, you performed well here\./g, "Despite a hiccup, you performed well here.")
     .replace(/\s+/g, " ")
     .trim();
@@ -4598,6 +4698,12 @@ export default function App() {
   const selectedBlockIndex = selectedRoutine?.blocks.findIndex((block) => block.id === selectedBlock?.id) ?? -1;
   const canGoToPreviousBlock = selectedBlockIndex > 0;
   const canGoToNextBlock = !!selectedRoutine && selectedBlockIndex >= 0 && selectedBlockIndex < selectedRoutine.blocks.length - 1;
+  const selectedGraphPositionLabel =
+    selectedRoutine && selectedBlockIndex >= 0
+      ? `Graph ${selectedBlockIndex + 1} of ${selectedRoutine.blocks.length}`
+      : "Graph";
+  const previousGraphBlockTitle = selectedRoutine && canGoToPreviousBlock ? selectedRoutine.blocks[selectedBlockIndex - 1]?.title : "";
+  const nextGraphBlockTitle = selectedRoutine && canGoToNextBlock ? selectedRoutine.blocks[selectedBlockIndex + 1]?.title : "";
 
   const stepGraphBlock = (direction: "previous" | "next") => {
     if (!selectedRoutine || selectedBlockIndex < 0) return;
@@ -5510,6 +5616,31 @@ export default function App() {
                       <ToggleButton active={graphAxis === "session"} onClick={() => setGraphAxis("session")}>By Session #</ToggleButton>
                     </div>
 
+                    {selectedRoutine.blocks.length > 1 ? (
+                      <div className="hidden sm:flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("previous")}
+                          disabled={!canGoToPreviousBlock}
+                          className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                        >
+                          ← Previous
+                        </button>
+                        <div className="min-w-0 text-center">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{selectedGraphPositionLabel}</div>
+                          <div className="truncate text-sm font-semibold text-zinc-900">{selectedBlock.title}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("next")}
+                          disabled={!canGoToNextBlock}
+                          className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    ) : null}
+
                     <div className="graph-ui-lock space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="graph-select-none" style={{ minHeight: graphLegendItems.length > 2 ? 112 : graphLegendItems.length === 1 ? 96 : 76 }}>
                         <style>{GRAPH_UI_LOCK_CSS}</style>
@@ -5724,6 +5855,33 @@ export default function App() {
                     </div>
 
                     <GraphInsightCard insight={generatedWorkoutSummaryInsight} />
+
+                    {selectedRoutine.blocks.length > 1 ? (
+                      <div className="sticky bottom-3 z-20 hidden sm:flex items-center justify-between gap-3 rounded-2xl border border-zinc-300 bg-white/95 p-3 shadow-lg backdrop-blur">
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("previous")}
+                          disabled={!canGoToPreviousBlock}
+                          className="rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                          title={previousGraphBlockTitle ? `Previous: ${previousGraphBlockTitle}` : "Previous graph"}
+                        >
+                          ← Previous Graph
+                        </button>
+                        <div className="min-w-0 text-center">
+                          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{selectedGraphPositionLabel}</div>
+                          <div className="truncate text-sm font-semibold text-zinc-900">{selectedBlock.title}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => stepGraphBlock("next")}
+                          disabled={!canGoToNextBlock}
+                          className="rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-35"
+                          title={nextGraphBlockTitle ? `Next: ${nextGraphBlockTitle}` : "Next graph"}
+                        >
+                          Next Graph →
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </SectionCard>
               )}
