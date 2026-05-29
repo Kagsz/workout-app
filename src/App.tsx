@@ -3794,8 +3794,6 @@ const getAISummaryCloserText = (
 const adjustAISummaryCloserForThemeRepetition = (closer: string, existingSlots: AISummaryResolvedSlot[]) => {
   if (!closer) return closer;
   const priorText = existingSlots.map((slot) => slot.text).join(" ").toLowerCase();
-  const lowerCloser = closer.toLowerCase();
-
   if (/\b(good|great|outstanding)\s+(job|work)\b[.!]?\s*$/.test(priorText)) return "";
   if (/\b(this style of workflow defines a great workout|this type of discipline|structure under rising demand reflects excellent discipline)\b/.test(priorText)) return "Good job.";
 
