@@ -2881,9 +2881,7 @@ const hasAISummarySustainedPerformancePattern = (scorecard: AISummaryScorecard, 
   const noMeaningfulGiveback = maxStepRegression <= 0.75 && givebackFromPeak <= 0.75;
   const structureStayedIntact = belowBaselineCount <= 1 && target.endOutput >= target.startOutput;
 
-  const sustainedRun = hasAISummarySustainedRun(target);
-
-  return hasDemandProgression && (finishesPositive || sustainedRun) && structureStayedIntact && (noMeaningfulGiveback || sustainedRun);
+  return finishesPositive && hasDemandProgression && structureStayedIntact && noMeaningfulGiveback && !scorecard.hasLateDip && !scorecard.hasRebound;
 };
 
 const hasAISummaryTightBaselineRange = (profile?: AISummarySeriesProfile | null) => {
@@ -2975,30 +2973,41 @@ const hasAISummaryPreservedVolatility = (scorecard: AISummaryScorecard, profile?
   return demandProgressed && !collapsed && finishedNearStructure && notClearDecline && !isMostlyFlatStructure;
 };
 
-const hasAISummaryStrongOutputFloor = (profile?: AISummarySeriesProfile | null) => {
+const hasAISummarySharedOutputLevel = (scorecard: AISummaryScorecard, tolerance = 0.35) => {
+  if (scorecard.seriesProfiles.length < 2) return false;
+  const endValues = scorecard.seriesProfiles.map((profile) => profile.endOutput);
+  const highestEnd = Math.max(...endValues);
+  const lowestEnd = Math.min(...endValues);
+  return highestEnd - lowestEnd <= tolerance;
+};
+
+const hasAISummaryStrongOutputFloor = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
   if (!profile || profile.points.length < 4) return false;
   const retainedBaseline = profile.lowOutput >= profile.startOutput - 0.5;
   const controlledRange = profile.outputRange <= Math.max(1.5, Math.abs(profile.outputDelta) + 1);
   const finishHeld = profile.endOutput >= profile.startOutput - 0.25;
-  return retainedBaseline && controlledRange && finishHeld;
+  const sharedLevel = hasAISummarySharedOutputLevel(scorecard);
+  const settledFromAbove = profile.startOutput > profile.endOutput + 0.25 || profile.peakOutput > profile.endOutput + 0.75;
+  return sharedLevel && retainedBaseline && controlledRange && finishHeld && settledFromAbove;
 };
 
-const hasAISummarySustainedRun = (profile?: AISummarySeriesProfile | null, minimumRunLength = 5) => {
-  if (!profile || profile.points.length < minimumRunLength) return false;
-  const values = profile.points.map((point) => point.y);
+const hasAISummaryStrongOutputCeiling = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
+  if (!profile || profile.points.length < 4) return false;
+  const sharedLevel = hasAISummarySharedOutputLevel(scorecard);
+  const reachedFromBelow = profile.endOutput >= profile.startOutput + 0.25 || profile.peakOutput >= profile.startOutput + 0.75;
+  const heldNearPeak = profile.endOutput >= profile.peakOutput - 0.75;
+  return sharedLevel && reachedFromBelow && heldNearPeak;
+};
 
-  for (let start = 0; start <= values.length - minimumRunLength; start += 1) {
-    const run = values.slice(start, start + minimumRunLength);
-    const runStart = run[0];
-    const runEnd = run[run.length - 1];
-    const runLow = Math.min(...run);
-    const runHigh = Math.max(...run);
-    const sustainedFloor = runLow >= runStart - 0.5 && runEnd >= runStart - 0.25;
-    const sustainedCeiling = runHigh - runLow <= Math.max(1.25, Math.abs(runEnd - runStart) + 0.75);
-    if (sustainedFloor && sustainedCeiling) return true;
-  }
+const getAISummaryWorkRangeTier = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
+  if (!profile) return "work range";
+  const weightMomentum = scorecard.maxConsecutiveWeightIncreaseCount >= 5 || scorecard.totalWeightIncreaseCount >= 5;
+  const strongConstraintContext = scorecard.hasConstraints && scorecard.totalWeightIncreaseCount >= 3;
+  const highRetention = profile.lowOutput >= profile.startOutput - 0.5 && profile.endOutput >= profile.startOutput - 0.25;
 
-  return false;
+  if (highRetention && (weightMomentum || strongConstraintContext)) return "elite work range";
+  if (highRetention || scorecard.totalWeightIncreaseCount >= 3) return "pronounced work range";
+  return "work range";
 };
 
 const hasAISummaryVisibleFluctuation = (profile?: AISummarySeriesProfile | null) =>
@@ -3223,7 +3232,7 @@ const buildAISummaryInterpretedAchievements = (
         title: "Sustained performance",
         meaning: "The athlete sustained the output structure while demand increased instead of giving ground back.",
         summarySentence: joinAISummarySentences(
-          `You established a sustained work zone and managed it through continual weight increases.`,
+          `You established a sustained progression pattern and managed it through continual weight increases.`,
           getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
         ),
         strength: 0.84,
@@ -3248,7 +3257,7 @@ const buildAISummaryInterpretedAchievements = (
                 getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
               )
           : joinAISummarySentences(
-              `You maintained a solid output range${workingWithConstraintSuffix || constraintSuffix} and ${weightProgressionPhrase}.`,
+              `You maintained a ${getAISummaryWorkRangeTier(scorecard, bestOutputProfile)}${workingWithConstraintSuffix || constraintSuffix} while ${weightProgressionPhrase}.`,
               getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
             ),
         strength: relevantTradeoff ? 0.88 : 0.86,
@@ -3277,7 +3286,7 @@ const buildAISummaryInterpretedAchievements = (
         title: "Trade-off managed under higher demand",
         meaning: "The output fluctuations were tied to added demand rather than a loss of structure.",
         summarySentence: joinAISummarySentences(
-          `You had a great upward trajectory with increased demand until that demand led to a trade-off.`,
+          `You had a great upward trajectory while increasing demand until that demand led to a trade-off.`,
           getAISummaryDemandDisciplinePayoff(scorecard)
         ),
         strength: 0.8,
@@ -3301,16 +3310,22 @@ const buildAISummaryInterpretedAchievements = (
     }
 
     if (!scorecard.hasConstraints && scorecard.hasRetainedOutputUnderWeight && significantWeightGain && bestOutputProfile?.isFlatOrControlled) {
-      const floorDominant = hasAISummaryStrongOutputFloor(bestOutputProfile);
+      const floorDominant = hasAISummaryStrongOutputFloor(scorecard, bestOutputProfile);
+      const ceilingDominant = hasAISummaryStrongOutputCeiling(scorecard, bestOutputProfile);
+      const rangeTier = getAISummaryWorkRangeTier(scorecard, bestOutputProfile);
       pushAISummaryInterpretation(interpreted, {
-        kind: floorDominant ? "strong_output_floor" : "strong_output_ceiling",
-        title: floorDominant ? "Strong output floor" : "Strong output ceiling",
+        kind: floorDominant ? "strong_output_floor" : ceilingDominant ? "strong_output_ceiling" : "controlled_workflow",
+        title: floorDominant ? "Strong output floor" : ceilingDominant ? "Strong output ceiling" : "Controlled work range",
         meaning: floorDominant
           ? "The athlete established a workable output floor and sustained it while weight progressed."
-          : "The athlete established a strong output ceiling and held it while weight progressed.",
+          : ceilingDominant
+            ? "The athlete established a strong output ceiling and held it while weight progressed."
+            : "The athlete maintained a useful work range while demand progressed.",
         summarySentence: floorDominant
-          ? `You established a workable floor and sustained it while progressing upward in weight. That combination reflects high-level consistency.`
-          : `You established a strong output ceiling and sustained it while progressing upward in weight. That combination reflects high-level consistency.`,
+          ? `You established a workable floor and sustained it through ${getAISummaryEscalationTierPhrase(scorecard)}.`
+          : ceilingDominant
+            ? `You established a strong ceiling and sustained it while progressing upward in weight.`
+            : `You established a ${rangeTier} while progressing upward in weight.`,
         strength: 0.84,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "output_plateau"],
@@ -3326,7 +3341,7 @@ const buildAISummaryInterpretedAchievements = (
           ? `You carved out a strong work area while ${getAISummaryEscalationTierPhrase(scorecard)}. Handling that demand and output ${constraintPhrase || "under constraint"} is what makes this performance stand out.`
           : scorecard.maxConsecutiveWeightIncreaseCount >= 5
             ? joinAISummarySentences(
-                `You established a workable floor and sustained it through ${getAISummaryEscalationTierPhrase(scorecard)}.`,
+                `You established a ${getAISummaryWorkRangeTier(scorecard, bestOutputProfile)} through ${getAISummaryEscalationTierPhrase(scorecard)}.`,
                 getAISummaryDemandDisciplinePayoff(scorecard)
               )
             : `You carved out a strong work area while ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? "making consecutive and impactful weight gains" : significantWeightGain ? "handling impactful weight increases" : "making meaningful weight gains"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
@@ -3768,11 +3783,11 @@ const getAISummaryCloserText = (
 
   const kinds = interpretedAchievements.map((item) => item.kind);
   if (kinds.includes("sustained_performance")) return "Strong flow, strong finish.";
+  if (kinds.includes("tradeoff_recovery")) return "Good job.";
   if (kinds.includes("tight_baseline_range")) return classification.label === "Moderate Growth" ? "Good job." : "";
-  if (kinds.includes("constraint_floor") || kinds.includes("controlled_workflow")) return "";
   if (kinds.includes("weighted_conditioning") || kinds.includes("preserved_volatility")) return "Good job.";
-  if (kinds.includes("tradeoff_recovery")) return "Solid work.";
-  if (scorecard.hasConstraints || scorecard.hasRetainedOutputUnderWeight) return "Great work.";
+  if (kinds.includes("constraint_floor") || kinds.includes("controlled_workflow") || kinds.includes("strong_output_floor") || kinds.includes("strong_output_ceiling")) return "Good job.";
+  if (scorecard.hasConstraints || scorecard.hasRetainedOutputUnderWeight) return "Good job.";
   return "Good work.";
 };
 
@@ -3783,9 +3798,6 @@ const adjustAISummaryCloserForThemeRepetition = (closer: string, existingSlots: 
 
   if (/\b(good|great|outstanding)\s+(job|work)\b[.!]?\s*$/.test(priorText)) return "";
   if (/\b(this style of workflow defines a great workout|this type of discipline|structure under rising demand reflects excellent discipline)\b/.test(priorText)) return "Good job.";
-  if (/\bwork\b/.test(lowerCloser) && /\bwork\b/.test(priorText)) return "Good job.";
-  if (/\bsolid\b/.test(lowerCloser) && /\bsolid\b/.test(priorText)) return closer.replace(/Solid/i, "Good");
-  if (/\bstrong\b/.test(lowerCloser) && /\bstrong\b/.test(priorText)) return "Great job.";
 
   return closer;
 };
