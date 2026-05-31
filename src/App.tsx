@@ -3498,7 +3498,7 @@ if (scorecard.mode !== "single" && escalatingConstrainedProgression && bestOutpu
         summarySentence: "Your stand-out moment here really exemplifies high-octane performance. You kept this progression moving at a very high level.",
         strength: 0.88,
         labelImpact: "carries",
-        evidenceMarkerKinds: classification.map((reason: AISummaryMarker) => reason.kind),
+        evidenceMarkerKinds: scorecard.markers.map((reason: AISummaryMarker) => reason.kind),
       });
     }
 };
