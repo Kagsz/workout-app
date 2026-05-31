@@ -3320,7 +3320,6 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
     if (!scorecard.hasConstraints && scorecard.hasRetainedOutputUnderWeight && significantWeightGain && bestOutputProfile?.isFlatOrControlled) {
       const floorDominant = hasAISummaryStrongOutputFloor(scorecard, bestOutputProfile);
       const ceilingDominant = hasAISummaryStrongOutputCeiling(scorecard, bestOutputProfile);
-      const rangeTier = getAISummaryWorkRangeTier(scorecard, bestOutputProfile);
       pushAISummaryInterpretation(interpreted, {
         kind: floorDominant ? "strong_output_floor" : ceilingDominant ? "strong_output_ceiling" : "controlled_workflow",
         title: floorDominant ? "Strong output floor" : ceilingDominant ? "Strong output ceiling" : "Controlled work range",
