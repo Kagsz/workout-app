@@ -2755,6 +2755,8 @@ const formatAISummaryCompactConstraintTagList = (tags: string[]) => {
   return uniqueTags.join(" + ");
 };
 
+const getAISummaryConstraintArticle = (constraintText: string) => /^ECC\b/i.test(constraintText.trim()) ? "an" : "a";
+
 const getAISummaryConstraintOccurrenceCount = (scorecard: AISummaryScorecard) => {
   const tags = getAISummaryConstraintTags(scorecard);
   if (!tags.length) return 0;
@@ -2778,7 +2780,7 @@ const getAISummaryConstraintPhrase = (scorecard: AISummaryScorecard) => {
       : `under double ${tagText} constraints`;
   }
 
-  return `under a ${tagText} constraint`;
+  return `under ${getAISummaryConstraintArticle(tagText)} ${tagText} constraint`;
 };
 
 const getAISummaryWorkingWithConstraintPhrase = (scorecard: AISummaryScorecard) => {
@@ -2794,7 +2796,7 @@ const getAISummaryWorkingWithConstraintPhrase = (scorecard: AISummaryScorecard) 
       : `while working with double ${tagText} constraints`;
   }
 
-  return `while working with a ${tagText} constraint`;
+  return `while working with ${getAISummaryConstraintArticle(tagText)} ${tagText} constraint`;
 };
 
 const getAISummaryOutputMetricLabel = (profile: AISummarySeriesProfile | null | undefined) => {
@@ -3103,7 +3105,7 @@ const getAISummaryProgressionPhrase = (scorecard: AISummaryScorecard, context: "
   const hasImpactfulProgression = getAISummaryImpactfulWeightProgression(scorecard);
   const hasSubstantialProgression = getAISummarySubstantialWeightProgression(scorecard);
 
-  if (hasConsecutiveRun && hasSubstantialProgression) return "consecutive and substantial weight increases";
+  if (hasConsecutiveRun && hasSubstantialProgression) return "multiple substantial weight increases";
   if (hasConsecutiveRun && hasImpactfulProgression) return "consecutive and impactful weight increases";
   if (hasConsecutiveRun) return "consecutive weight increases";
   if (hasImpactfulProgression && scorecard.totalWeightIncreaseCount >= 2) return "multiple impactful weight increases";
@@ -3121,7 +3123,7 @@ const getAISummaryConstraintPayoffSentence = (scorecard: AISummaryScorecard, pre
     ? tags.length > 1
       ? `${formatAISummaryCompactConstraintTagList(tags)} constraints`
       : `double ${formatAISummaryConstraintTagList(tags)} constraints`
-    : `a ${formatAISummaryConstraintTagList(tags)} constraint`;
+    : `${getAISummaryConstraintArticle(formatAISummaryConstraintTagList(tags))} ${formatAISummaryConstraintTagList(tags)} constraint`;
   const prefix = "Performing";
   return `${prefix} at that level under ${compact} is what makes this ${preferredNoun} stand out.`;
 };
@@ -3234,7 +3236,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         title: "Solid work area under constraint",
         meaning: "The athlete preserved a controlled work area while moving through multiple weight increases under constraint demand.",
         summarySentence: joinAISummarySentences(
-          `You maintained a consistent work area ${constraintPhrase || "under constraint"} with ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
+          `You maintained a consistent work area ${constraintPhrase || "under constraint"} and ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
           getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
         ),
         strength: 0.86,
@@ -3289,7 +3291,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
                 getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
               )
           : joinAISummarySentences(
-              `You maintained a ${getAISummaryWorkRangeTier(scorecard, bestOutputProfile)}${workingWithConstraintSuffix || constraintSuffix} with ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
+              `You maintained a ${getAISummaryWorkRangeTier(scorecard, bestOutputProfile)}${workingWithConstraintSuffix || constraintSuffix} and ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
               getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
             ),
         strength: relevantTradeoff ? 0.88 : 0.86,
@@ -3421,7 +3423,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         kind: "constraint_floor",
         title: "Solid output range under constraint",
         meaning: "The athlete maintained a controlled working range while handling constraint demand.",
-        summarySentence: `Under ${getAISummaryConstraintTags(scorecard).length > 1 ? `${formatAISummaryCompactConstraintTagList(getAISummaryConstraintTags(scorecard))} constraints` : `a ${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraint`}, you maintained a solid output range throughout the program. Great work.`,
+        summarySentence: `Under ${getAISummaryConstraintTags(scorecard).length > 1 ? `${formatAISummaryCompactConstraintTagList(getAISummaryConstraintTags(scorecard))} constraints` : `${getAISummaryConstraintArticle(formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard)))} ${formatAISummaryConstraintTagList(getAISummaryConstraintTags(scorecard))} constraint`}, you maintained a solid output range throughout the program. Great work.`,
         strength: 0.73,
         labelImpact: "supports",
         evidenceMarkerKinds: ["constraint_present", "output_plateau"],
@@ -4054,7 +4056,7 @@ const getAISummaryCloserText = (
     (kinds.includes("substantial_weight_gain") && (scorecard.hasConstraints || scorecard.totalWeightIncreaseCount >= 5)) ||
     (kinds.includes("tradeoff_recovery") && scorecard.totalWeightIncreaseCount >= 3);
   if (highAchievementEnergy) return "Great job.";
-  if (kinds.includes("sustained_performance")) return "Good job.";
+  if (kinds.includes("sustained_performance")) return "Great job.";
   if (kinds.includes("tradeoff_recovery")) return "Good job.";
   if (kinds.includes("tight_baseline_range")) return classification.label === "Moderate Growth" ? "Good job." : "";
   if (kinds.includes("weighted_conditioning") || kinds.includes("preserved_volatility")) return "Good job.";
