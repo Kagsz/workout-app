@@ -4002,6 +4002,35 @@ const buildAISummaryExerciseChangeContextSentence = (
   return "Despite a mid-program exercise change, you maintained your output range.";
 };
 
+
+const buildAISummaryTradeoffContextSentence = (
+  scorecard: AISummaryScorecard,
+  classification: AISummaryClassification,
+  interpretedAchievements: AISummaryInterpretedAchievement[] = []
+) => {
+  if (classification.label !== "Moderate Growth") return "";
+
+  const kinds = interpretedAchievements.map((item) => item.kind);
+  if (kinds.includes("substantial_weight_tradeoff") || kinds.includes("tradeoff_recovery")) return "";
+
+  const bestWeightProfile = getAISummaryBestWeightProfile(scorecard);
+  const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
+  const hasRelevantTradeoff =
+    hasAISummaryRelevantTradeoff(scorecard, bestWeightProfile) ||
+    hasAISummaryRelevantTradeoff(scorecard, bestOutputProfile);
+
+  if (!hasRelevantTradeoff) return "";
+
+  const hasHighDemandContext =
+    scorecard.totalWeightIncreaseCount >= 3 ||
+    hasAISummarySignificantWeightGain(bestWeightProfile) ||
+    hasAISummarySignificantWeightGain(bestOutputProfile);
+
+  return hasHighDemandContext
+    ? "Rising demands eventually produced a trade-off in output, reinforcing the significance of that progression."
+    : "Rising demands eventually produced a trade-off in output, adding further context to your progression this program.";
+};
+
 const buildAISummaryStructuralSentence = (
   scorecard: AISummaryScorecard,
   classification: AISummaryClassification,
@@ -4128,6 +4157,12 @@ const composeAISummarySlots = (
   const exerciseChangeAlreadyMentioned = slots.some((slot) => /mid-program exercise change/i.test(slot.text));
   if (exerciseChangeContext && exerciseChangeContext !== achievementSentence && !exerciseChangeAlreadyMentioned) {
     addSlot({ kind: "supporting_context", text: exerciseChangeContext, importance: 0.66 });
+  }
+
+  const tradeoffContext = buildAISummaryTradeoffContextSentence(scorecard, classification, interpretedAchievements);
+  const tradeoffAlreadyMentioned = slots.some((slot) => /trade-off|tradeoff|concession/i.test(slot.text));
+  if (tradeoffContext && tradeoffContext !== achievementSentence && !tradeoffAlreadyMentioned) {
+    addSlot({ kind: "supporting_context", text: tradeoffContext, importance: 0.54 });
   }
 
   if (slotPlan.allowStructuralExplanation) {
