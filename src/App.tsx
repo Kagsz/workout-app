@@ -2623,7 +2623,7 @@ const buildAISummaryAchievements = (scorecard: AISummaryScorecard, classificatio
     });
   }
 
-  if (scorecard.maxConsecutiveWeightIncreaseCount >= 4 && bestWeightProfile) {
+  if (scorecard.maxConsecutiveWeightIncreaseCount >= 3 && bestWeightProfile) {
     achievements.push({
       id: "four-plus-weight-increases",
       title: `${scorecard.maxConsecutiveWeightIncreaseCount} consecutive weight increases`,
@@ -3170,7 +3170,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         title: "Hidden stability through exercise change",
         meaning: "The athlete maintained the baseline despite a mid-program exercise change and constraint demand.",
         summarySentence: `Despite a mid-program exercise change, you maintained your output range ${constraintPhrase || "under constraint"}.`,
-        strength: 0.88,
+        strength: 0.98,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["constraint_present", "output_plateau"],
       });

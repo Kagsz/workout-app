@@ -2841,8 +2841,10 @@ const hasAISummarySignificantWeightGain = (profile: AISummarySeriesProfile | nul
 const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
   const target = profile || getAISummaryBestWeightProfile(scorecard) || getAISummaryBestOutputProfile(scorecard);
   if (!target || target.points.length < 3 || target.totalWeightIncrease <= 0) return false;
+
   const points = target.points;
   const meaningfulDropThreshold = Math.max(0.75, target.outputRange * 0.22);
+  const recoveryThreshold = meaningfulDropThreshold * 0.6;
 
   for (let index = 1; index < points.length; index += 1) {
     const currentWeight = getAISummaryNumericWeight(points[index].weight);
@@ -2850,13 +2852,17 @@ const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: A
     if (currentWeight == null || previousWeight == null || currentWeight <= previousWeight) continue;
 
     const outputDropAmount = points[index - 1].y - points[index].y;
-    const recoveredNext = index < points.length - 1 && points[index + 1].y >= points[index].y + meaningfulDropThreshold * 0.6;
-    const lateStructuralDrop = index >= points.length - 2 && points[index].y < target.peakOutput - meaningfulDropThreshold;
+    if (outputDropAmount < meaningfulDropThreshold) continue;
 
-    if (outputDropAmount >= meaningfulDropThreshold && (recoveredNext || lateStructuralDrop)) return true;
+    const suppressedOutput = points[index].y;
+    const laterPoints = points.slice(index + 1);
+    const hasMeaningfulRecovery = laterPoints.some((point) => point.y >= suppressedOutput + recoveryThreshold);
+    const sustainedLoss = laterPoints.length === 0 || laterPoints.every((point) => point.y <= suppressedOutput + recoveryThreshold);
+
+    if (!hasMeaningfulRecovery && sustainedLoss) return true;
   }
 
-  return scorecard.hasLateDip && scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0 && scorecard.outputRangeAverage > 1.5;
+  return scorecard.hasLateDip && !scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0 && scorecard.outputRangeAverage > 1.5;
 };
 
 const pushAISummaryInterpretation = (
@@ -3004,14 +3010,14 @@ const hasAISummaryStrongOutputCeiling = (scorecard: AISummaryScorecard, profile?
 };
 
 const getAISummaryWorkRangeTier = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
-  if (!profile) return "work range";
-  const weightMomentum = scorecard.maxConsecutiveWeightIncreaseCount >= 5 || scorecard.totalWeightIncreaseCount >= 5;
+  if (!profile) return "solid work range";
+  const weightMomentum = scorecard.maxConsecutiveWeightIncreaseCount >= 4 || scorecard.totalWeightIncreaseCount >= 5;
   const strongConstraintContext = scorecard.hasConstraints && scorecard.totalWeightIncreaseCount >= 3;
   const highRetention = profile.lowOutput >= profile.startOutput - 0.5 && profile.endOutput >= profile.startOutput - 0.25;
 
   if (highRetention && (weightMomentum || strongConstraintContext)) return "pronounced work range";
   if (highRetention || scorecard.totalWeightIncreaseCount >= 3) return "pronounced work range";
-  return "work range";
+  return "solid work range";
 };
 
 const hasAISummaryVisibleFluctuation = (profile?: AISummarySeriesProfile | null) =>
@@ -3056,10 +3062,38 @@ const getAISummaryDemandDisciplinePayoff = (scorecard: AISummaryScorecard, varia
 const joinAISummarySentences = (...sentences: string[]) =>
   sentences.map((sentence) => sentence.trim()).filter(Boolean).join(" ");
 
+const getAISummaryImpactfulWeightProgression = (scorecard: AISummaryScorecard) => {
+  const largestGain = scorecard.seriesProfiles.reduce((largest, profile) => Math.max(largest, profile.totalWeightIncrease), 0);
+  const largestRelativeGain = scorecard.seriesProfiles.reduce((largest, profile) => {
+    const firstWeight = profile.numericWeights[0];
+    if (!firstWeight || firstWeight <= 0) return largest;
+    return Math.max(largest, profile.totalWeightIncrease / firstWeight);
+  }, 0);
+
+  return largestGain >= 10 || largestRelativeGain >= 0.45;
+};
+
+const getAISummarySubstantialWeightProgression = (scorecard: AISummaryScorecard) => {
+  const largestGain = scorecard.seriesProfiles.reduce((largest, profile) => Math.max(largest, profile.totalWeightIncrease), 0);
+  const largestRelativeGain = scorecard.seriesProfiles.reduce((largest, profile) => {
+    const firstWeight = profile.numericWeights[0];
+    if (!firstWeight || firstWeight <= 0) return largest;
+    return Math.max(largest, profile.totalWeightIncrease / firstWeight);
+  }, 0);
+
+  return largestGain >= 16 || largestRelativeGain >= 0.75;
+};
+
 const getAISummaryProgressionPhrase = (scorecard: AISummaryScorecard, context: "range" | "tradeoff" | "ceiling" | "default" = "default") => {
-  if (context === "tradeoff" && scorecard.totalWeightIncreaseCount >= 3) return "multiple impactful weight increases";
-  if (scorecard.maxConsecutiveWeightIncreaseCount >= 5) return "consecutive and substantial weight increases";
-  if (scorecard.maxConsecutiveWeightIncreaseCount >= 3) return context === "range" ? "consecutive weight increases" : "consecutive and impactful weight increases";
+  const hasConsecutiveRun = scorecard.maxConsecutiveWeightIncreaseCount >= 4;
+  const hasImpactfulProgression = getAISummaryImpactfulWeightProgression(scorecard);
+  const hasSubstantialProgression = getAISummarySubstantialWeightProgression(scorecard);
+
+  if (hasConsecutiveRun && hasSubstantialProgression) return "consecutive and substantial weight increases";
+  if (hasConsecutiveRun && hasImpactfulProgression) return "consecutive and impactful weight increases";
+  if (hasConsecutiveRun) return "consecutive weight increases";
+  if (hasImpactfulProgression && scorecard.totalWeightIncreaseCount >= 2) return "multiple impactful weight increases";
+  if (context === "tradeoff" && scorecard.totalWeightIncreaseCount >= 3) return "multiple weight increases";
   if (scorecard.totalWeightIncreaseCount >= 3) return "multiple weight increases";
   return "weight increases";
 };
@@ -3068,8 +3102,13 @@ const getAISummaryConstraintPayoffSentence = (scorecard: AISummaryScorecard, pre
   if (!scorecard.hasConstraints) return "";
   const tags = getAISummaryConstraintTags(scorecard);
   if (!tags.length) return "";
-  const compact = tags.length > 1 ? `${formatAISummaryCompactConstraintTagList(tags)} constraints` : `a ${formatAISummaryConstraintTagList(tags)} constraint`;
-  const prefix = tags.length > 1 ? "Performing" : "Performing";
+  const occurrenceCount = getAISummaryConstraintOccurrenceCount(scorecard);
+  const compact = occurrenceCount >= 2
+    ? tags.length > 1
+      ? `${formatAISummaryCompactConstraintTagList(tags)} constraints`
+      : `double ${formatAISummaryConstraintTagList(tags)} constraints`
+    : `a ${formatAISummaryConstraintTagList(tags)} constraint`;
+  const prefix = "Performing";
   return `${prefix} at that level under ${compact} is what makes this ${preferredNoun} stand out.`;
 };
 
@@ -3130,7 +3169,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         kind: "exercise_change_stability",
         title: "Hidden stability through exercise change",
         meaning: "The athlete maintained the baseline despite a mid-program exercise change and constraint demand.",
-        summarySentence: `Despite a mid-program exercise change, you maintained a solid output range ${constraintPhrase || "under constraint"}.`,
+        summarySentence: `Despite a mid-program exercise change, you maintained your output range ${constraintPhrase || "under constraint"}.`,
         strength: 0.88,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["constraint_present", "output_plateau"],
@@ -3169,8 +3208,8 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         title: "Solid work area under constraint",
         meaning: "The athlete preserved a controlled work area while moving through multiple weight increases under constraint demand.",
         summarySentence: joinAISummarySentences(
-          `You maintained a solid work area ${constraintPhrase || "under constraint"} with ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
-          getAISummaryConstraintPayoffSentence(scorecard, "performance") || getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
+          `You maintained a consistent work area ${constraintPhrase || "under constraint"} with ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
+          getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
         ),
         strength: 0.86,
         labelImpact: "promotes",
@@ -3225,7 +3264,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
               )
           : joinAISummarySentences(
               `You maintained a ${getAISummaryWorkRangeTier(scorecard, bestOutputProfile)}${workingWithConstraintSuffix || constraintSuffix} with ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
-              getAISummaryConstraintPayoffSentence(scorecard, "performance") || getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
+              getAISummaryDemandDisciplinePayoff(scorecard, "discipline")
             ),
         strength: relevantTradeoff ? 0.88 : 0.86,
         labelImpact: "promotes",
@@ -3281,7 +3320,6 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
     if (!scorecard.hasConstraints && scorecard.hasRetainedOutputUnderWeight && significantWeightGain && bestOutputProfile?.isFlatOrControlled) {
       const floorDominant = hasAISummaryStrongOutputFloor(scorecard, bestOutputProfile);
       const ceilingDominant = hasAISummaryStrongOutputCeiling(scorecard, bestOutputProfile);
-      const rangeTier = getAISummaryWorkRangeTier(scorecard, bestOutputProfile);
       pushAISummaryInterpretation(interpreted, {
         kind: floorDominant ? "strong_output_floor" : ceilingDominant ? "strong_output_ceiling" : "controlled_workflow",
         title: floorDominant ? "Strong output floor" : ceilingDominant ? "Strong output ceiling" : "Controlled work range",
@@ -3294,7 +3332,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
           ? `You established a workable floor and sustained it through ${getAISummaryProgressionPhrase(scorecard, "range")}.`
           : ceilingDominant
             ? `You established a strong ceiling and sustained it through ${getAISummaryProgressionPhrase(scorecard, "ceiling")}.`
-            : `You established a ${rangeTier} and maintained it through ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
+            : `You maintained consistent output through ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
         strength: 0.84,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["retained_output_under_weight", "weight_progression", "output_plateau"],
@@ -3316,7 +3354,7 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
                 `You maintained a ${getAISummaryWorkRangeTier(scorecard, bestOutputProfile)} through ${getAISummaryProgressionPhrase(scorecard, "range")}.`,
                 getAISummaryDemandDisciplinePayoff(scorecard)
               )
-            : `You carved out a strong work area with ${scorecard.maxConsecutiveWeightIncreaseCount >= 3 ? getAISummaryProgressionPhrase(scorecard, "range") : significantWeightGain ? "impactful weight increases" : "meaningful weight increases"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
+            : `You maintained consistent output with ${scorecard.maxConsecutiveWeightIncreaseCount >= 4 ? getAISummaryProgressionPhrase(scorecard, "range") : significantWeightGain ? "impactful weight increases" : "meaningful weight increases"}. That demand increase gives the ${blockNoun} more value than the output line alone shows.`,
         strength: 0.78,
         labelImpact: "supports",
         evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight"],
@@ -3387,6 +3425,18 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         strength: 0.7,
         labelImpact: "supports",
         evidenceMarkerKinds: ["output_rise", "output_plateau"],
+      });
+    }
+
+    if (hasExerciseChange && !interpreted.some((item) => item.kind === "exercise_change_stability" || item.kind === "exercise_change_context")) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "exercise_change_context",
+        title: "Mid-program exercise change",
+        meaning: "The athlete kept the output range intact despite an exercise replacement mid-program.",
+        summarySentence: "Despite a mid-program exercise change, you maintained your output range.",
+        strength: 0.81,
+        labelImpact: "supports",
+        evidenceMarkerKinds: ["output_plateau"],
       });
     }
 };
@@ -3793,6 +3843,8 @@ const selectAISummarySecondarySlotCandidate = (
   if (!slotPlan.allowSecondaryHighlight) return undefined;
 
   const primaryIsPrestige = isAISummaryPrestigeInterpretation(primaryInterpretation);
+  const exerciseChangeCandidate = secondaryInterpretations.find((item) => item.kind === "exercise_change_stability" || item.kind === "exercise_change_context");
+  if (exerciseChangeCandidate && primaryInterpretation?.kind !== "exercise_change_stability") return exerciseChangeCandidate;
 
   return secondaryInterpretations.find((item) => {
     if (primaryIsPrestige && item.kind === "retained_adaptation") return false;
@@ -4044,8 +4096,9 @@ const composeAISummarySlots = (
   }
 
   const exerciseChangeContext = buildAISummaryExerciseChangeContextSentence(scorecard, classification, interpretedAchievements);
-  if (exerciseChangeContext && exerciseChangeContext !== achievementSentence && !slots.some((slot) => slot.text === exerciseChangeContext)) {
-    addSlot({ kind: "supporting_context", text: exerciseChangeContext, importance: 0.6 });
+  const exerciseChangeAlreadyMentioned = slots.some((slot) => /mid-program exercise change/i.test(slot.text));
+  if (exerciseChangeContext && exerciseChangeContext !== achievementSentence && !exerciseChangeAlreadyMentioned) {
+    addSlot({ kind: "supporting_context", text: exerciseChangeContext, importance: 0.66 });
   }
 
   if (slotPlan.allowStructuralExplanation) {
