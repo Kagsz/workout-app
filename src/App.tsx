@@ -5631,7 +5631,6 @@ export default function App() {
     };
 
     setTrackerWorkouts((current) => [workout, ...current]);
-    setExpandedTrackerWorkoutIds((current) => [workout.id, ...current]);
     setSelectedTrackerWorkoutId(workout.id);
     setNewWorkoutName("");
   };
