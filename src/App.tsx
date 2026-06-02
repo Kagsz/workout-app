@@ -61,6 +61,26 @@ type Member = {
   memberPlan?: MemberPlan;
 };
 
+type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Legs" | "Core" | "Cardio" | "Full Body" | "Other";
+
+type TrackerExercise = {
+  id: string;
+  memberId: string;
+  name: string;
+  muscleGroup: MuscleGroup;
+  archived?: boolean;
+  createdAt: string;
+};
+
+type TrackerWorkout = {
+  id: string;
+  memberId: string;
+  name: string;
+  exerciseIds: string[];
+  archived?: boolean;
+  createdAt: string;
+};
+
 type SessionExerciseInput = {
   exerciseId: string;
   exerciseName: string;
@@ -349,6 +369,9 @@ const getProgramBlockCount = (program: Program | null | undefined) =>
 
 const DEFAULT_PROGRAM_LENGTH = 8;
 
+const MUSCLE_GROUP_OPTIONS: MuscleGroup[] = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Legs", "Core", "Cardio", "Full Body", "Other"];
+const WORKOUT_QUICK_FILL_OPTIONS = ["Leg Workout", "Upper Body Workout", "Core Workout", "Cardio Workout", "Full Body Workout"];
+
 const getProgramLength = (program: Program | null | undefined) => {
   const value = Number(program?.programLength);
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_PROGRAM_LENGTH;
@@ -464,6 +487,8 @@ const STORAGE_KEYS = {
   members: "workout-app-members-v1",
   programs: "workout-app-programs-v1",
   savedSessions: "workout-app-saved-sessions-v1",
+  trackerExercises: "workout-app-tracker-exercises-v1",
+  trackerWorkouts: "workout-app-tracker-workouts-v1",
   seeded: "workout-app-seeded-program1-v1",
   seededProgram2: "workout-app-seeded-program2-v1",
   seededProgram3: "workout-app-seeded-program3-v1",
@@ -4892,6 +4917,23 @@ export default function App() {
   });
   const [importText, setImportText] = useState(PROGRAM_1_IMPORT_TEMPLATE);
 
+  const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(() => {
+    if (typeof window === "undefined") return [];
+    const stored = window.localStorage.getItem(STORAGE_KEYS.trackerExercises);
+    return stored ? JSON.parse(stored) : [];
+  });
+  const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(() => {
+    if (typeof window === "undefined") return [];
+    const stored = window.localStorage.getItem(STORAGE_KEYS.trackerWorkouts);
+    return stored ? JSON.parse(stored) : [];
+  });
+  const [newTrackerExerciseName, setNewTrackerExerciseName] = useState("");
+  const [newTrackerExerciseMuscleGroup, setNewTrackerExerciseMuscleGroup] = useState<MuscleGroup>("Chest");
+  const [newWorkoutName, setNewWorkoutName] = useState("");
+  const [selectedWorkoutExerciseId, setSelectedWorkoutExerciseId] = useState("");
+  const [expandedTrackerExerciseIds, setExpandedTrackerExerciseIds] = useState<string[]>([]);
+  const [expandedTrackerWorkoutIds, setExpandedTrackerWorkoutIds] = useState<string[]>([]);
+
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
     const scopedMembers = members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived));
@@ -4905,6 +4947,28 @@ export default function App() {
   const selectedMember = useMemo(
     () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
     [members, selectedMemberId]
+  );
+
+
+  const activeTrackerExercises = useMemo(
+    () =>
+      trackerExercises
+        .filter((exercise) => exercise.memberId === selectedMember?.id && !exercise.archived)
+        .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
+    [trackerExercises, selectedMember?.id]
+  );
+
+  const activeTrackerWorkouts = useMemo(
+    () =>
+      trackerWorkouts
+        .filter((workout) => workout.memberId === selectedMember?.id && !workout.archived)
+        .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
+    [trackerWorkouts, selectedMember?.id]
+  );
+
+  const trackerExerciseById = useMemo(
+    () => new Map(activeTrackerExercises.map((exercise) => [exercise.id, exercise])),
+    [activeTrackerExercises]
   );
 
   useEffect(() => {
@@ -5292,6 +5356,17 @@ export default function App() {
     window.localStorage.setItem(STORAGE_KEYS.savedSessions, JSON.stringify(savedSessions));
   }, [savedSessions]);
 
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEYS.trackerExercises, JSON.stringify(trackerExercises));
+  }, [trackerExercises]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(STORAGE_KEYS.trackerWorkouts, JSON.stringify(trackerWorkouts));
+  }, [trackerWorkouts]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -5491,6 +5566,95 @@ export default function App() {
           }),
         };
       })
+    );
+  };
+
+  const toggleExpandedTrackerExercise = (exerciseId: string) => {
+    setExpandedTrackerExerciseIds((current) =>
+      current.includes(exerciseId) ? current.filter((id) => id !== exerciseId) : [...current, exerciseId]
+    );
+  };
+
+  const toggleExpandedTrackerWorkout = (workoutId: string) => {
+    setExpandedTrackerWorkoutIds((current) =>
+      current.includes(workoutId) ? current.filter((id) => id !== workoutId) : [...current, workoutId]
+    );
+  };
+
+  const addTrackerExercise = (nameOverride?: string, muscleGroupOverride?: MuscleGroup) => {
+    if (!selectedMember) return null;
+    const name = (nameOverride ?? newTrackerExerciseName).trim();
+    if (!name) return null;
+
+    const exercise: TrackerExercise = {
+      id: uid(),
+      memberId: selectedMember.id,
+      name,
+      muscleGroup: muscleGroupOverride || newTrackerExerciseMuscleGroup,
+      archived: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    setTrackerExercises((current) => [exercise, ...current]);
+    setExpandedTrackerExerciseIds((current) => [exercise.id, ...current]);
+
+    if (!nameOverride) {
+      setNewTrackerExerciseName("");
+      setNewTrackerExerciseMuscleGroup("Chest");
+    }
+
+    return exercise.id;
+  };
+
+  const archiveTrackerExercise = (exerciseId: string) => {
+    setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? { ...exercise, archived: true } : exercise)));
+    setTrackerWorkouts((current) =>
+      current.map((workout) => ({
+        ...workout,
+        exerciseIds: workout.exerciseIds.filter((id) => id !== exerciseId),
+      }))
+    );
+  };
+
+  const addTrackerWorkout = () => {
+    if (!selectedMember) return;
+    const name = newWorkoutName.trim();
+    if (!name) return;
+
+    const workout: TrackerWorkout = {
+      id: uid(),
+      memberId: selectedMember.id,
+      name,
+      exerciseIds: [],
+      archived: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    setTrackerWorkouts((current) => [workout, ...current]);
+    setExpandedTrackerWorkoutIds((current) => [workout.id, ...current]);
+    setNewWorkoutName("");
+  };
+
+  const archiveTrackerWorkout = (workoutId: string) => {
+    setTrackerWorkouts((current) => current.map((workout) => (workout.id === workoutId ? { ...workout, archived: true } : workout)));
+  };
+
+  const addExistingExerciseToWorkout = (workoutId: string) => {
+    if (!selectedWorkoutExerciseId) return;
+    setTrackerWorkouts((current) =>
+      current.map((workout) => {
+        if (workout.id !== workoutId || workout.exerciseIds.includes(selectedWorkoutExerciseId)) return workout;
+        return { ...workout, exerciseIds: [...workout.exerciseIds, selectedWorkoutExerciseId] };
+      })
+    );
+    setSelectedWorkoutExerciseId("");
+  };
+
+  const removeExerciseFromWorkout = (workoutId: string, exerciseId: string) => {
+    setTrackerWorkouts((current) =>
+      current.map((workout) =>
+        workout.id === workoutId ? { ...workout, exerciseIds: workout.exerciseIds.filter((id) => id !== exerciseId) } : workout
+      )
     );
   };
 
@@ -6583,18 +6747,172 @@ export default function App() {
 
               {role === "member" && screen === "openTracker" && (
                 <SectionCard title="Open Tracker" collapsible>
-                  <div className="space-y-3">
-                    <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
-                      Open Tracker shell is installed. Workout library, exercise library, metrics, entries, graphs, and summaries will be connected in later passes.
+                  <div className="space-y-5">
+                    <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
+                      Open Tracker libraries are member-created only. Structured-program exercises stay separate from this tracker.
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="text-sm font-semibold text-zinc-900">Workout Library</div>
-                        <div className="mt-1 text-sm text-zinc-500">Coming soon.</div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div className="mb-3 text-sm font-semibold text-zinc-900">Create Workout</div>
+                      <div className="space-y-3">
+                        <input
+                          value={newWorkoutName}
+                          onChange={(event) => setNewWorkoutName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") addTrackerWorkout();
+                          }}
+                          placeholder="Workout name"
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {WORKOUT_QUICK_FILL_OPTIONS.map((option) => (
+                            <SmallButton key={option} onClick={() => setNewWorkoutName(option)}>{option}</SmallButton>
+                          ))}
+                        </div>
+                        <PrimaryButton onClick={addTrackerWorkout} disabled={!newWorkoutName.trim()} className="w-full">+ Create Workout</PrimaryButton>
                       </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <div className="mb-3 text-sm font-semibold text-zinc-900">Add Exercise</div>
+                      <div className="grid gap-3 md:grid-cols-[1fr_150px_auto]">
+                        <input
+                          value={newTrackerExerciseName}
+                          onChange={(event) => setNewTrackerExerciseName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") addTrackerExercise();
+                          }}
+                          placeholder="Exercise name"
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                        />
+                        <select
+                          value={newTrackerExerciseMuscleGroup}
+                          onChange={(event) => setNewTrackerExerciseMuscleGroup(event.target.value as MuscleGroup)}
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                        >
+                          {MUSCLE_GROUP_OPTIONS.map((group) => (
+                            <option key={group} value={group}>{group}</option>
+                          ))}
+                        </select>
+                        <PrimaryButton onClick={() => addTrackerExercise()} disabled={!newTrackerExerciseName.trim()}>+</PrimaryButton>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="text-sm font-semibold text-zinc-900">Exercise Library</div>
-                        <div className="mt-1 text-sm text-zinc-500">Coming soon.</div>
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-zinc-900">Workout Library</div>
+                            <div className="text-xs text-zinc-500">Custom workouts made by this member.</div>
+                          </div>
+                          <div className="text-xs text-zinc-500">{activeTrackerWorkouts.length}</div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {activeTrackerWorkouts.length ? (
+                            activeTrackerWorkouts.map((workout) => {
+                              const isExpanded = expandedTrackerWorkoutIds.includes(workout.id);
+                              const workoutExercises = workout.exerciseIds.map((id) => trackerExerciseById.get(id)).filter(Boolean) as TrackerExercise[];
+
+                              return (
+                                <div key={workout.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <button onClick={() => toggleExpandedTrackerWorkout(workout.id)} className="flex flex-1 items-center gap-2 text-left">
+                                      <span className="text-zinc-400">{isExpanded ? "▼" : "▶"}</span>
+                                      <div>
+                                        <div className="text-sm font-semibold text-zinc-900">{workout.name}</div>
+                                        <div className="text-xs text-zinc-500">{workoutExercises.length} exercises</div>
+                                      </div>
+                                    </button>
+                                    <SmallButton onClick={() => archiveTrackerWorkout(workout.id)}>Archive</SmallButton>
+                                  </div>
+
+                                  {isExpanded ? (
+                                    <div className="mt-3 space-y-3">
+                                      <div className="space-y-2">
+                                        {workoutExercises.length ? (
+                                          workoutExercises.map((exercise) => (
+                                            <div key={exercise.id} className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm">
+                                              <div>
+                                                <div className="font-medium text-zinc-900">{exercise.name}</div>
+                                                <div className="text-xs text-zinc-500">{exercise.muscleGroup}</div>
+                                              </div>
+                                              <SmallButton onClick={() => removeExerciseFromWorkout(workout.id, exercise.id)}>Remove</SmallButton>
+                                            </div>
+                                          ))
+                                        ) : (
+                                          <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-3 text-sm text-zinc-500">No exercises added yet.</div>
+                                        )}
+                                      </div>
+
+                                      <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                                        <select
+                                          value={selectedWorkoutExerciseId}
+                                          onChange={(event) => setSelectedWorkoutExerciseId(event.target.value)}
+                                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                        >
+                                          <option value="">Select existing exercise</option>
+                                          {activeTrackerExercises.map((exercise) => (
+                                            <option key={exercise.id} value={exercise.id}>{exercise.name} • {exercise.muscleGroup}</option>
+                                          ))}
+                                        </select>
+                                        <SmallButton onClick={() => addExistingExerciseToWorkout(workout.id)} disabled={!selectedWorkoutExerciseId}>Add</SmallButton>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No workouts yet. Create one above.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-zinc-900">Exercise Library</div>
+                            <div className="text-xs text-zinc-500">Custom exercises only. Program exercises are separate.</div>
+                          </div>
+                          <div className="text-xs text-zinc-500">{activeTrackerExercises.length}</div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {activeTrackerExercises.length ? (
+                            activeTrackerExercises.map((exercise) => {
+                              const isExpanded = expandedTrackerExerciseIds.includes(exercise.id);
+
+                              return (
+                                <div key={exercise.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <button onClick={() => toggleExpandedTrackerExercise(exercise.id)} className="flex flex-1 items-center gap-2 text-left">
+                                      <span className="text-zinc-400">{isExpanded ? "▼" : "▶"}</span>
+                                      <div>
+                                        <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                        <div className="text-xs text-zinc-500">{exercise.muscleGroup}</div>
+                                      </div>
+                                    </button>
+                                    <button disabled title="Graph placeholder" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm opacity-50">📈</button>
+                                  </div>
+
+                                  {isExpanded ? (
+                                    <div className="mt-3 space-y-3">
+                                      <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">
+                                        Metrics, entries, dates, graphs, and summaries will be added in later passes.
+                                      </div>
+                                      <div className="flex justify-end">
+                                        <SmallButton onClick={() => archiveTrackerExercise(exercise.id)}>Archive Exercise</SmallButton>
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No exercises yet. Add one above.</div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
