@@ -1813,6 +1813,19 @@ type AISummaryKeyFactorCategory =
   | "exceptional_marker"
   | "general";
 
+type AISummaryKeyFactorFamily =
+  | "output_structure"
+  | "sustained_performance"
+  | "progress_pattern"
+  | "weight_output"
+  | "weight_advancement"
+  | "constraint_adaptation"
+  | "exercise_change"
+  | "volatility_recovery"
+  | "trade_off"
+  | "conditioning"
+  | "general";
+
 type AISummaryKeyFactor = {
   id: string;
   title: string;
@@ -3957,6 +3970,124 @@ const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievemen
 const getAISummaryKeyFactorCategoryForInterpretation = (achievement: AISummaryInterpretedAchievement): AISummaryKeyFactorCategory =>
   getAISummaryKeyFactorCategoryForSource(achievement.kind);
 
+
+const getAISummaryKeyFactorFamily = (factor: AISummaryKeyFactor): AISummaryKeyFactorFamily => {
+  const title = factor.title.toLowerCase();
+  const source = String(factor.sourceKind || "").toLowerCase();
+  const detail = factor.detail.toLowerCase();
+  const text = `${title} ${source} ${detail}`;
+
+  if (
+    /ceiling|floor|work area|work range|output range|controlled work range|controlled workflow|tight_baseline_range|strong_output_ceiling|strong_output_floor|constraint_floor|elevated_floor/.test(text)
+  ) {
+    return "output_structure";
+  }
+
+  if (/sustained|consistent output|consistency|sustained_performance|consistent_output_progression|true_consistency/.test(text)) {
+    return "sustained_performance";
+  }
+
+  if (
+    /explosive acceleration|explosive output jump|explosive jump|output rise|output_rise|finished .* above baseline|primary progress pattern|controlled progression|controlled upward|upward drift|dominant baseline separation|dominant_baseline_separation|explosive_acceleration_retention|explosive_jump/.test(text)
+  ) {
+    return "progress_pattern";
+  }
+
+  if (
+    /output held under rising demand|retained output under weight|retained_output_under_weight|retained-output-under-weight|consecutive weight|multiple weight|weight progression streak|consecutive_weight_progression|weight_progression/.test(text)
+  ) {
+    return "weight_output";
+  }
+
+  if (
+    /substantial weight|impactful weight|significant weight|weight advancement|substantial_weight_gain|significant_weight_gain|impactful_weight_progression/.test(text)
+  ) {
+    return "weight_advancement";
+  }
+
+  if (/constraint|tempo|pause|ecc|constraint_present|constraint_work_area|constraint_payoff|escalating_constrained_progression|explosive_constrained_progression/.test(text)) {
+    return "constraint_adaptation";
+  }
+
+  if (/exercise change|exercise_change/.test(text)) return "exercise_change";
+  if (/volatility|recovery|rebound|hiccup|late_dip|balanced_volatility|preserved_volatility/.test(text)) return "volatility_recovery";
+  if (/trade-off|tradeoff|tradeoff_recovery|substantial_weight_tradeoff/.test(text)) return "trade_off";
+  if (/conditioning|cardio|rower|bike|weighted_conditioning/.test(text)) return "conditioning";
+
+  return "general";
+};
+
+const getAISummaryKeyFactorFamilyRank = (factor: AISummaryKeyFactor) => {
+  const title = factor.title.toLowerCase();
+  const source = String(factor.sourceKind || "").toLowerCase();
+  const detail = factor.detail.toLowerCase();
+  const text = `${title} ${source} ${detail}`;
+  const family = getAISummaryKeyFactorFamily(factor);
+
+  if (family === "output_structure") {
+    if (/ceiling|strong_output_ceiling/.test(text)) return 40;
+    if (/floor|strong_output_floor|constraint_floor|elevated_floor/.test(text)) return 39;
+    if (/sustained/.test(text)) return 30;
+    return 16;
+  }
+
+  if (family === "progress_pattern") {
+    if (/explosive acceleration.*retention|explosive_acceleration_retention/.test(text)) return 42;
+    if (/dominant baseline separation|dominant_baseline_separation/.test(text)) return 40;
+    if (/explosive output jump|explosive jump|explosive_jump/.test(text)) return 34;
+    if (/controlled progression|controlled upward/.test(text)) return 28;
+    if (/finished .* above baseline|output rise|output_rise/.test(text)) return 18;
+    if (/primary progress pattern/.test(text)) return 8;
+    return 12;
+  }
+
+  if (family === "weight_output") {
+    if (/output held under rising demand|retained output under weight|retained_output_under_weight/.test(text)) return 40;
+    if (/structure retained|retained adaptation/.test(text)) return 36;
+    if (/consecutive/.test(text)) return 30;
+    if (/multiple/.test(text)) return 22;
+    return 14;
+  }
+
+  if (family === "weight_advancement") {
+    if (/substantial/.test(text) || source === "substantial_weight_gain") return 34;
+    if (/impactful|significant/.test(text) || source === "significant_weight_gain" || source === "impactful_weight_progression") return 24;
+    return 14;
+  }
+
+  if (family === "constraint_adaptation") {
+    if (/explosive/.test(text) || source === "explosive_constrained_progression") return 34;
+    if (/escalating/.test(text) || source === "escalating_constrained_progression") return 28;
+    return 18;
+  }
+
+  if (family === "exercise_change") return /stability|stable/.test(text) ? 30 : 18;
+  if (family === "volatility_recovery") return /recovered|recovery|rebound/.test(text) ? 28 : /balanced/.test(text) ? 22 : 16;
+  if (family === "trade_off") return 18;
+  if (family === "conditioning") return /weighted/.test(text) || source === "weighted_conditioning" ? 26 : 16;
+
+  return 10;
+};
+
+const selectAISummaryKeyFactorFamilyWinners = (factors: AISummaryKeyFactor[]) => {
+  const byFamily = new Map<AISummaryKeyFactorFamily, AISummaryKeyFactor>();
+
+  factors.forEach((factor) => {
+    const family = getAISummaryKeyFactorFamily(factor);
+    const current = byFamily.get(family);
+    const familyRank = getAISummaryKeyFactorFamilyRank(factor);
+    const currentFamilyRank = current ? getAISummaryKeyFactorFamilyRank(current) : -Infinity;
+    const priority = getAISummaryKeyFactorPriority(factor);
+    const currentPriority = current ? getAISummaryKeyFactorPriority(current) : -Infinity;
+
+    if (!current || familyRank > currentFamilyRank || (familyRank === currentFamilyRank && (priority > currentPriority || (priority === currentPriority && factor.strength > current.strength)))) {
+      byFamily.set(family, factor);
+    }
+  });
+
+  return Array.from(byFamily.values());
+};
+
 const selectAISummaryKeyFactorCategoryWinners = (factors: AISummaryKeyFactor[]) => {
   const byCategory = new Map<AISummaryKeyFactorCategory, AISummaryKeyFactor>();
 
@@ -3976,106 +4107,17 @@ const selectAISummaryKeyFactorCategoryWinners = (factors: AISummaryKeyFactor[]) 
   return Array.from(byCategory.values());
 };
 
-const getAISummaryKeyFactorSemanticTokens = (factor: AISummaryKeyFactor) => {
-  const title = factor.title.toLowerCase();
-  const source = String(factor.sourceKind || "").toLowerCase();
-  const detail = factor.detail.toLowerCase();
-  const text = `${title} ${source} ${detail}`;
-  const tokens = new Set<string>();
+const dedupeAISummaryKeyFactors = (factors: AISummaryKeyFactor[]) => {
+  const seenIds = new Set<string>();
+  const seenTitles = new Set<string>();
 
-  const titleIs = (value: string) => title.replace(/[^a-z0-9]+/g, " ").trim() === value;
-
-  if (
-    /explosive acceleration with retention|explosive_continuity|explosive_acceleration_retention/.test(text) ||
-    (title.includes("explosive acceleration") && title.includes("retention"))
-  ) {
-    tokens.add("explosive_with_retention");
-    tokens.add("explosive_complex");
-  }
-
-  if (
-    /explosive output jump|explosive-output-jump|explosive_jump/.test(text) ||
-    titleIs("explosive jump") ||
-    titleIs("explosive output jump")
-  ) {
-    tokens.add("explosive_simple");
-  }
-
-  if (/output rise|output_rise/.test(text) || titleIs("output rise")) {
-    tokens.add("output_rise_simple");
-    tokens.add("explosive_simple");
-  }
-
-  if (
-    /substantial weight increases with structure retained|substantial_weight_tradeoff/.test(text) ||
-    (title.includes("substantial weight") && title.includes("structure retained"))
-  ) {
-    tokens.add("weight_structure_retained");
-    tokens.add("weight_with_retention");
-  }
-
-  if (
-    /output held under rising demand|retained output under weight|retained_output_under_weight|retained-output-under-weight/.test(text) ||
-    (title.includes("output held") && title.includes("rising demand"))
-  ) {
-    tokens.add("output_held_under_demand");
-    tokens.add("weight_with_retention");
-  }
-
-  if (/retained adaptation|retained_adaptation|structure retained/.test(text)) tokens.add("weight_with_retention");
-
-  if (
-    /substantial weight progression|impactful weight progression|substantial weight increases|substantial_weight_gain|significant_weight_gain|impactful_weight_progression/.test(text)
-  ) {
-    tokens.add("weight_magnitude_simple");
-  }
-
-  if (/consecutive weight increases|consecutive_weight_progression|multiple weight increases/.test(text)) {
-    tokens.add("weight_frequency_simple");
-  }
-
-  if (/constraint adaptation|constraint_present|constraint work area|constraint_work_area|solid work area under constraint/.test(text)) tokens.add("constraint_simple");
-  if (/strong output floor|established floor|elevated_floor|constraint_floor/.test(text)) tokens.add("floor_specific");
-  if (/strong output ceiling|established ceiling|strong_output_ceiling/.test(text)) tokens.add("ceiling_specific");
-  if (/work range|output range|work area|tight_baseline_range|controlled_workflow|controlled work range/.test(text)) tokens.add("range_simple");
-
-  return tokens;
-};
-
-const applyAISummaryKeyFactorSemanticSuppression = (factors: AISummaryKeyFactor[]) => {
-  const tokenMap = factors.map((factor) => ({ factor, tokens: getAISummaryKeyFactorSemanticTokens(factor) }));
-  const hasToken = (token: string) => tokenMap.some((item) => item.tokens.has(token));
-  const suppress = new Set<string>();
-
-  const suppressWhere = (predicate: (tokens: Set<string>) => boolean) => {
-    tokenMap.forEach(({ factor, tokens }) => {
-      if (predicate(tokens)) suppress.add(factor.id);
-    });
-  };
-
-  if (hasToken("explosive_with_retention")) {
-    suppressWhere((tokens) => tokens.has("explosive_simple") && !tokens.has("explosive_with_retention"));
-    suppressWhere((tokens) => tokens.has("output_rise_simple") && !tokens.has("explosive_with_retention"));
-  }
-
-  if (hasToken("weight_structure_retained")) {
-    suppressWhere((tokens) => tokens.has("weight_magnitude_simple") && !tokens.has("weight_structure_retained"));
-    suppressWhere((tokens) => tokens.has("output_held_under_demand") && !tokens.has("weight_structure_retained"));
-    suppressWhere((tokens) => tokens.has("constraint_simple") && !tokens.has("weight_structure_retained"));
-  } else if (hasToken("output_held_under_demand")) {
-    suppressWhere((tokens) => tokens.has("constraint_simple") && !tokens.has("output_held_under_demand"));
-    suppressWhere((tokens) => tokens.has("weight_magnitude_simple") && !tokens.has("output_held_under_demand"));
-    suppressWhere((tokens) => tokens.has("weight_frequency_simple") && !tokens.has("output_held_under_demand"));
-  } else if (hasToken("weight_with_retention")) {
-    suppressWhere((tokens) => tokens.has("weight_magnitude_simple") && !tokens.has("weight_with_retention"));
-    suppressWhere((tokens) => tokens.has("constraint_simple") && !tokens.has("weight_with_retention"));
-  }
-
-  if (hasToken("floor_specific") || hasToken("ceiling_specific")) {
-    suppressWhere((tokens) => tokens.has("range_simple") && !tokens.has("floor_specific") && !tokens.has("ceiling_specific"));
-  }
-
-  return factors.filter((factor) => !suppress.has(factor.id));
+  return factors.filter((factor) => {
+    const normalizedTitle = factor.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (seenIds.has(factor.id) || seenTitles.has(normalizedTitle)) return false;
+    seenIds.add(factor.id);
+    seenTitles.add(normalizedTitle);
+    return true;
+  });
 };
 
 const buildAISummaryKeyFactors = (
@@ -4198,7 +4240,9 @@ const buildAISummaryKeyFactors = (
     });
   });
 
-  return applyAISummaryKeyFactorSemanticSuppression(selectAISummaryKeyFactorCategoryWinners(factors))
+  return dedupeAISummaryKeyFactors(
+    selectAISummaryKeyFactorCategoryWinners(selectAISummaryKeyFactorFamilyWinners(factors))
+  )
     .sort((a, b) => getAISummaryKeyFactorPriority(b) - getAISummaryKeyFactorPriority(a) || b.strength - a.strength)
     .slice(0, 6);
 };
