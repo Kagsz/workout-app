@@ -3916,7 +3916,7 @@ const addAISummaryKeyFactor = (factors: AISummaryKeyFactor[], factor: AISummaryK
   if (!alreadyExists) factors.push(normalizedFactor);
 };
 
-const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievement, scorecard: AISummaryScorecard) => {
+const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievement) => {
   switch (achievement.kind) {
     case "strong_output_floor":
     case "constraint_floor":
@@ -3997,7 +3997,7 @@ const buildAISummaryKeyFactors = (
     addAISummaryKeyFactor(factors, {
       id: `interpretation-${achievement.kind}`,
       title: achievement.title,
-      detail: getAISummaryKeyFactorDetail(achievement, scorecard),
+      detail: getAISummaryKeyFactorDetail(achievement),
       strength: achievement.strength,
       priority: getAISummaryImpactRank(achievement.labelImpact) * 30 + achievement.strength * 20 + classificationPriorityBoost,
       category: getAISummaryKeyFactorCategoryForInterpretation(achievement),
