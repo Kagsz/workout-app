@@ -1799,12 +1799,27 @@ type AISummaryHighlight = {
   strength: number;
 };
 
+type AISummaryKeyFactorCategory =
+  | "range"
+  | "sustained_performance"
+  | "weight_progression"
+  | "weight_advancement"
+  | "constraint_adaptation"
+  | "exercise_change"
+  | "trajectory"
+  | "volatility_recovery"
+  | "trade_off"
+  | "conditioning"
+  | "exceptional_marker"
+  | "general";
+
 type AISummaryKeyFactor = {
   id: string;
   title: string;
   detail: string;
   strength: number;
   priority: number;
+  category?: AISummaryKeyFactorCategory;
   sourceKind?: AISummaryInterpretedAchievementKind | AISummaryMarkerKind | AISummaryAchievement["id"];
 };
 
@@ -3772,29 +3787,133 @@ const buildAISummaryInterpretedAchievements = (
 };
 
 
+const getAISummaryKeyFactorCategoryForSource = (sourceKind?: AISummaryKeyFactor["sourceKind"]): AISummaryKeyFactorCategory => {
+  const source = String(sourceKind || "");
+
+  if (["strong_output_ceiling", "strong_output_floor", "constraint_floor", "elevated_floor", "controlled_workflow", "tight_baseline_range"].includes(source)) return "range";
+  if (["sustained_performance", "consistent_output_progression", "true_consistency"].includes(source)) return "sustained_performance";
+  if (["consecutive_weight_progression", "weight_progression"].includes(source)) return "weight_progression";
+  if (["substantial_weight_gain", "significant_weight_gain", "impactful_weight_progression", "weight_progression_streak"].includes(source)) return "weight_advancement";
+  if (["constraint_work_area", "constraint_payoff", "constraint_present", "escalating_constrained_progression", "explosive_constrained_progression"].includes(source)) return "constraint_adaptation";
+  if (["exercise_change_stability", "exercise_change_context"].includes(source)) return "exercise_change";
+  if (["controlled_progression", "controlled_upward_drift", "outlier_hiccup_rebound", "output_rise"].includes(source)) return "trajectory";
+  if (["preserved_volatility", "balanced_volatility", "late_dip", "rebound"].includes(source)) return "volatility_recovery";
+  if (["tradeoff_recovery", "substantial_weight_tradeoff"].includes(source)) return "trade_off";
+  if (["weighted_conditioning"].includes(source)) return "conditioning";
+  if (["dominant_baseline_separation", "explosive_acceleration_retention", "high_octane_window", "explosive_jump"].includes(source)) return "exceptional_marker";
+
+  return "general";
+};
+
+const getAISummaryKeyFactorCategoryForTitle = (title: string): AISummaryKeyFactorCategory => {
+  const value = title.toLowerCase();
+
+  if (/ceiling|floor|work area|work range|output range|workflow|range/.test(value)) return "range";
+  if (/sustained|consistent output|consistency/.test(value)) return "sustained_performance";
+  if (/consecutive weight|multiple weight|weight progression streak/.test(value)) return "weight_progression";
+  if (/substantial weight|impactful weight|gradual weight|weight advancement/.test(value)) return "weight_advancement";
+  if (/constraint|tempo|pause|ecc/.test(value)) return "constraint_adaptation";
+  if (/exercise change/.test(value)) return "exercise_change";
+  if (/trajectory|upward|drift|strong finish/.test(value)) return "trajectory";
+  if (/volatility|recovery|rebound|hiccup/.test(value)) return "volatility_recovery";
+  if (/trade-off|tradeoff/.test(value)) return "trade_off";
+  if (/conditioning|cardio|rower|bike/.test(value)) return "conditioning";
+  if (/exceptional|explosive|dominant|standout|relaunch|high-octane/.test(value)) return "exceptional_marker";
+
+  return "general";
+};
+
+const getAISummaryKeyFactorCategory = (factor: AISummaryKeyFactor): AISummaryKeyFactorCategory => {
+  if (factor.category) return factor.category;
+  const sourceCategory = getAISummaryKeyFactorCategoryForSource(factor.sourceKind);
+  return sourceCategory === "general" ? getAISummaryKeyFactorCategoryForTitle(factor.title) : sourceCategory;
+};
+
+const getAISummaryKeyFactorCategoryRank = (factor: AISummaryKeyFactor) => {
+  const title = factor.title.toLowerCase();
+  const source = String(factor.sourceKind || "");
+  const category = getAISummaryKeyFactorCategory(factor);
+
+  if (category === "range") {
+    if (/ceiling/.test(title) || source === "strong_output_ceiling") return 35;
+    if (/floor/.test(title) || source === "strong_output_floor" || source === "constraint_floor" || source === "elevated_floor") return 34;
+    return 12;
+  }
+
+  if (category === "sustained_performance") {
+    if (/sustained/.test(title) || source === "sustained_performance") return 32;
+    return 20;
+  }
+
+  if (category === "weight_progression") {
+    if (/consecutive/.test(title) || source === "consecutive_weight_progression") return 34;
+    if (/multiple/.test(title)) return 22;
+    return 16;
+  }
+
+  if (category === "weight_advancement") {
+    if (/substantial/.test(title) || source === "substantial_weight_gain") return 34;
+    if (/impactful|significant/.test(title) || source === "significant_weight_gain" || source === "impactful_weight_progression") return 24;
+    return 14;
+  }
+
+  if (category === "constraint_adaptation") {
+    if (/explosive/.test(title) || source === "explosive_constrained_progression") return 34;
+    if (/escalating/.test(title) || source === "escalating_constrained_progression") return 28;
+    return 20;
+  }
+
+  if (category === "exercise_change") {
+    if (/stability|stable/.test(title) || source === "exercise_change_stability") return 30;
+    return 18;
+  }
+
+  if (category === "trajectory") {
+    if (/controlled upward|controlled progression/.test(title) || source === "controlled_progression") return 28;
+    if (/drift|strong finish|rebound/.test(title)) return 20;
+    return 14;
+  }
+
+  if (category === "volatility_recovery") {
+    if (/recovered|recovery|rebound/.test(title)) return 28;
+    if (/balanced/.test(title)) return 22;
+    return 16;
+  }
+
+  if (category === "trade_off") return 18;
+  if (category === "conditioning") return /weighted/.test(title) || source === "weighted_conditioning" ? 26 : 16;
+  if (category === "exceptional_marker") return 34;
+
+  return 10;
+};
+
 const getAISummaryKeyFactorPriority = (factor: AISummaryKeyFactor) => {
   const title = factor.title.toLowerCase();
   const source = String(factor.sourceKind || "");
+  const category = getAISummaryKeyFactorCategory(factor);
 
-  if (/exceptional|explosive|dominant|standout|relaunch/.test(title) || factor.priority >= 95) return factor.priority + 18;
-  if (/consecutive weight|weight progression streak/.test(title)) return factor.priority + 16;
-  if (/ceiling|floor/.test(title) || source === "strong_output_ceiling" || source === "strong_output_floor" || source === "constraint_floor" || source === "elevated_floor") return factor.priority + 14;
-  if (/sustained/.test(title) || source === "sustained_performance") return factor.priority + 12;
-  if (/exercise change/.test(title) || source === "exercise_change_stability" || source === "exercise_change_context") return factor.priority + 11;
-  if (/constraint|tempo|pause|ecc/.test(title) || source === "constraint_work_area" || source === "constraint_payoff" || source === "escalating_constrained_progression" || source === "explosive_constrained_progression") return factor.priority + 10;
-  if (/trade-off|tradeoff/.test(title) || source === "tradeoff_recovery" || source === "substantial_weight_tradeoff") return factor.priority + 5;
-  if (/work area|work range|workflow|range/.test(title)) return factor.priority - 6;
+  if (category === "exceptional_marker" || /exceptional|explosive|dominant|standout|relaunch/.test(title) || factor.priority >= 95) return factor.priority + 18;
+  if (category === "weight_progression") return factor.priority + 16;
+  if (category === "range" && (/ceiling|floor/.test(title) || source === "strong_output_ceiling" || source === "strong_output_floor" || source === "constraint_floor" || source === "elevated_floor")) return factor.priority + 14;
+  if (category === "sustained_performance") return factor.priority + 12;
+  if (category === "exercise_change") return factor.priority + 11;
+  if (category === "constraint_adaptation") return factor.priority + 10;
+  if (category === "weight_advancement") return factor.priority + 9;
+  if (category === "conditioning") return factor.priority + 6;
+  if (category === "trade_off") return factor.priority + 5;
+  if (category === "range") return factor.priority - 6;
   return factor.priority;
 };
 
 const addAISummaryKeyFactor = (factors: AISummaryKeyFactor[], factor: AISummaryKeyFactor) => {
   const normalizedTitle = factor.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normalizedFactor = { ...factor, category: factor.category || getAISummaryKeyFactorCategory(factor) };
   const alreadyExists = factors.some((existing) => {
     const existingTitle = existing.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    return existing.id === factor.id || existingTitle === normalizedTitle;
+    return existing.id === normalizedFactor.id || existingTitle === normalizedTitle;
   });
 
-  if (!alreadyExists) factors.push(factor);
+  if (!alreadyExists) factors.push(normalizedFactor);
 };
 
 const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievement, scorecard: AISummaryScorecard) => {
@@ -3819,9 +3938,7 @@ const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievemen
       return "The block stayed stable even after the exercise changed mid-program.";
     case "substantial_weight_gain":
     case "significant_weight_gain":
-      return scorecard.maxConsecutiveWeightIncreaseCount >= 3
-        ? `Weight increased across ${scorecard.maxConsecutiveWeightIncreaseCount} consecutive progressions while the block kept its structure.`
-        : "Weight progression was large enough to meaningfully shape how this graph should be read.";
+      return "Weight progression was large enough to meaningfully shape how this graph should be read.";
     case "tradeoff_recovery":
     case "substantial_weight_tradeoff":
       return "Rising demands produced a temporary output trade-off while progression continued.";
@@ -3835,6 +3952,28 @@ const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievemen
     default:
       return achievement.meaning.replace(/^The athlete\s+/i, "You ").replace(/\.$/, ".");
   }
+};
+
+const getAISummaryKeyFactorCategoryForInterpretation = (achievement: AISummaryInterpretedAchievement): AISummaryKeyFactorCategory =>
+  getAISummaryKeyFactorCategoryForSource(achievement.kind);
+
+const selectAISummaryKeyFactorCategoryWinners = (factors: AISummaryKeyFactor[]) => {
+  const byCategory = new Map<AISummaryKeyFactorCategory, AISummaryKeyFactor>();
+
+  factors.forEach((factor) => {
+    const category = getAISummaryKeyFactorCategory(factor);
+    const current = byCategory.get(category);
+    const categoryRank = getAISummaryKeyFactorCategoryRank(factor);
+    const currentCategoryRank = current ? getAISummaryKeyFactorCategoryRank(current) : -Infinity;
+    const priority = getAISummaryKeyFactorPriority(factor);
+    const currentPriority = current ? getAISummaryKeyFactorPriority(current) : -Infinity;
+
+    if (!current || categoryRank > currentCategoryRank || (categoryRank === currentCategoryRank && (priority > currentPriority || (priority === currentPriority && factor.strength > current.strength)))) {
+      byCategory.set(category, { ...factor, category });
+    }
+  });
+
+  return Array.from(byCategory.values());
 };
 
 const buildAISummaryKeyFactors = (
@@ -3861,6 +4000,7 @@ const buildAISummaryKeyFactors = (
       detail: getAISummaryKeyFactorDetail(achievement, scorecard),
       strength: achievement.strength,
       priority: getAISummaryImpactRank(achievement.labelImpact) * 30 + achievement.strength * 20 + classificationPriorityBoost,
+      category: getAISummaryKeyFactorCategoryForInterpretation(achievement),
       sourceKind: achievement.kind,
     });
   });
@@ -3872,6 +4012,7 @@ const buildAISummaryKeyFactors = (
       detail: "You established a reliable working floor and kept the block from falling below that level.",
       strength: 0.84,
       priority: 82,
+      category: "range",
       sourceKind: "output_plateau",
     });
   }
@@ -3883,6 +4024,7 @@ const buildAISummaryKeyFactors = (
       detail: "You reached the top working level and kept returning to it as demand increased.",
       strength: 0.84,
       priority: 82,
+      category: "range",
       sourceKind: "output_plateau",
     });
   }
@@ -3897,7 +4039,23 @@ const buildAISummaryKeyFactors = (
         : "You increased weight in consecutive sessions, adding demand without losing the thread of the block.",
       strength: Math.min(0.94, 0.64 + count * 0.07),
       priority: 78 + count * 3,
+      category: "weight_progression",
       sourceKind: "consecutive_weight_progression",
+    });
+  }
+
+  if ((getAISummarySubstantialWeightProgression(scorecard) || getAISummaryImpactfulWeightProgression(scorecard)) && bestWeightProfile) {
+    const substantial = getAISummarySubstantialWeightProgression(scorecard);
+    addAISummaryKeyFactor(factors, {
+      id: substantial ? "substantial-weight-advancement-factor" : "impactful-weight-advancement-factor",
+      title: substantial ? "Substantial Weight Progression" : "Impactful Weight Progression",
+      detail: substantial
+        ? "The amount of weight added was large enough to meaningfully raise the demand of the block."
+        : "The weight increases were meaningful enough to shape how this progress should be read.",
+      strength: substantial ? 0.86 : 0.78,
+      priority: substantial ? 84 : 76,
+      category: "weight_advancement",
+      sourceKind: substantial ? "substantial_weight_gain" : "significant_weight_gain",
     });
   }
 
@@ -3908,6 +4066,7 @@ const buildAISummaryKeyFactors = (
       detail: "You preserved useful output while working under added constraint demand.",
       strength: 0.82,
       priority: 80,
+      category: "constraint_adaptation",
       sourceKind: "constraint_present",
     });
   }
@@ -3919,23 +4078,25 @@ const buildAISummaryKeyFactors = (
       detail: "Rising demands produced a temporary reduction in output while progression continued.",
       strength: 0.68,
       priority: 62,
+      category: "trade_off",
       sourceKind: "late_dip",
     });
   }
 
   achievements.forEach((achievement) => {
-    if (factors.length >= 8) return;
+    if (factors.length >= 12) return;
     addAISummaryKeyFactor(factors, {
       id: `achievement-${achievement.id}`,
       title: achievement.title,
       detail: achievement.detail,
       strength: achievement.strength,
       priority: getAISummaryImpactRank(achievement.labelImpact) * 26 + achievement.strength * 18 + classificationPriorityBoost,
+      category: getAISummaryKeyFactorCategoryForSource(achievement.id) === "general" ? getAISummaryKeyFactorCategoryForTitle(achievement.title) : getAISummaryKeyFactorCategoryForSource(achievement.id),
       sourceKind: achievement.id,
     });
   });
 
-  return factors
+  return selectAISummaryKeyFactorCategoryWinners(factors)
     .sort((a, b) => getAISummaryKeyFactorPriority(b) - getAISummaryKeyFactorPriority(a) || b.strength - a.strength)
     .slice(0, 6);
 };
