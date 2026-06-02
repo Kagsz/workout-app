@@ -370,11 +370,29 @@ const normalizeProgram = (program: Program): Program => ({
   programLength: getProgramLength(program),
 });
 
+const getProgramPlannedSessionTotal = (program: Program | null | undefined) =>
+  getProgramLength(program) * (program?.routines.length || 0);
+
 const getProgramSessionCount = (sessions: SavedSession[], programId: string, memberId?: string | null) => {
   const sessionNumbers = new Set<string>();
 
   sessions.forEach((session) => {
     if (session.programId !== programId) return;
+    if (memberId && session.memberId !== memberId) return;
+
+    const normalized = String(session.sessionNumber || "").trim();
+    sessionNumbers.add(normalized || session.id);
+  });
+
+  return sessionNumbers.size;
+};
+
+const getRoutineSessionCount = (sessions: SavedSession[], programId: string, routineId: string, memberId?: string | null) => {
+  const sessionNumbers = new Set<string>();
+
+  sessions.forEach((session) => {
+    if (session.programId !== programId) return;
+    if (session.routineId !== routineId) return;
     if (memberId && session.memberId !== memberId) return;
 
     const normalized = String(session.sessionNumber || "").trim();
@@ -5971,11 +5989,11 @@ export default function App() {
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                                   <div className="font-semibold text-zinc-900">{getProgramLength(activeAdminProgram)}</div>
-                                  <div>Planned Sessions</div>
+                                  <div>Sessions / Routine</div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramLength(activeAdminProgram)}</div>
-                                  <div>Sessions Complete</div>
+                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
+                                  <div>Total Sessions</div>
                                 </div>
                               </div>
                               <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
@@ -6055,7 +6073,7 @@ export default function App() {
                             >
                               <div className="font-semibold text-zinc-900">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember.id)} / {getProgramLength(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </button>
                             <div className={`text-xs font-semibold uppercase tracking-wide ${
                               program.status === "active"
@@ -6135,11 +6153,11 @@ export default function App() {
                         </div>
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                           <div className="text-base font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</div>
-                          <div>Planned Sessions</div>
+                          <div>Sessions / Routine</div>
                         </div>
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramLength(selectedProgram)}</div>
-                          <div>Sessions Complete</div>
+                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
+                          <div>Total Sessions</div>
                         </div>
                       </div>
                       <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
@@ -6602,7 +6620,7 @@ export default function App() {
                             <div>
                               <div className="text-lg font-semibold">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember?.id)} / {getProgramLength(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -6621,7 +6639,7 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramLength(selectedProgram)}</span> sessions complete
+                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
                     </div>
                     <div className="space-y-3">
                       {selectedProgram.routines.map((routine) => (
@@ -6630,6 +6648,7 @@ export default function App() {
                             <div>
                               <div className="text-lg font-semibold">{routine.label}</div>
                               <div className="text-sm text-zinc-500">{routine.blocks.length} blocks</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(savedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
