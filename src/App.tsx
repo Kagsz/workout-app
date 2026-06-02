@@ -4933,7 +4933,6 @@ export default function App() {
   const [selectedWorkoutExerciseId, setSelectedWorkoutExerciseId] = useState("");
   const [selectedTrackerWorkoutId, setSelectedTrackerWorkoutId] = useState<string | null>(null);
   const [expandedTrackerExerciseIds, setExpandedTrackerExerciseIds] = useState<string[]>([]);
-  const [expandedTrackerWorkoutIds, setExpandedTrackerWorkoutIds] = useState<string[]>([]);
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
@@ -5581,11 +5580,6 @@ export default function App() {
     );
   };
 
-  const toggleExpandedTrackerWorkout = (workoutId: string) => {
-    setExpandedTrackerWorkoutIds((current) =>
-      current.includes(workoutId) ? current.filter((id) => id !== workoutId) : [...current, workoutId]
-    );
-  };
 
   const addTrackerExercise = (nameOverride?: string, muscleGroupOverride?: MuscleGroup) => {
     if (!selectedMember) return null;
