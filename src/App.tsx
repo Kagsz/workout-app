@@ -3983,16 +3983,61 @@ const getAISummaryKeyFactorSemanticTokens = (factor: AISummaryKeyFactor) => {
   const text = `${title} ${source} ${detail}`;
   const tokens = new Set<string>();
 
-  if (/explosive acceleration with retention|explosive_continuity|explosive_acceleration_retention/.test(text)) tokens.add("explosive_with_retention");
-  if (/explosive output jump|explosive jump|explosive-output-jump|explosive_jump|output rise|output_rise/.test(text)) tokens.add("explosive_simple");
+  const titleIs = (value: string) => title.replace(/[^a-z0-9]+/g, " ").trim() === value;
 
-  if (/output held under rising demand|retained output under weight|retained_output_under_weight|retained adaptation|retained_adaptation|structure retained|substantial_weight_tradeoff/.test(text)) tokens.add("weight_with_retention");
-  if (/substantial weight progression|impactful weight progression|substantial weight increases$|substantial_weight_gain|significant_weight_gain|impactful_weight_progression/.test(text)) tokens.add("weight_magnitude_simple");
+  if (
+    /explosive acceleration with retention|explosive_continuity|explosive_acceleration_retention/.test(text) ||
+    (title.includes("explosive acceleration") && title.includes("retention"))
+  ) {
+    tokens.add("explosive_with_retention");
+    tokens.add("explosive_complex");
+  }
+
+  if (
+    /explosive output jump|explosive-output-jump|explosive_jump/.test(text) ||
+    titleIs("explosive jump") ||
+    titleIs("explosive output jump")
+  ) {
+    tokens.add("explosive_simple");
+  }
+
+  if (/output rise|output_rise/.test(text) || titleIs("output rise")) {
+    tokens.add("output_rise_simple");
+    tokens.add("explosive_simple");
+  }
+
+  if (
+    /substantial weight increases with structure retained|substantial_weight_tradeoff/.test(text) ||
+    (title.includes("substantial weight") && title.includes("structure retained"))
+  ) {
+    tokens.add("weight_structure_retained");
+    tokens.add("weight_with_retention");
+  }
+
+  if (
+    /output held under rising demand|retained output under weight|retained_output_under_weight|retained-output-under-weight/.test(text) ||
+    (title.includes("output held") && title.includes("rising demand"))
+  ) {
+    tokens.add("output_held_under_demand");
+    tokens.add("weight_with_retention");
+  }
+
+  if (/retained adaptation|retained_adaptation|structure retained/.test(text)) tokens.add("weight_with_retention");
+
+  if (
+    /substantial weight progression|impactful weight progression|substantial weight increases|substantial_weight_gain|significant_weight_gain|impactful_weight_progression/.test(text)
+  ) {
+    tokens.add("weight_magnitude_simple");
+  }
+
+  if (/consecutive weight increases|consecutive_weight_progression|multiple weight increases/.test(text)) {
+    tokens.add("weight_frequency_simple");
+  }
 
   if (/constraint adaptation|constraint_present|constraint work area|constraint_work_area|solid work area under constraint/.test(text)) tokens.add("constraint_simple");
   if (/strong output floor|established floor|elevated_floor|constraint_floor/.test(text)) tokens.add("floor_specific");
   if (/strong output ceiling|established ceiling|strong_output_ceiling/.test(text)) tokens.add("ceiling_specific");
-  if (/work range|output range|work area|tight_baseline_range|controlled_workflow/.test(text)) tokens.add("range_simple");
+  if (/work range|output range|work area|tight_baseline_range|controlled_workflow|controlled work range/.test(text)) tokens.add("range_simple");
 
   return tokens;
 };
@@ -4002,23 +4047,32 @@ const applyAISummaryKeyFactorSemanticSuppression = (factors: AISummaryKeyFactor[
   const hasToken = (token: string) => tokenMap.some((item) => item.tokens.has(token));
   const suppress = new Set<string>();
 
-  if (hasToken("explosive_with_retention")) {
+  const suppressWhere = (predicate: (tokens: Set<string>) => boolean) => {
     tokenMap.forEach(({ factor, tokens }) => {
-      if (tokens.has("explosive_simple") && !tokens.has("explosive_with_retention")) suppress.add(factor.id);
+      if (predicate(tokens)) suppress.add(factor.id);
     });
+  };
+
+  if (hasToken("explosive_with_retention")) {
+    suppressWhere((tokens) => tokens.has("explosive_simple") && !tokens.has("explosive_with_retention"));
+    suppressWhere((tokens) => tokens.has("output_rise_simple") && !tokens.has("explosive_with_retention"));
   }
 
-  if (hasToken("weight_with_retention")) {
-    tokenMap.forEach(({ factor, tokens }) => {
-      if (tokens.has("weight_magnitude_simple") && !tokens.has("weight_with_retention")) suppress.add(factor.id);
-      if (tokens.has("constraint_simple") && !tokens.has("weight_with_retention")) suppress.add(factor.id);
-    });
+  if (hasToken("weight_structure_retained")) {
+    suppressWhere((tokens) => tokens.has("weight_magnitude_simple") && !tokens.has("weight_structure_retained"));
+    suppressWhere((tokens) => tokens.has("output_held_under_demand") && !tokens.has("weight_structure_retained"));
+    suppressWhere((tokens) => tokens.has("constraint_simple") && !tokens.has("weight_structure_retained"));
+  } else if (hasToken("output_held_under_demand")) {
+    suppressWhere((tokens) => tokens.has("constraint_simple") && !tokens.has("output_held_under_demand"));
+    suppressWhere((tokens) => tokens.has("weight_magnitude_simple") && !tokens.has("output_held_under_demand"));
+    suppressWhere((tokens) => tokens.has("weight_frequency_simple") && !tokens.has("output_held_under_demand"));
+  } else if (hasToken("weight_with_retention")) {
+    suppressWhere((tokens) => tokens.has("weight_magnitude_simple") && !tokens.has("weight_with_retention"));
+    suppressWhere((tokens) => tokens.has("constraint_simple") && !tokens.has("weight_with_retention"));
   }
 
   if (hasToken("floor_specific") || hasToken("ceiling_specific")) {
-    tokenMap.forEach(({ factor, tokens }) => {
-      if (tokens.has("range_simple") && !tokens.has("floor_specific") && !tokens.has("ceiling_specific")) suppress.add(factor.id);
-    });
+    suppressWhere((tokens) => tokens.has("range_simple") && !tokens.has("floor_specific") && !tokens.has("ceiling_specific"));
   }
 
   return factors.filter((factor) => !suppress.has(factor.id));
