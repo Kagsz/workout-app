@@ -1756,6 +1756,7 @@ type AISummaryInterpretedAchievementKind =
   | "hidden_progression"
   | "repeated_demand"
   | "retained_separation"
+  | "tradeoff_recovery"
   | "controlled_progression"
   | "controlled_workflow"
   | "consistent_output_progression"
@@ -1770,6 +1771,7 @@ type AISummaryInterpretedAchievementKind =
   | "weighted_conditioning"
   | "significant_weight_gain"
   | "substantial_weight_gain"
+  | "substantial_weight_tradeoff"
   | "constraint_work_area"
   | "strong_output_ceiling"
   | "strong_output_floor"
@@ -2836,42 +2838,6 @@ const hasAISummarySignificantWeightGain = (profile: AISummarySeriesProfile | nul
   return profile.totalWeightIncrease >= Math.max(7.5, Math.abs(first) * 0.25);
 };
 
-const pushAISummaryInterpretation = (
-  interpreted: AISummaryInterpretedAchievement[],
-  item: AISummaryInterpretedAchievement
-) => {
-  const alreadyHasKind = interpreted.some((existing) => existing.kind === item.kind);
-  if (!alreadyHasKind) interpreted.push(item);
-};
-
-const hasAISummarySustainedPerformancePattern = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
-  const target = profile || getAISummaryBestOutputProfile(scorecard);
-  if (!target || target.points.length < 4) return false;
-
-  const toleratedFloor = target.startOutput - 0.25;
-  const belowBaselineCount = target.points.filter((point) => point.y < toleratedFloor).length;
-  const finishesPositive = target.outputDelta > 0.75;
-  const hasDemandProgression = target.totalWeightIncrease > 0 || scorecard.totalWeightIncreaseCount > 0;
-  const outputValues = target.points.map((point) => point.y);
-  const maxStepRegression = outputValues.reduce((largestDrop, value, index) => {
-    if (index === 0) return largestDrop;
-    return Math.max(largestDrop, outputValues[index - 1] - value);
-  }, 0);
-  const givebackFromPeak = target.peakOutput - target.endOutput;
-  const noMeaningfulGiveback = maxStepRegression <= 0.75 && givebackFromPeak <= 0.75;
-  const structureStayedIntact = belowBaselineCount <= 1 && target.endOutput >= target.startOutput;
-
-  return finishesPositive && hasDemandProgression && structureStayedIntact && noMeaningfulGiveback && !scorecard.hasLateDip && !scorecard.hasRebound;
-};
-
-const hasAISummaryTightBaselineRange = (profile?: AISummarySeriesProfile | null) => {
-  if (!profile || profile.points.length < 3) return false;
-  const stayedAheadOfBaseline = profile.lowOutput >= profile.startOutput - 0.25 && profile.endOutput >= profile.startOutput;
-  const tightWorkRange = profile.outputRange <= Math.max(1.25, Math.abs(profile.outputDelta) + 0.75);
-  const notTrajectoryDriven = profile.outputDelta <= Math.max(1.25, profile.outputRange * 0.75);
-  return stayedAheadOfBaseline && tightWorkRange && notTrajectoryDriven;
-};
-
 const hasAISummaryRecoveredHiccup = (profile?: AISummarySeriesProfile | null) => {
   if (!profile || profile.points.length < 5 || !profile.endsAtPeak || profile.outputDelta <= 0.75) return false;
 
@@ -3072,7 +3038,6 @@ const getAISummarySubstantialWeightProgression = (scorecard: AISummaryScorecard)
 };
 
 const getAISummaryProgressionPhrase = (scorecard: AISummaryScorecard, context: "range" | "ceiling" | "default" = "default") => {
-  void context;
   const hasConsecutiveRun = scorecard.maxConsecutiveWeightIncreaseCount >= 3;
   const hasImpactfulProgression = getAISummaryImpactfulWeightProgression(scorecard);
   const hasSubstantialProgression = getAISummarySubstantialWeightProgression(scorecard);
@@ -3113,6 +3078,7 @@ type AISummaryInterpretationContext = {
   bestProfile?: AISummarySeriesProfile | null;
   weightedConditioning: boolean;
   significantWeightGain: boolean;
+  weightProgressionSeriesCount: number;
   hasExerciseChange: boolean;
   largeRelativeGain: boolean;
   dominantBaselineSeparation: boolean;
@@ -3139,6 +3105,7 @@ const buildAISummaryModerateInterpretedAchievements = (
     bestProfile,
     weightedConditioning,
     significantWeightGain,
+    weightProgressionSeriesCount,
     hasExerciseChange,
     largeRelativeGain,
     tightBaselineRange,
@@ -3209,6 +3176,21 @@ if (hasExerciseChange && scorecard.hasConstraints && bestProfile?.isFlatOrContro
         strength: 0.86,
         labelImpact: "promotes",
         evidenceMarkerKinds: ["constraint_present", "weight_progression", "output_plateau"],
+      });
+    }
+
+    if (scorecard.hasConstraints && significantWeightGain && bestWeightProfile && !interpreted.some((item) => item.kind === "consistent_output_progression" || item.kind === "constraint_work_area")) {
+      pushAISummaryInterpretation(interpreted, {
+        kind: "constraint_weight_progression",
+        title: "Substantial weight increases under constraint",
+        meaning: "The athlete retained the structure of the block while the weight increases became a major part of the story.",
+        summarySentence: joinAISummarySentences(
+          `You carved out a strong work area while making substantial weight increases.`,
+          getAISummaryConstraintPayoffSentence(scorecard, "performance") || `Retaining that structure as demand rose is what makes this performance stand out.`
+        ),
+        strength: 0.88,
+        labelImpact: "promotes",
+        evidenceMarkerKinds: ["weight_progression", "retained_output_under_weight", "constraint_present"],
       });
     }
 
@@ -3614,6 +3596,7 @@ const buildAISummaryInterpretedAchievements = (
   const bestProfile = bestOutputProfile || bestWeightProfile;
   const weightedConditioning = isAISummaryWeightedConditioningProfile(bestWeightProfile) || isAISummaryWeightedConditioningProfile(bestOutputProfile);
   const significantWeightGain = scorecard.seriesProfiles.some(hasAISummarySignificantWeightGain);
+  const weightProgressionSeriesCount = scorecard.seriesProfiles.filter((profile) => profile.totalWeightIncrease > 0).length;
   const hasExerciseChange = scorecard.hasExerciseChange;
   const largeRelativeGain = hasAISummaryLargeRelativeGain(bestOutputProfile);
   const dominantBaselineSeparation = hasAISummaryDominantBaselineSeparation(bestOutputProfile);
@@ -3636,6 +3619,7 @@ const buildAISummaryInterpretedAchievements = (
     bestProfile,
     weightedConditioning,
     significantWeightGain,
+    weightProgressionSeriesCount,
     hasExerciseChange,
     largeRelativeGain,
     dominantBaselineSeparation,
@@ -3917,6 +3901,7 @@ const buildAISummaryExerciseChangeContextSentence = (
   if (kinds.includes("strong_output_ceiling")) return "Despite a mid-program exercise change, you maintained a strong ceiling.";
   if (kinds.includes("strong_output_floor")) return "Despite a mid-program exercise change, you maintained a workable floor.";
   if (kinds.includes("controlled_progression")) return "Despite a mid-program exercise change, the progression still moved upward.";
+  if (kinds.includes("tradeoff_recovery")) return "Despite a mid-program exercise change, you kept the larger progression intact.";
   return "Despite a mid-program exercise change, you maintained your output range.";
 };
 
@@ -3969,10 +3954,13 @@ const getAISummaryCloserText = (
 
   const kinds = interpretedAchievements.map((item) => item.kind);
   const highAchievementEnergy =
+    kinds.includes("substantial_weight_tradeoff") ||
     kinds.includes("constraint_work_area") ||
-    (kinds.includes("substantial_weight_gain") && (scorecard.hasConstraints || scorecard.totalWeightIncreaseCount >= 5));
+    (kinds.includes("substantial_weight_gain") && (scorecard.hasConstraints || scorecard.totalWeightIncreaseCount >= 5)) ||
+    (kinds.includes("tradeoff_recovery") && scorecard.totalWeightIncreaseCount >= 3);
   if (highAchievementEnergy) return "Great job.";
   if (kinds.includes("sustained_performance")) return "Great job.";
+  if (kinds.includes("tradeoff_recovery")) return "Good job.";
   if (kinds.includes("tight_baseline_range")) return classification.label === "Moderate Growth" ? "Good job." : "";
   if (kinds.includes("weighted_conditioning") || kinds.includes("preserved_volatility")) return "Good job.";
   if (kinds.includes("constraint_floor") || kinds.includes("controlled_workflow") || kinds.includes("consistent_output_progression") || kinds.includes("strong_output_floor") || kinds.includes("strong_output_ceiling")) return "Good job.";
