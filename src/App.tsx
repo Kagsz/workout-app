@@ -62,7 +62,7 @@ type Member = {
 };
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Legs" | "Core" | "Cardio" | "Full Body" | "Other";
-type TrackerMetric = "Weight" | "Reps" | "Sets" | "Time" | "Distance" | "Calories" | "RPE" | "Heart Rate" | "Steps" | "Laps" | "Yards" | "Rounds";
+type TrackerMetric = string;
 
 type TrackerEntry = {
   id: string;
@@ -4957,6 +4957,8 @@ export default function App() {
   const [trackerEntryDateByExercise, setTrackerEntryDateByExercise] = useState<Record<string, string>>({});
   const [pendingTrackerEntryExerciseId, setPendingTrackerEntryExerciseId] = useState<string | null>(null);
   const [dataViewerExerciseId, setDataViewerExerciseId] = useState<string | null>(null);
+  const [draggedTrackerExerciseId, setDraggedTrackerExerciseId] = useState<string | null>(null);
+  const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
@@ -4975,10 +4977,7 @@ export default function App() {
 
 
   const activeTrackerExercises = useMemo(
-    () =>
-      trackerExercises
-        .filter((exercise) => exercise.memberId === selectedMember?.id && !exercise.archived)
-        .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
+    () => trackerExercises.filter((exercise) => exercise.memberId === selectedMember?.id && !exercise.archived),
     [trackerExercises, selectedMember?.id]
   );
 
@@ -5657,12 +5656,13 @@ export default function App() {
   };
 
   const addMetricToTrackerExercise = (exerciseId: string) => {
-    const selectedMetric = selectedTrackerMetricByExercise[exerciseId] as TrackerMetric | undefined;
+    const selectedMetric = String(selectedTrackerMetricByExercise[exerciseId] || "").trim();
     if (!selectedMetric) return;
 
     updateTrackerExercise(exerciseId, (exercise) => {
       const metrics = exercise.metrics || [];
-      if (metrics.includes(selectedMetric)) return exercise;
+      const alreadyExists = metrics.some((metric) => metric.trim().toLowerCase() === selectedMetric.toLowerCase());
+      if (alreadyExists) return exercise;
       return { ...exercise, metrics: [...metrics, selectedMetric] };
     });
 
@@ -5769,6 +5769,35 @@ export default function App() {
       current.map((workout) =>
         workout.id === workoutId ? { ...workout, exerciseIds: workout.exerciseIds.filter((id) => id !== exerciseId) } : workout
       )
+    );
+  };
+
+  const reorderTrackerExercises = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    setTrackerExercises((current) => {
+      const draggedIndex = current.findIndex((exercise) => exercise.id === draggedId);
+      const targetIndex = current.findIndex((exercise) => exercise.id === targetId);
+      if (draggedIndex < 0 || targetIndex < 0) return current;
+      const next = [...current];
+      const [dragged] = next.splice(draggedIndex, 1);
+      next.splice(targetIndex, 0, dragged);
+      return next;
+    });
+  };
+
+  const reorderWorkoutExercises = (workoutId: string, draggedExerciseId: string, targetExerciseId: string) => {
+    if (draggedExerciseId === targetExerciseId) return;
+    setTrackerWorkouts((current) =>
+      current.map((workout) => {
+        if (workout.id !== workoutId) return workout;
+        const draggedIndex = workout.exerciseIds.indexOf(draggedExerciseId);
+        const targetIndex = workout.exerciseIds.indexOf(targetExerciseId);
+        if (draggedIndex < 0 || targetIndex < 0) return workout;
+        const nextExerciseIds = [...workout.exerciseIds];
+        const [dragged] = nextExerciseIds.splice(draggedIndex, 1);
+        nextExerciseIds.splice(targetIndex, 0, dragged);
+        return { ...workout, exerciseIds: nextExerciseIds };
+      })
     );
   };
 
@@ -6935,7 +6964,18 @@ export default function App() {
                             const isExpanded = expandedTrackerExerciseIds.includes(exercise.id);
 
                             return (
-                              <div key={exercise.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                              <div
+                                key={exercise.id}
+                                draggable
+                                onDragStart={() => setDraggedTrackerExerciseId(exercise.id)}
+                                onDragOver={(event) => event.preventDefault()}
+                                onDrop={() => {
+                                  if (draggedTrackerExerciseId) reorderTrackerExercises(draggedTrackerExerciseId, exercise.id);
+                                  setDraggedTrackerExerciseId(null);
+                                }}
+                                onDragEnd={() => setDraggedTrackerExerciseId(null)}
+                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3"
+                              >
                                 <div className="flex items-center justify-between gap-3">
                                   <button onClick={() => toggleExpandedTrackerExercise(exercise.id)} className="flex flex-1 items-center gap-2 text-left">
                                     <span className="text-zinc-400">{isExpanded ? "▼" : "▶"}</span>
@@ -6955,24 +6995,30 @@ export default function App() {
                                     <div className="rounded-xl border border-zinc-200 bg-white p-3">
                                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Add Metric</div>
                                       <div className="flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
-                                        <select
+                                        <input
+                                          list={`tracker-metric-options-${exercise.id}`}
                                           value={selectedTrackerMetricByExercise[exercise.id] || ""}
                                           onChange={(event) => setSelectedTrackerMetricByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
+                                          onKeyDown={(event) => {
+                                            if (event.key === "Enter") addMetricToTrackerExercise(exercise.id);
+                                          }}
+                                          placeholder="Metric name"
                                           className="min-w-0 flex-1 bg-white px-3 py-2 text-sm text-zinc-900 outline-none"
-                                        >
-                                          <option value="">Select Metric</option>
+                                        />
+                                        <datalist id={`tracker-metric-options-${exercise.id}`}>
                                           {TRACKER_METRIC_OPTIONS.map((metric) => (
-                                            <option key={metric} value={metric}>{metric}</option>
+                                            <option key={metric} value={metric} />
                                           ))}
-                                        </select>
+                                        </datalist>
                                         <button
                                           onClick={() => addMetricToTrackerExercise(exercise.id)}
-                                          disabled={!selectedTrackerMetricByExercise[exercise.id]}
+                                          disabled={!String(selectedTrackerMetricByExercise[exercise.id] || "").trim()}
                                           className="border-l border-zinc-300 bg-zinc-900 px-4 text-sm font-bold text-white disabled:bg-zinc-300"
                                         >
                                           +
                                         </button>
                                       </div>
+                                      <div className="mt-2 text-xs text-zinc-500">Type a custom metric or choose a preset from the dropdown.</div>
                                     </div>
 
                                     {(exercise.metrics || []).length ? (
@@ -7153,7 +7199,7 @@ export default function App() {
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div>
                           <div className="text-sm font-semibold text-zinc-900">Workout Exercises</div>
-                          <div className="text-xs text-zinc-500">Exercises assigned to this workout.</div>
+                          <div className="text-xs text-zinc-500">Exercises assigned to this workout. Drag cards to reorder.</div>
                         </div>
                         <div className="text-xs text-zinc-500">{selectedTrackerWorkout.exerciseIds.length}</div>
                       </div>
@@ -7164,11 +7210,25 @@ export default function App() {
                             const exercise = trackerExerciseById.get(exerciseId);
                             if (!exercise) return null;
                             return (
-                              <div key={exercise.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                              <div
+                                key={exercise.id}
+                                draggable
+                                onDragStart={() => setDraggedWorkoutExerciseId(exercise.id)}
+                                onDragOver={(event) => event.preventDefault()}
+                                onDrop={() => {
+                                  if (draggedWorkoutExerciseId) reorderWorkoutExercises(selectedTrackerWorkout.id, draggedWorkoutExerciseId, exercise.id);
+                                  setDraggedWorkoutExerciseId(null);
+                                }}
+                                onDragEnd={() => setDraggedWorkoutExerciseId(null)}
+                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3"
+                              >
                                 <div className="flex items-center justify-between gap-3">
-                                  <div>
-                                    <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                    <div className="text-xs text-zinc-500">{exercise.muscleGroup}</div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="cursor-grab text-zinc-400" title="Drag to reorder">☰</span>
+                                    <div>
+                                      <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                      <div className="text-xs text-zinc-500">{exercise.muscleGroup}</div>
+                                    </div>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <button disabled title="Graph placeholder" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm opacity-50">📈</button>
