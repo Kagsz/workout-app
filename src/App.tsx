@@ -2836,33 +2836,6 @@ const hasAISummarySignificantWeightGain = (profile: AISummarySeriesProfile | nul
   return profile.totalWeightIncrease >= Math.max(7.5, Math.abs(first) * 0.25);
 };
 
-const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: AISummarySeriesProfile | null) => {
-  const target = profile || getAISummaryBestWeightProfile(scorecard) || getAISummaryBestOutputProfile(scorecard);
-  if (!target || target.points.length < 3 || target.totalWeightIncrease <= 0) return false;
-
-  const points = target.points;
-  const meaningfulDropThreshold = Math.max(0.75, target.outputRange * 0.22);
-  const recoveryThreshold = meaningfulDropThreshold * 0.6;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const currentWeight = getAISummaryNumericWeight(points[index].weight);
-    const previousWeight = getAISummaryNumericWeight(points[index - 1].weight);
-    if (currentWeight == null || previousWeight == null || currentWeight <= previousWeight) continue;
-
-    const outputDropAmount = points[index - 1].y - points[index].y;
-    if (outputDropAmount < meaningfulDropThreshold) continue;
-
-    const suppressedOutput = points[index].y;
-    const laterPoints = points.slice(index + 1);
-    const hasMeaningfulRecovery = laterPoints.some((point) => point.y >= suppressedOutput + recoveryThreshold);
-    const sustainedLoss = laterPoints.length === 0 || laterPoints.every((point) => point.y <= suppressedOutput + recoveryThreshold);
-
-    if (!hasMeaningfulRecovery && sustainedLoss) return true;
-  }
-
-  return scorecard.hasLateDip && !scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0 && scorecard.outputRangeAverage > 1.5;
-};
-
 const pushAISummaryInterpretation = (
   interpreted: AISummaryInterpretedAchievement[],
   item: AISummaryInterpretedAchievement
@@ -3099,6 +3072,7 @@ const getAISummarySubstantialWeightProgression = (scorecard: AISummaryScorecard)
 };
 
 const getAISummaryProgressionPhrase = (scorecard: AISummaryScorecard, context: "range" | "ceiling" | "default" = "default") => {
+  void context;
   const hasConsecutiveRun = scorecard.maxConsecutiveWeightIncreaseCount >= 3;
   const hasImpactfulProgression = getAISummaryImpactfulWeightProgression(scorecard);
   const hasSubstantialProgression = getAISummarySubstantialWeightProgression(scorecard);
