@@ -3976,6 +3976,54 @@ const selectAISummaryKeyFactorCategoryWinners = (factors: AISummaryKeyFactor[]) 
   return Array.from(byCategory.values());
 };
 
+const getAISummaryKeyFactorSemanticTokens = (factor: AISummaryKeyFactor) => {
+  const title = factor.title.toLowerCase();
+  const source = String(factor.sourceKind || "").toLowerCase();
+  const detail = factor.detail.toLowerCase();
+  const text = `${title} ${source} ${detail}`;
+  const tokens = new Set<string>();
+
+  if (/explosive acceleration with retention|explosive_continuity|explosive_acceleration_retention/.test(text)) tokens.add("explosive_with_retention");
+  if (/explosive output jump|explosive jump|explosive-output-jump|explosive_jump|output rise|output_rise/.test(text)) tokens.add("explosive_simple");
+
+  if (/output held under rising demand|retained output under weight|retained_output_under_weight|retained adaptation|retained_adaptation|structure retained|substantial_weight_tradeoff/.test(text)) tokens.add("weight_with_retention");
+  if (/substantial weight progression|impactful weight progression|substantial weight increases$|substantial_weight_gain|significant_weight_gain|impactful_weight_progression/.test(text)) tokens.add("weight_magnitude_simple");
+
+  if (/constraint adaptation|constraint_present|constraint work area|constraint_work_area|solid work area under constraint/.test(text)) tokens.add("constraint_simple");
+  if (/strong output floor|established floor|elevated_floor|constraint_floor/.test(text)) tokens.add("floor_specific");
+  if (/strong output ceiling|established ceiling|strong_output_ceiling/.test(text)) tokens.add("ceiling_specific");
+  if (/work range|output range|work area|tight_baseline_range|controlled_workflow/.test(text)) tokens.add("range_simple");
+
+  return tokens;
+};
+
+const applyAISummaryKeyFactorSemanticSuppression = (factors: AISummaryKeyFactor[]) => {
+  const tokenMap = factors.map((factor) => ({ factor, tokens: getAISummaryKeyFactorSemanticTokens(factor) }));
+  const hasToken = (token: string) => tokenMap.some((item) => item.tokens.has(token));
+  const suppress = new Set<string>();
+
+  if (hasToken("explosive_with_retention")) {
+    tokenMap.forEach(({ factor, tokens }) => {
+      if (tokens.has("explosive_simple") && !tokens.has("explosive_with_retention")) suppress.add(factor.id);
+    });
+  }
+
+  if (hasToken("weight_with_retention")) {
+    tokenMap.forEach(({ factor, tokens }) => {
+      if (tokens.has("weight_magnitude_simple") && !tokens.has("weight_with_retention")) suppress.add(factor.id);
+      if (tokens.has("constraint_simple") && !tokens.has("weight_with_retention")) suppress.add(factor.id);
+    });
+  }
+
+  if (hasToken("floor_specific") || hasToken("ceiling_specific")) {
+    tokenMap.forEach(({ factor, tokens }) => {
+      if (tokens.has("range_simple") && !tokens.has("floor_specific") && !tokens.has("ceiling_specific")) suppress.add(factor.id);
+    });
+  }
+
+  return factors.filter((factor) => !suppress.has(factor.id));
+};
+
 const buildAISummaryKeyFactors = (
   scorecard: AISummaryScorecard,
   classification: AISummaryClassification,
@@ -4096,7 +4144,7 @@ const buildAISummaryKeyFactors = (
     });
   });
 
-  return selectAISummaryKeyFactorCategoryWinners(factors)
+  return applyAISummaryKeyFactorSemanticSuppression(selectAISummaryKeyFactorCategoryWinners(factors))
     .sort((a, b) => getAISummaryKeyFactorPriority(b) - getAISummaryKeyFactorPriority(a) || b.strength - a.strength)
     .slice(0, 6);
 };
