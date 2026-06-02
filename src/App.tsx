@@ -2844,7 +2844,6 @@ const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: A
 
   const points = target.points;
   const meaningfulDropThreshold = Math.max(0.75, target.outputRange * 0.22);
-  const recoveryThreshold = meaningfulDropThreshold * 0.6;
 
   for (let index = 1; index < points.length; index += 1) {
     const currentWeight = getAISummaryNumericWeight(points[index].weight);
@@ -2854,15 +2853,15 @@ const hasAISummaryRelevantTradeoff = (scorecard: AISummaryScorecard, profile?: A
     const outputDropAmount = points[index - 1].y - points[index].y;
     if (outputDropAmount < meaningfulDropThreshold) continue;
 
-    const suppressedOutput = points[index].y;
-    const laterPoints = points.slice(index + 1);
-    const hasMeaningfulRecovery = laterPoints.some((point) => point.y >= suppressedOutput + recoveryThreshold);
-    const sustainedLoss = laterPoints.length === 0 || laterPoints.every((point) => point.y <= suppressedOutput + recoveryThreshold);
+    const priorOutputWasStableOrBetter =
+      index >= 2
+        ? points[index - 1].y >= points[index - 2].y - 0.25
+        : points[index - 1].y >= target.startOutput - 0.25;
 
-    if (!hasMeaningfulRecovery && sustainedLoss) return true;
+    if (priorOutputWasStableOrBetter) return true;
   }
 
-  return scorecard.hasLateDip && !scorecard.hasRebound && scorecard.totalWeightIncreaseCount > 0 && scorecard.outputRangeAverage > 1.5;
+  return scorecard.hasLateDip && scorecard.totalWeightIncreaseCount > 0 && scorecard.outputRangeAverage > 1.5;
 };
 
 const pushAISummaryInterpretation = (
