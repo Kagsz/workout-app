@@ -13,8 +13,9 @@ import appBanner from "./assets/appbanner1.png";
 // ===== TYPES =====
 
 type Role = "admin" | "member";
-type Screen = "members" | "memberOverview" | "adminPrograms" | "builder" | "input" | "programs" | "routines" | "routine" | "graph";
+type Screen = "members" | "memberOverview" | "adminPrograms" | "builder" | "input" | "memberHome" | "openTracker" | "trainerSupport" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
+type MemberPlan = "basic" | "direct" | "premium";
 type BlockType = "paired" | "single";
 type GraphAxis = "date" | "session";
 
@@ -48,6 +49,7 @@ type Program = {
   routines: Routine[];
   notes?: string;
   memberId?: string;
+  programLength?: number;
 };
 
 type Member = {
@@ -56,6 +58,7 @@ type Member = {
   name: string;
   programClosed?: boolean;
   archived?: boolean;
+  memberPlan?: MemberPlan;
 };
 
 type SessionExerciseInput = {
@@ -343,6 +346,43 @@ const GRAPH_UI_LOCK_CSS = `
 
 const getProgramBlockCount = (program: Program | null | undefined) =>
   program?.routines.reduce((total, routine) => total + routine.blocks.length, 0) || 0;
+
+const DEFAULT_PROGRAM_LENGTH = 8;
+
+const getProgramLength = (program: Program | null | undefined) => {
+  const value = Number(program?.programLength);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_PROGRAM_LENGTH;
+};
+
+const getMemberPlanLabel = (plan: MemberPlan | undefined) => {
+  if (plan === "basic") return "Basic Member";
+  if (plan === "premium") return "Premium Member";
+  return "Direct Member";
+};
+
+const normalizeMember = (member: Member): Member => ({
+  ...member,
+  memberPlan: member.memberPlan || "direct",
+});
+
+const normalizeProgram = (program: Program): Program => ({
+  ...program,
+  programLength: getProgramLength(program),
+});
+
+const getProgramSessionCount = (sessions: SavedSession[], programId: string, memberId?: string | null) => {
+  const sessionNumbers = new Set<string>();
+
+  sessions.forEach((session) => {
+    if (session.programId !== programId) return;
+    if (memberId && session.memberId !== memberId) return;
+
+    const normalized = String(session.sessionNumber || "").trim();
+    sessionNumbers.add(normalized || session.id);
+  });
+
+  return sessionNumbers.size;
+};
 
 // ===== HELPERS =====
 
@@ -1303,12 +1343,13 @@ function buildInitialPrograms(): Program[] {
 }
 
 const mergeProgramsWithBase = (storedPrograms: Program[]) => {
-  const basePrograms = buildInitialPrograms();
-  const storedMap = new Map(storedPrograms.map((program) => [program.id, program]));
+  const basePrograms = buildInitialPrograms().map(normalizeProgram);
+  const normalizedStoredPrograms = storedPrograms.map(normalizeProgram);
+  const storedMap = new Map(normalizedStoredPrograms.map((program) => [program.id, program]));
 
   return [
     ...basePrograms.map((program) => storedMap.get(program.id) || program),
-    ...storedPrograms.filter((program) => !basePrograms.some((baseProgram) => baseProgram.id === program.id)),
+    ...normalizedStoredPrograms.filter((program) => !basePrograms.some((baseProgram) => baseProgram.id === program.id)),
   ];
 };
 
@@ -4800,9 +4841,9 @@ function GraphInsightCard({ insight }: { insight: WorkoutSummaryInsight | null }
 
 export default function App() {
   const [members, setMembers] = useState<Member[]>(() => {
-    if (typeof window === "undefined") return [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
+    if (typeof window === "undefined") return [normalizeMember({ id: "member-1", clientId: "100001", name: "Test Subject" })];
     const stored = window.localStorage.getItem(STORAGE_KEYS.members);
-    return stored ? JSON.parse(stored) : [{ id: "member-1", clientId: "100001", name: "Test Subject" }];
+    return stored ? (JSON.parse(stored) as Member[]).map(normalizeMember) : [normalizeMember({ id: "member-1", clientId: "100001", name: "Test Subject" })];
   });
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
@@ -4814,9 +4855,9 @@ export default function App() {
   const [role, setRole] = useState<Role>("admin");
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
-    if (typeof window === "undefined") return buildInitialPrograms();
+    if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
     const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
-    return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms();
+    return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms().map(normalizeProgram);
   });
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
   const [builderSource, setBuilderSource] = useState<BuilderSource>("adminPrograms");
@@ -5475,8 +5516,12 @@ export default function App() {
       return;
     }
 
-    if (screen === "routines") {
+    if (screen === "programs" || screen === "openTracker" || screen === "trainerSupport") {
       goMemberPrograms();
+      return;
+    }
+    if (screen === "routines") {
+      setScreen("programs");
       return;
     }
     if (screen === "routine") {
@@ -5499,6 +5544,9 @@ export default function App() {
       if (screen === "input") return "Back to Client List";
       return "";
     }
+    if (screen === "programs") return "Back to Member View";
+    if (screen === "openTracker") return "Back to Member View";
+    if (screen === "trainerSupport") return "Back to Member View";
     if (screen === "routines") return "Back to My Programs";
     if (screen === "routine") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to My Programs";
     if (screen === "graph") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
@@ -5513,6 +5561,7 @@ export default function App() {
       name: `New Member ${nextMemberNumber}`,
       programClosed: false,
       archived: false,
+      memberPlan: "direct",
     };
 
     setMembers((prev) => [...prev, newMember]);
@@ -5544,6 +5593,11 @@ export default function App() {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
   };
 
+  const updateSelectedMemberPlan = (plan: MemberPlan) => {
+    if (!selectedMember) return;
+    setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
+  };
+
   const goAdminInput = () => {
     setRole("admin");
     setScreen("input");
@@ -5551,7 +5605,7 @@ export default function App() {
 
   const goMemberPrograms = () => {
     setRole("member");
-    setScreen("programs");
+    setScreen("memberHome");
   };
 
   const openProgram = (programId: string) => {
@@ -5692,8 +5746,17 @@ export default function App() {
     if (role === "admin" && screen === "input") {
       return [{ label: "Admin" }, { label: "Data Input" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
+    if (role === "member" && screen === "memberHome") {
+      return [{ label: "Member" }, { label: "Member View" }];
+    }
+    if (role === "member" && screen === "openTracker") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Open Tracker" }];
+    }
+    if (role === "member" && screen === "trainerSupport") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Trainer Support" }];
+    }
     if (role === "member" && screen === "programs") {
-      return [{ label: "Member" }, { label: "My Programs" }];
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs" }];
     }
     if (role === "member" && screen === "routines") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
@@ -5730,7 +5793,7 @@ export default function App() {
                   <div className="flex flex-nowrap gap-2">
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trainerSupport" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
                 </div>
               </div>
@@ -5878,6 +5941,19 @@ export default function App() {
                         </div>
                       </div>
 
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Type</div>
+                        <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
+                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
+                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
+                        </div>
+                        <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                          Current: {getMemberPlanLabel(selectedMember.memberPlan)}
+                        </div>
+                      </div>
+
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                           <div className="text-sm font-semibold text-zinc-900">Active Program</div>
@@ -5892,6 +5968,14 @@ export default function App() {
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                                   <div className="font-semibold text-zinc-900">{getProgramBlockCount(activeAdminProgram)}</div>
                                   <div>Total Blocks</div>
+                                </div>
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                  <div className="font-semibold text-zinc-900">{getProgramLength(activeAdminProgram)}</div>
+                                  <div>Planned Sessions</div>
+                                </div>
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramLength(activeAdminProgram)}</div>
+                                  <div>Sessions Complete</div>
                                 </div>
                               </div>
                               <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
@@ -5941,6 +6025,7 @@ export default function App() {
                             status: "active",
                             routines: [createRoutine(0)],
                             notes: "",
+                            programLength: DEFAULT_PROGRAM_LENGTH,
                             memberId: selectedMember?.id,
                           };
                           setPrograms((prev) => [...prev, newProgram]);
@@ -5970,6 +6055,7 @@ export default function App() {
                             >
                               <div className="font-semibold text-zinc-900">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember.id)} / {getProgramLength(program)} sessions</div>
                             </button>
                             <div className={`text-xs font-semibold uppercase tracking-wide ${
                               program.status === "active"
@@ -6047,6 +6133,14 @@ export default function App() {
                           <div className="text-base font-semibold text-zinc-900">{getProgramBlockCount(selectedProgram)}</div>
                           <div>Total Blocks</div>
                         </div>
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <div className="text-base font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</div>
+                          <div>Planned Sessions</div>
+                        </div>
+                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramLength(selectedProgram)}</div>
+                          <div>Sessions Complete</div>
+                        </div>
                       </div>
                       <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
                         <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Notes</div>
@@ -6085,6 +6179,23 @@ export default function App() {
     )
   }
 />
+                          </div>
+                          <div>
+                            <Label>Program Length (Sessions)</Label>
+                            <TextInput
+                              type="number"
+                              min={1}
+                              value={String(getProgramLength(selectedProgram))}
+                              onChange={(e) =>
+                                updatePrograms((current) =>
+                                  current.map((p) =>
+                                    p.id === selectedProgram.id
+                                      ? { ...p, programLength: Math.max(1, Number(e.target.value) || DEFAULT_PROGRAM_LENGTH) }
+                                      : p
+                                  )
+                                )
+                              }
+                            />
                           </div>
                           <div>
                             <Label>Program Notes</Label>
@@ -6413,6 +6524,73 @@ export default function App() {
                 </SectionCard>
               )}
 
+              {role === "member" && screen === "memberHome" && selectedMember && (
+                <SectionCard title="Member View" collapsible>
+                  <div className="space-y-3">
+                    <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
+                      {getMemberPlanLabel(selectedMember.memberPlan)}
+                    </div>
+
+                    <button onClick={() => setScreen("openTracker")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
+                      <div className="text-lg font-semibold text-zinc-900">Open Tracker</div>
+                      <div className="mt-1 text-sm text-zinc-500">Track custom workouts and exercise metrics.</div>
+                    </button>
+
+                    {(selectedMember.memberPlan || "direct") === "basic" ? (
+                      <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-100 p-4 text-left text-zinc-400">
+                        <div className="text-lg font-semibold">🔒 My Programs</div>
+                        <div className="mt-1 text-sm">Upgrade to Premium to unlock structured programs.</div>
+                      </div>
+                    ) : (
+                      <button onClick={() => setScreen("programs")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
+                        <div className="text-lg font-semibold text-zinc-900">My Programs</div>
+                        <div className="mt-1 text-sm text-zinc-500">View assigned structured programs.</div>
+                      </button>
+                    )}
+
+                    {(selectedMember.memberPlan || "direct") === "basic" ? (
+                      <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-100 p-4 text-left text-zinc-400">
+                        <div className="text-lg font-semibold">🔒 Trainer Support</div>
+                        <div className="mt-1 text-sm">Upgrade to Premium to unlock remote trainer support.</div>
+                      </div>
+                    ) : (selectedMember.memberPlan || "direct") === "premium" ? (
+                      <button onClick={() => setScreen("trainerSupport")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
+                        <div className="text-lg font-semibold text-zinc-900">Trainer Support</div>
+                        <div className="mt-1 text-sm text-zinc-500">Remote trainer support placeholder.</div>
+                      </button>
+                    ) : null}
+                  </div>
+                </SectionCard>
+              )}
+
+              {role === "member" && screen === "openTracker" && (
+                <SectionCard title="Open Tracker" collapsible>
+                  <div className="space-y-3">
+                    <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
+                      Open Tracker shell is installed. Workout library, exercise library, metrics, entries, graphs, and summaries will be connected in later passes.
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                        <div className="text-sm font-semibold text-zinc-900">Workout Library</div>
+                        <div className="mt-1 text-sm text-zinc-500">Coming soon.</div>
+                      </div>
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                        <div className="text-sm font-semibold text-zinc-900">Exercise Library</div>
+                        <div className="mt-1 text-sm text-zinc-500">Coming soon.</div>
+                      </div>
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
+
+              {role === "member" && screen === "trainerSupport" && (
+                <SectionCard title="Trainer Support" collapsible>
+                  <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
+                    Remote trainer support shell is installed. Messaging, trainer notes, and support requests will be connected in a later pass.
+                  </div>
+                </SectionCard>
+              )}
+
               {role === "member" && screen === "programs" && (
                 <SectionCard title="My Programs" collapsible>
                   <div className="space-y-3">
@@ -6424,6 +6602,7 @@ export default function App() {
                             <div>
                               <div className="text-lg font-semibold">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember?.id)} / {getProgramLength(program)} sessions</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -6441,6 +6620,9 @@ export default function App() {
                 <SectionCard title={`${selectedProgram.name} Routines`}>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
+                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramLength(selectedProgram)}</span> sessions complete
+                    </div>
                     <div className="space-y-3">
                       {selectedProgram.routines.map((routine) => (
                         <button key={routine.id} onClick={() => openRoutine(routine.id)} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
