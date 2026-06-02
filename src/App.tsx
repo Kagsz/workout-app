@@ -1799,6 +1799,15 @@ type AISummaryHighlight = {
   strength: number;
 };
 
+type AISummaryKeyFactor = {
+  id: string;
+  title: string;
+  detail: string;
+  strength: number;
+  priority: number;
+  sourceKind?: AISummaryInterpretedAchievementKind | AISummaryMarkerKind | AISummaryAchievement["id"];
+};
+
 type AISummarySeriesProfile = {
   exerciseName: string;
   points: GraphPoint[];
@@ -1884,6 +1893,7 @@ type WorkoutSummaryInsight = {
   accuracyReason: string;
   achievements: AISummaryAchievement[];
   interpretedAchievements: AISummaryInterpretedAchievement[];
+  keyFactors: AISummaryKeyFactor[];
   highlights: AISummaryHighlight[];
   markers: AISummaryMarker[];
   slots: AISummaryResolvedSlot[];
@@ -3676,7 +3686,8 @@ pushAISummaryInterpretation(interpreted, {
 const buildAISummaryInterpretedAchievements = (
   scorecard: AISummaryScorecard,
   classification: AISummaryClassification,
-  achievements: AISummaryAchievement[]
+  achievements: AISummaryAchievement[],
+  maxItems?: number
 ): AISummaryInterpretedAchievement[] => {
   const interpreted: AISummaryInterpretedAchievement[] = [];
   const bestWeightProfile = getAISummaryBestWeightProfile(scorecard);
@@ -3757,7 +3768,176 @@ const buildAISummaryInterpretedAchievements = (
 
   return interpreted
     .sort((a, b) => getAISummaryImpactRank(b.labelImpact) - getAISummaryImpactRank(a.labelImpact) || b.strength - a.strength)
-    .slice(0, classification.label === "Exceptional Growth" ? 3 : 2);
+    .slice(0, maxItems ?? (classification.label === "Exceptional Growth" ? 3 : 2));
+};
+
+
+const getAISummaryKeyFactorPriority = (factor: AISummaryKeyFactor) => {
+  const title = factor.title.toLowerCase();
+  const source = String(factor.sourceKind || "");
+
+  if (/exceptional|explosive|dominant|standout|relaunch/.test(title) || factor.priority >= 95) return factor.priority + 18;
+  if (/consecutive weight|weight progression streak/.test(title)) return factor.priority + 16;
+  if (/ceiling|floor/.test(title) || source === "strong_output_ceiling" || source === "strong_output_floor" || source === "constraint_floor" || source === "elevated_floor") return factor.priority + 14;
+  if (/sustained/.test(title) || source === "sustained_performance") return factor.priority + 12;
+  if (/exercise change/.test(title) || source === "exercise_change_stability" || source === "exercise_change_context") return factor.priority + 11;
+  if (/constraint|tempo|pause|ecc/.test(title) || source === "constraint_work_area" || source === "constraint_payoff" || source === "escalating_constrained_progression" || source === "explosive_constrained_progression") return factor.priority + 10;
+  if (/trade-off|tradeoff/.test(title) || source === "tradeoff_recovery" || source === "substantial_weight_tradeoff") return factor.priority + 5;
+  if (/work area|work range|workflow|range/.test(title)) return factor.priority - 6;
+  return factor.priority;
+};
+
+const addAISummaryKeyFactor = (factors: AISummaryKeyFactor[], factor: AISummaryKeyFactor) => {
+  const normalizedTitle = factor.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const alreadyExists = factors.some((existing) => {
+    const existingTitle = existing.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return existing.id === factor.id || existingTitle === normalizedTitle;
+  });
+
+  if (!alreadyExists) factors.push(factor);
+};
+
+const getAISummaryKeyFactorDetail = (achievement: AISummaryInterpretedAchievement, scorecard: AISummaryScorecard) => {
+  switch (achievement.kind) {
+    case "strong_output_floor":
+    case "constraint_floor":
+    case "elevated_floor":
+      return "You established a reliable working floor and kept the block from falling below that level.";
+    case "strong_output_ceiling":
+      return "You reached the top working level and kept returning to it as demand increased.";
+    case "sustained_performance":
+      return "You sustained the output structure across an extended stretch while demand continued to rise.";
+    case "consistent_output_progression":
+      return "You kept output steady while weight progression became the main source of added difficulty.";
+    case "constraint_work_area":
+    case "constraint_payoff":
+    case "escalating_constrained_progression":
+    case "explosive_constrained_progression":
+      return "You preserved useful output while working under added constraint demand.";
+    case "exercise_change_stability":
+    case "exercise_change_context":
+      return "The block stayed stable even after the exercise changed mid-program.";
+    case "substantial_weight_gain":
+    case "significant_weight_gain":
+      return scorecard.maxConsecutiveWeightIncreaseCount >= 3
+        ? `Weight increased across ${scorecard.maxConsecutiveWeightIncreaseCount} consecutive progressions while the block kept its structure.`
+        : "Weight progression was large enough to meaningfully shape how this graph should be read.";
+    case "tradeoff_recovery":
+    case "substantial_weight_tradeoff":
+      return "Rising demands produced a temporary output trade-off while progression continued.";
+    case "weighted_conditioning":
+      return "Weight progression gave this conditioning-style result more value than the output line alone shows.";
+    case "controlled_progression":
+      return "The graph stayed controlled while gradually moving in a positive direction.";
+    case "preserved_volatility":
+    case "balanced_volatility":
+      return "The block moved through fluctuation without losing its overall working structure.";
+    default:
+      return achievement.meaning.replace(/^The athlete\s+/i, "You ").replace(/\.$/, ".");
+  }
+};
+
+const buildAISummaryKeyFactors = (
+  scorecard: AISummaryScorecard,
+  classification: AISummaryClassification,
+  achievements: AISummaryAchievement[],
+  interpretedAchievements: AISummaryInterpretedAchievement[]
+): AISummaryKeyFactor[] => {
+  const factors: AISummaryKeyFactor[] = [];
+  const classificationPriorityBoost = classification.label === "Exceptional Growth" ? 6 : classification.label === "Moderate Growth" ? 3 : 0;
+  const bestOutputProfile = getAISummaryBestOutputProfile(scorecard);
+  const bestWeightProfile = getAISummaryBestWeightProfile(scorecard);
+  const hasFloor = hasAISummaryStrongOutputFloor(scorecard, bestOutputProfile) || interpretedAchievements.some((item) => item.kind === "strong_output_floor" || item.kind === "constraint_floor" || item.kind === "elevated_floor");
+  const hasCeiling = hasAISummaryStrongOutputCeiling(scorecard, bestOutputProfile) || interpretedAchievements.some((item) => item.kind === "strong_output_ceiling");
+  const hasSpecificRangePromotion = hasFloor || hasCeiling || interpretedAchievements.some((item) => item.kind === "sustained_performance");
+  const genericRangeKinds: AISummaryInterpretedAchievementKind[] = ["controlled_workflow", "constraint_work_area", "preserved_volatility", "tight_baseline_range"];
+
+  interpretedAchievements.forEach((achievement) => {
+    if (hasSpecificRangePromotion && genericRangeKinds.includes(achievement.kind)) return;
+
+    addAISummaryKeyFactor(factors, {
+      id: `interpretation-${achievement.kind}`,
+      title: achievement.title,
+      detail: getAISummaryKeyFactorDetail(achievement, scorecard),
+      strength: achievement.strength,
+      priority: getAISummaryImpactRank(achievement.labelImpact) * 30 + achievement.strength * 20 + classificationPriorityBoost,
+      sourceKind: achievement.kind,
+    });
+  });
+
+  if (hasFloor && !factors.some((factor) => /floor/i.test(factor.title))) {
+    addAISummaryKeyFactor(factors, {
+      id: "strong-output-floor-factor",
+      title: "Strong Output Floor",
+      detail: "You established a reliable working floor and kept the block from falling below that level.",
+      strength: 0.84,
+      priority: 82,
+      sourceKind: "output_plateau",
+    });
+  }
+
+  if (hasCeiling && !factors.some((factor) => /ceiling/i.test(factor.title))) {
+    addAISummaryKeyFactor(factors, {
+      id: "strong-output-ceiling-factor",
+      title: "Strong Output Ceiling",
+      detail: "You reached the top working level and kept returning to it as demand increased.",
+      strength: 0.84,
+      priority: 82,
+      sourceKind: "output_plateau",
+    });
+  }
+
+  if (scorecard.maxConsecutiveWeightIncreaseCount >= 2 && bestWeightProfile) {
+    const count = scorecard.maxConsecutiveWeightIncreaseCount;
+    addAISummaryKeyFactor(factors, {
+      id: "consecutive-weight-increases-factor",
+      title: count >= 4 ? `${count} Consecutive Weight Increases` : "Consecutive Weight Increases",
+      detail: count >= 4
+        ? `Weight increased across ${count} consecutive progressions while the block kept its structure.`
+        : "You increased weight in consecutive sessions, adding demand without losing the thread of the block.",
+      strength: Math.min(0.94, 0.64 + count * 0.07),
+      priority: 78 + count * 3,
+      sourceKind: "consecutive_weight_progression",
+    });
+  }
+
+  if (scorecard.hasConstraints && scorecard.hasRetainedOutputUnderWeight && !factors.some((factor) => /constraint|tempo|pause|ecc/i.test(factor.title))) {
+    addAISummaryKeyFactor(factors, {
+      id: "constraint-adaptation-factor",
+      title: "Constraint Adaptation",
+      detail: "You preserved useful output while working under added constraint demand.",
+      strength: 0.82,
+      priority: 80,
+      sourceKind: "constraint_present",
+    });
+  }
+
+  if (hasAISummaryRelevantTradeoff(scorecard, bestWeightProfile || bestOutputProfile)) {
+    addAISummaryKeyFactor(factors, {
+      id: "trade-off-factor",
+      title: "Trade-Off",
+      detail: "Rising demands produced a temporary reduction in output while progression continued.",
+      strength: 0.68,
+      priority: 62,
+      sourceKind: "late_dip",
+    });
+  }
+
+  achievements.forEach((achievement) => {
+    if (factors.length >= 8) return;
+    addAISummaryKeyFactor(factors, {
+      id: `achievement-${achievement.id}`,
+      title: achievement.title,
+      detail: achievement.detail,
+      strength: achievement.strength,
+      priority: getAISummaryImpactRank(achievement.labelImpact) * 26 + achievement.strength * 18 + classificationPriorityBoost,
+      sourceKind: achievement.id,
+    });
+  });
+
+  return factors
+    .sort((a, b) => getAISummaryKeyFactorPriority(b) - getAISummaryKeyFactorPriority(a) || b.strength - a.strength)
+    .slice(0, 6);
 };
 
 const buildAISummaryHighlightsFromInterpretations = (interpretedAchievements: AISummaryInterpretedAchievement[]): AISummaryHighlight[] =>
@@ -4195,6 +4375,8 @@ const generateWorkoutSummaryInsightFromGraphData = (graphData: GraphSeries[], bl
   const classification = classifyAISummaryLabel(scorecard);
   const achievements = buildAISummaryAchievements(scorecard, classification);
   const interpretedAchievements = buildAISummaryInterpretedAchievements(scorecard, classification, achievements);
+  const keyFactorInterpretations = buildAISummaryInterpretedAchievements(scorecard, classification, achievements, 6);
+  const keyFactors = buildAISummaryKeyFactors(scorecard, classification, achievements, keyFactorInterpretations);
   const highlights = buildAISummaryHighlightsFromInterpretations(interpretedAchievements);
   const story = locateAISummaryStory(scorecard, classification);
   const slots = composeAISummarySlots(scorecard, classification, story, achievements, interpretedAchievements, highlights);
@@ -4211,6 +4393,7 @@ const generateWorkoutSummaryInsightFromGraphData = (graphData: GraphSeries[], bl
     accuracyReason: scorecard.dataConfidence === "High" ? "stable data set" : scorecard.dataConfidence === "Moderate" ? "developing data set" : "limited data",
     achievements,
     interpretedAchievements,
+    keyFactors,
     highlights,
     markers: scorecard.markers,
     slots,
@@ -4250,7 +4433,15 @@ function GraphInsightCard({ insight }: { insight: WorkoutSummaryInsight | null }
   }
 
   const toneClasses = getAISummaryToneClasses(insight.tone);
-  const secondaryDetails = insight.markers.slice(0, 5);
+  const visibleKeyFactors = insight.keyFactors.slice(0, 2);
+  const expandedKeyFactors = insight.keyFactors.slice(2, 6);
+  const secondaryDetails = expandedKeyFactors.length ? expandedKeyFactors : insight.markers.slice(0, 5).map((marker) => ({
+    id: `${marker.kind}-${marker.text}`,
+    title: marker.kind.replace(/_/g, " "),
+    detail: marker.text,
+    strength: marker.strength,
+    priority: marker.strength * 10,
+  }));
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -4269,12 +4460,12 @@ function GraphInsightCard({ insight }: { insight: WorkoutSummaryInsight | null }
           <p className="mt-2 text-sm leading-6 text-zinc-700">{insight.summary}</p>
 
 
-          {insight.interpretedAchievements.length ? (
+          {visibleKeyFactors.length ? (
             <div className="mt-3">
               <p className="mb-1 text-xs font-bold uppercase tracking-wide text-zinc-500">Key Factors</p>
               <div className="grid gap-2 sm:grid-cols-2">
-                {insight.interpretedAchievements.slice(0, 2).map((achievement) => (
-                  <AISummaryMiniCard key={`${insight.id}-${achievement.kind}-${achievement.title}`} title={achievement.title} detail={achievement.meaning} />
+                {visibleKeyFactors.map((factor) => (
+                  <AISummaryMiniCard key={`${insight.id}-${factor.id}`} title={factor.title} detail={factor.detail} />
                 ))}
               </div>
             </div>
@@ -4287,8 +4478,8 @@ function GraphInsightCard({ insight }: { insight: WorkoutSummaryInsight | null }
               </button>
               {open ? (
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {secondaryDetails.map((marker) => (
-                    <AISummaryMiniCard key={`${insight.id}-${marker.kind}-${marker.text}`} title={marker.kind.replace(/_/g, " ")} detail={marker.text} />
+                  {secondaryDetails.map((factor) => (
+                    <AISummaryMiniCard key={`${insight.id}-${factor.id}`} title={factor.title} detail={factor.detail} />
                   ))}
                 </div>
               ) : null}
