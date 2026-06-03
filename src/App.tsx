@@ -5095,6 +5095,65 @@ export default function App() {
 
   const latestSavedSession = matchingSavedSessions[0] || null;
 
+
+  const premiumProgramInputActive = canMemberEnterProgramResults(selectedProgram, selectedMember);
+
+  const getSessionSortTime = (session: SavedSession) =>
+    Math.max(getSafeDateTime(session.date || ""), getSafeDateTime(session.createdAt || ""));
+
+  const getBlockOutcomeValue = (block: Block, entry?: SessionExerciseInput) => {
+    if (!entry) return "";
+    return block.type === "single" ? String(entry.performance || "").trim() : String(entry.setsCompleted || "").trim();
+  };
+
+  const isBlockCompleteInSession = (block: Block, session?: SavedSession | null) => {
+    if (!session) return false;
+
+    const savedBlock = session.blocks.find((item) => item.blockId === block.id);
+    if (!savedBlock) return false;
+
+    return block.exercises.every((exercise) => {
+      const savedEntry = savedBlock.entries.find((entry) => entry.exerciseId === exercise.id);
+      return !!getBlockOutcomeValue(block, savedEntry);
+    });
+  };
+
+  const premiumNextRoutineId = useMemo(() => {
+    if (!premiumProgramInputActive || !selectedProgram || !selectedMember || !selectedProgram.routines.length) return null;
+
+    const memberProgramSessions = savedSessions
+      .filter((session) => session.programId === selectedProgram.id && session.memberId === selectedMember.id)
+      .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a));
+
+    const latestSession = memberProgramSessions[0];
+    if (!latestSession) return selectedProgram.routines[0]?.id || null;
+
+    const latestRoutineIndex = selectedProgram.routines.findIndex((routine) => routine.id === latestSession.routineId);
+    if (latestRoutineIndex < 0) return selectedProgram.routines[0]?.id || null;
+
+    return selectedProgram.routines[(latestRoutineIndex + 1) % selectedProgram.routines.length]?.id || null;
+  }, [premiumProgramInputActive, savedSessions, selectedMember, selectedProgram]);
+
+  const latestSelectedRoutineSession = useMemo(() => {
+    if (!premiumProgramInputActive || !selectedProgram || !selectedRoutine || !selectedMember) return null;
+
+    return savedSessions
+      .filter(
+        (session) =>
+          session.programId === selectedProgram.id &&
+          session.routineId === selectedRoutine.id &&
+          session.memberId === selectedMember.id
+      )
+      .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a))[0] || null;
+  }, [premiumProgramInputActive, savedSessions, selectedMember, selectedProgram, selectedRoutine]);
+
+  const premiumNextBlockId = useMemo(() => {
+    if (!premiumProgramInputActive || !selectedRoutine || !selectedRoutine.blocks.length) return null;
+
+    const firstIncompleteBlock = selectedRoutine.blocks.find((block) => !isBlockCompleteInSession(block, latestSelectedRoutineSession));
+    return firstIncompleteBlock?.id || selectedRoutine.blocks[0]?.id || null;
+  }, [premiumProgramInputActive, selectedRoutine, latestSelectedRoutineSession]);
+
   const graphData = useMemo<GraphSeries[]>(() => {
     if (!selectedBlock || !selectedRoutine || !selectedProgram || !selectedMember) return [];
 
@@ -7523,21 +7582,31 @@ export default function App() {
                       Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
                     </div>
                     <div className="space-y-3">
-                      {selectedProgram.routines.map((routine) => (
-                        <button key={routine.id} onClick={() => openRoutine(routine.id)} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-lg font-semibold">{routine.label}</div>
-                              <div className="text-sm text-zinc-500">{routine.blocks.length} blocks</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(savedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
+                      {selectedProgram.routines.map((routine) => {
+                        const isNextRoutine = premiumProgramInputActive && routine.id === premiumNextRoutineId;
+                        return (
+                          <button
+                            key={routine.id}
+                            onClick={() => openRoutine(routine.id)}
+                            className={`w-full rounded-2xl border p-4 text-left transition hover:border-zinc-400 hover:bg-white ${isNextRoutine ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-lg font-semibold">{routine.label}</div>
+                                  {isNextRoutine ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
+                                </div>
+                                <div className="text-sm text-zinc-500">{routine.blocks.length} blocks</div>
+                                <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(savedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
+                                <div className="text-sm font-medium text-zinc-600">{selectedMember?.programClosed ? "Completed" : "In Progress"}</div>
+                              </div>
                             </div>
-                            <div className="flex flex-col items-end gap-1">
-                              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
-                              <div className="text-sm font-medium text-zinc-600">{selectedMember?.programClosed ? "Completed" : "In Progress"}</div>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 </SectionCard>
@@ -7546,33 +7615,32 @@ export default function App() {
               {role === "member" && screen === "routine" && selectedRoutine && (
                 <SectionCard title={selectedRoutine.label}>
                   <div className="space-y-3">
-                    {canMemberEnterProgramResults(selectedProgram, selectedMember) ? (
-                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-sm font-semibold text-zinc-900">Premium Member Input</div>
-                        <div className="mt-1 text-sm text-zinc-600">Enter outcomes for this routine, then review progress through the existing graph screens.</div>
-                        <PrimaryButton onClick={() => openMemberInputScreen()} className="mt-3 w-full">Enter Results</PrimaryButton>
-                      </div>
-                    ) : null}
                     {selectedRoutine.blocks.map((block) =>
-                      canMemberEnterProgramResults(selectedProgram, selectedMember) ? (
-                        <div key={block.id} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-lg font-semibold">{block.title}</div>
-                              <div className="mt-2 space-y-1 text-sm text-zinc-600">
-                                {block.exercises.map((exercise, index) => (
-                                  <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {exercise.target || "—"} {exercise.metric || ""}</div>
-                                ))}
+                      canMemberEnterProgramResults(selectedProgram, selectedMember) ? (() => {
+                        const isNextBlock = premiumProgramInputActive && block.id === premiumNextBlockId;
+                        return (
+                          <div key={block.id} className={`w-full rounded-2xl border p-4 text-left ${isNextBlock ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-lg font-semibold">{block.title}</div>
+                                  {isNextBlock ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
+                                </div>
+                                <div className="mt-2 space-y-1 text-sm text-zinc-600">
+                                  {block.exercises.map((exercise, index) => (
+                                    <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                  ))}
+                                </div>
+                                {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
                               </div>
-                              {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
+                            </div>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                              <SmallButton onClick={() => openMemberInputScreen()}>Enter Results</SmallButton>
+                              <SmallButton onClick={() => openGraph(selectedRoutine.id, block.id)}>View Graph</SmallButton>
                             </div>
                           </div>
-                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                            <SmallButton onClick={() => openMemberInputScreen()}>Enter Results</SmallButton>
-                            <SmallButton onClick={() => openGraph(selectedRoutine.id, block.id)}>View Graph</SmallButton>
-                          </div>
-                        </div>
-                      ) : (
+                        );
+                      })() : (
                         <button key={block.id} onClick={() => openGraph(selectedRoutine.id, block.id)} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
                           <div className="flex items-start justify-between gap-3">
                             <div>
