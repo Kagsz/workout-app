@@ -384,7 +384,7 @@ const DEFAULT_PROGRAM_LENGTH = 8;
 const getDefaultProgramInputModeForMember = (member?: Member | null): ProgramInputMode =>
   (member?.memberPlan || "direct") === "premium" ? "memberInput" : "trainerInput";
 
-const getProgramInputMode = (program: Program | null | undefined): ProgramInputMode => program?.inputMode || "trainerInput";
+const getProgramInputMode = (program: Program | null | undefined, member?: Member | null): ProgramInputMode => program?.inputMode || getDefaultProgramInputModeForMember(member);
 
 const MUSCLE_GROUP_OPTIONS: MuscleGroup[] = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Legs", "Core", "Cardio", "Full Body", "Other"];
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds"];
@@ -6687,7 +6687,7 @@ export default function App() {
                           <div>
                             <Label>Program Input Mode</Label>
                             <select
-                              value={getProgramInputMode(selectedProgram)}
+                              value={getProgramInputMode(selectedProgram, selectedMember)}
                               onChange={(e) =>
                                 updatePrograms((current) =>
                                   current.map((p) =>
@@ -7543,7 +7543,7 @@ export default function App() {
               {role === "member" && screen === "routine" && selectedRoutine && (
                 <SectionCard title={selectedRoutine.label}>
                   <div className="space-y-3">
-                    {selectedProgram && getProgramInputMode(selectedProgram) === "memberInput" ? (
+                    {selectedProgram && getProgramInputMode(selectedProgram, selectedMember) === "memberInput" ? (
                       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                         <div className="text-sm font-semibold text-zinc-900">Premium Member Input</div>
                         <div className="mt-1 text-sm text-zinc-600">Enter outcomes for this routine, then review progress through the existing graph screens.</div>
@@ -7551,7 +7551,7 @@ export default function App() {
                       </div>
                     ) : null}
                     {selectedRoutine.blocks.map((block) =>
-                      selectedProgram && getProgramInputMode(selectedProgram) === "memberInput" ? (
+                      selectedProgram && getProgramInputMode(selectedProgram, selectedMember) === "memberInput" ? (
                         <div key={block.id} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left">
                           <div className="flex items-start justify-between gap-3">
                             <div>
