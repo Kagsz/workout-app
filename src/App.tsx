@@ -84,11 +84,19 @@ type TrackerExercise = {
   createdAt: string;
 };
 
+type TrackerWorkoutExerciseSlot = {
+  id: string;
+  exerciseId: string;
+  createdAt: string;
+  entries?: TrackerEntry[];
+};
+
 type TrackerWorkout = {
   id: string;
   memberId: string;
   name: string;
   exerciseIds: string[];
+  exerciseSlots?: TrackerWorkoutExerciseSlot[];
   archived?: boolean;
   createdAt: string;
 };
@@ -400,6 +408,26 @@ const normalizeTrackerExercise = (exercise: TrackerExercise): TrackerExercise =>
   metrics: exercise.metrics || [],
   entries: exercise.entries || [],
 });
+
+const normalizeTrackerWorkout = (workout: TrackerWorkout): TrackerWorkout => {
+  const exerciseSlots = (workout.exerciseSlots && workout.exerciseSlots.length
+    ? workout.exerciseSlots
+    : (workout.exerciseIds || []).map((exerciseId, index) => ({
+        id: `legacy-${workout.id}-${exerciseId}-${index}`,
+        exerciseId,
+        createdAt: workout.createdAt || new Date().toISOString(),
+        entries: [],
+      }))
+  ).map((slot) => ({ ...slot, entries: slot.entries || [] }));
+
+  return {
+    ...workout,
+    exerciseIds: exerciseSlots.map((slot) => slot.exerciseId),
+    exerciseSlots,
+  };
+};
+
+const getTrackerContextKey = (exerciseId: string, workoutSlotId?: string | null) => workoutSlotId ? `workout-slot:${workoutSlotId}` : exerciseId;
 
 const getProgramLength = (program: Program | null | undefined) => {
   const value = Number(program?.programLength);
@@ -4955,19 +4983,23 @@ export default function App() {
   const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = window.localStorage.getItem(STORAGE_KEYS.trackerWorkouts);
-    return stored ? JSON.parse(stored) : [];
+    return stored ? (JSON.parse(stored) as TrackerWorkout[]).map(normalizeTrackerWorkout) : [];
   });
   const [newTrackerExerciseName, setNewTrackerExerciseName] = useState("");
   const [newTrackerExerciseMuscleGroup, setNewTrackerExerciseMuscleGroup] = useState<MuscleGroup>("Chest");
   const [newWorkoutName, setNewWorkoutName] = useState("");
   const [selectedWorkoutExerciseId, setSelectedWorkoutExerciseId] = useState("");
   const [selectedTrackerWorkoutId, setSelectedTrackerWorkoutId] = useState<string | null>(null);
+  const [trackerTab, setTrackerTab] = useState<"exercises" | "workouts">("exercises");
   const [expandedTrackerExerciseIds, setExpandedTrackerExerciseIds] = useState<string[]>([]);
   const [selectedTrackerMetricByExercise, setSelectedTrackerMetricByExercise] = useState<Record<string, string>>({});
   const [trackerDraftValues, setTrackerDraftValues] = useState<Record<string, Record<string, string>>>({});
   const [trackerEntryDateByExercise, setTrackerEntryDateByExercise] = useState<Record<string, string>>({});
   const [pendingTrackerEntryExerciseId, setPendingTrackerEntryExerciseId] = useState<string | null>(null);
+  const [pendingTrackerWorkoutSlotId, setPendingTrackerWorkoutSlotId] = useState<string | null>(null);
+  const [pendingMetricRemoval, setPendingMetricRemoval] = useState<{ exerciseId: string; metric: TrackerMetric } | null>(null);
   const [dataViewerExerciseId, setDataViewerExerciseId] = useState<string | null>(null);
+  const [dataViewerWorkoutSlotId, setDataViewerWorkoutSlotId] = useState<string | null>(null);
   const [draggedTrackerExerciseId, setDraggedTrackerExerciseId] = useState<string | null>(null);
   const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
@@ -4997,6 +5029,7 @@ export default function App() {
   const activeTrackerWorkouts = useMemo(
     () =>
       trackerWorkouts
+        .map(normalizeTrackerWorkout)
         .filter((workout) => workout.memberId === selectedMember?.id && !workout.archived)
         .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
     [trackerWorkouts, selectedMember?.id]
@@ -5012,6 +5045,16 @@ export default function App() {
     [activeTrackerWorkouts, selectedTrackerWorkoutId]
   );
 
+  const hasWorkoutSlotEntryForDate = (slot: TrackerWorkoutExerciseSlot, entryDate = getTodayInputDate()) =>
+    Boolean((slot.entries || []).find((entry) => entry.entryDate === entryDate));
+
+  const selectedWorkoutNextSlotId = useMemo(() => {
+    if (!selectedTrackerWorkout) return null;
+    const today = getTodayInputDate();
+    const firstOpenSlot = (selectedTrackerWorkout.exerciseSlots || []).find((slot) => !hasWorkoutSlotEntryForDate(slot, today));
+    return firstOpenSlot?.id || null;
+  }, [selectedTrackerWorkout]);
+
   const pendingTrackerEntryExercise = useMemo(
     () => trackerExercises.find((exercise) => exercise.id === pendingTrackerEntryExerciseId) || null,
     [trackerExercises, pendingTrackerEntryExerciseId]
@@ -5022,11 +5065,35 @@ export default function App() {
     [trackerExercises, dataViewerExerciseId]
   );
 
+  const dataViewerWorkoutSlot = useMemo(() => {
+    if (!dataViewerWorkoutSlotId) return null;
+    for (const workout of activeTrackerWorkouts) {
+      const slot = (workout.exerciseSlots || []).find((item) => item.id === dataViewerWorkoutSlotId);
+      if (slot) return { workout, slot, exercise: trackerExerciseById.get(slot.exerciseId) || null };
+    }
+    return null;
+  }, [activeTrackerWorkouts, dataViewerWorkoutSlotId, trackerExerciseById]);
+
+  const pendingTrackerWorkoutSlot = useMemo(() => {
+    if (!pendingTrackerWorkoutSlotId) return null;
+    for (const workout of activeTrackerWorkouts) {
+      const slot = (workout.exerciseSlots || []).find((item) => item.id === pendingTrackerWorkoutSlotId);
+      if (slot) return { workout, slot };
+    }
+    return null;
+  }, [activeTrackerWorkouts, pendingTrackerWorkoutSlotId]);
+
+  const pendingTrackerEntryContextKey = pendingTrackerEntryExercise ? getTrackerContextKey(pendingTrackerEntryExercise.id, pendingTrackerWorkoutSlotId) : "";
+
   const pendingTrackerExistingEntry = useMemo(() => {
     if (!pendingTrackerEntryExercise) return null;
-    const entryDate = trackerEntryDateByExercise[pendingTrackerEntryExercise.id] || getTodayInputDate();
+    const contextKey = getTrackerContextKey(pendingTrackerEntryExercise.id, pendingTrackerWorkoutSlotId);
+    const entryDate = trackerEntryDateByExercise[contextKey] || getTodayInputDate();
+    if (pendingTrackerWorkoutSlot?.slot) {
+      return (pendingTrackerWorkoutSlot.slot.entries || []).find((entry) => entry.entryDate === entryDate) || null;
+    }
     return (pendingTrackerEntryExercise.entries || []).find((entry) => entry.entryDate === entryDate) || null;
-  }, [pendingTrackerEntryExercise, trackerEntryDateByExercise]);
+  }, [pendingTrackerEntryExercise, pendingTrackerWorkoutSlot, pendingTrackerWorkoutSlotId, trackerEntryDateByExercise]);
 
   useEffect(() => {
     if (!selectedMember) {
@@ -5118,8 +5185,14 @@ export default function App() {
     });
   };
 
-  const premiumNextRoutineId = useMemo(() => {
-    if (!premiumProgramInputActive || !selectedProgram || !selectedMember || !selectedProgram.routines.length) return null;
+  const selectedProgramPlannedTotal = selectedProgram ? getProgramPlannedSessionTotal(selectedProgram) : 0;
+  const selectedProgramCompletedTotal = selectedProgram ? getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id) : 0;
+  const selectedProgramIsComplete = selectedProgramPlannedTotal > 0 && selectedProgramCompletedTotal >= selectedProgramPlannedTotal;
+
+  const nextRoutineId = useMemo(() => {
+    if (!selectedProgram || !selectedMember || !selectedProgram.routines.length) return null;
+    if ((selectedMember.memberPlan || "direct") === "basic") return null;
+    if (selectedProgramIsComplete) return null;
 
     const memberProgramSessions = savedSessions
       .filter((session) => session.programId === selectedProgram.id && session.memberId === selectedMember.id)
@@ -5132,7 +5205,7 @@ export default function App() {
     if (latestRoutineIndex < 0) return selectedProgram.routines[0]?.id || null;
 
     return selectedProgram.routines[(latestRoutineIndex + 1) % selectedProgram.routines.length]?.id || null;
-  }, [premiumProgramInputActive, savedSessions, selectedMember, selectedProgram]);
+  }, [savedSessions, selectedMember, selectedProgram, selectedProgramIsComplete]);
 
   const latestSelectedRoutineSession = useMemo(() => {
     if (!premiumProgramInputActive || !selectedProgram || !selectedRoutine || !selectedMember) return null;
@@ -5151,7 +5224,7 @@ export default function App() {
     if (!premiumProgramInputActive || !selectedRoutine || !selectedRoutine.blocks.length) return null;
 
     const firstIncompleteBlock = selectedRoutine.blocks.find((block) => !isBlockCompleteInSession(block, latestSelectedRoutineSession));
-    return firstIncompleteBlock?.id || selectedRoutine.blocks[0]?.id || null;
+    return firstIncompleteBlock?.id || null;
   }, [premiumProgramInputActive, selectedRoutine, latestSelectedRoutineSession]);
 
   const graphData = useMemo<GraphSeries[]>(() => {
@@ -5754,55 +5827,206 @@ export default function App() {
     setSelectedTrackerMetricByExercise((current) => ({ ...current, [exerciseId]: "" }));
   };
 
-  const updateTrackerMetricDraftValue = (exerciseId: string, metric: TrackerMetric, value: string) => {
+  const updateTrackerMetricDraftValue = (contextKey: string, metric: TrackerMetric, value: string) => {
     setTrackerDraftValues((current) => ({
       ...current,
-      [exerciseId]: {
-        ...(current[exerciseId] || {}),
+      [contextKey]: {
+        ...(current[contextKey] || {}),
         [metric]: value,
       },
     }));
   };
 
-  const getTrackerEntryDate = (exerciseId: string) => trackerEntryDateByExercise[exerciseId] || getTodayInputDate();
+  const getTrackerEntryDate = (contextKey: string) => trackerEntryDateByExercise[contextKey] || getTodayInputDate();
 
-  const requestTrackerEntryConfirmation = (exerciseId: string) => {
+  const requestTrackerEntryConfirmation = (exerciseId: string, workoutSlotId?: string) => {
     const exercise = trackerExercises.find((item) => item.id === exerciseId);
     if (!exercise || !(exercise.metrics || []).length) return;
     setPendingTrackerEntryExerciseId(exerciseId);
+    setPendingTrackerWorkoutSlotId(workoutSlotId || null);
   };
+
+  const requestRemoveMetric = (exerciseId: string, metric: TrackerMetric) => {
+    setPendingMetricRemoval({ exerciseId, metric });
+  };
+
+  const confirmRemoveMetric = () => {
+    if (!pendingMetricRemoval) return;
+    const { exerciseId, metric } = pendingMetricRemoval;
+    updateTrackerExercise(exerciseId, (exercise) => ({
+      ...exercise,
+      metrics: (exercise.metrics || []).filter((item) => item !== metric),
+      entries: (exercise.entries || []).map((entry) => {
+        const { [metric]: _removed, ...values } = entry.values || {};
+        return { ...entry, values };
+      }),
+    }));
+    setTrackerWorkouts((current) =>
+      current.map((workout) => {
+        const normalized = normalizeTrackerWorkout(workout);
+        const nextSlots = (normalized.exerciseSlots || []).map((slot) => {
+          if (slot.exerciseId !== exerciseId) return slot;
+          return {
+            ...slot,
+            entries: (slot.entries || []).map((entry) => {
+              const { [metric]: _removed, ...values } = entry.values || {};
+              return { ...entry, values };
+            }),
+          };
+        });
+        return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
+      })
+    );
+    setTrackerDraftValues((current) => {
+      const next = { ...current };
+      Object.keys(next).forEach((key) => {
+        if (key === exerciseId || key.startsWith("workout-slot:")) {
+          const { [metric]: _removed, ...values } = next[key] || {};
+          next[key] = values;
+        }
+      });
+      return next;
+    });
+    setPendingMetricRemoval(null);
+  };
+
+  const renderTrackerExerciseLogPanel = (
+    exercise: TrackerExercise,
+    contextKey: string,
+    savedEntries: TrackerEntry[],
+    workoutSlotId?: string
+  ) => (
+    <div className="mt-3 space-y-3">
+      <div className="rounded-xl border border-zinc-200 bg-white p-3">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Add Metric</div>
+        <div className="flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
+          <input
+            list={`tracker-metric-options-${exercise.id}`}
+            value={selectedTrackerMetricByExercise[exercise.id] || ""}
+            onChange={(event) => setSelectedTrackerMetricByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addMetricToTrackerExercise(exercise.id);
+            }}
+            placeholder="Metric name"
+            className="min-w-0 flex-1 bg-white px-3 py-2 text-sm text-zinc-900 outline-none"
+          />
+          <datalist id={`tracker-metric-options-${exercise.id}`}>
+            {TRACKER_METRIC_OPTIONS.map((metric) => (
+              <option key={metric} value={metric} />
+            ))}
+          </datalist>
+          <button
+            onClick={() => addMetricToTrackerExercise(exercise.id)}
+            disabled={!String(selectedTrackerMetricByExercise[exercise.id] || "").trim()}
+            className="border-l border-zinc-300 bg-zinc-900 px-4 text-sm font-bold text-white disabled:bg-zinc-300"
+          >
+            +
+          </button>
+        </div>
+        <div className="mt-2 text-xs text-zinc-500">Type a custom metric or choose a preset from the dropdown.</div>
+      </div>
+
+      {(exercise.metrics || []).length ? (
+        <div className="rounded-xl border border-zinc-200 bg-white p-3">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">Log Entry</div>
+          <div className="space-y-2">
+            {(exercise.metrics || []).map((metric) => (
+              <div key={metric} className="grid grid-cols-[120px_1fr] items-center gap-2">
+                <div className="flex items-center justify-between gap-2 text-sm font-semibold text-zinc-700">
+                  <span className="truncate">{metric}</span>
+                  <button
+                    type="button"
+                    onClick={() => requestRemoveMetric(exercise.id, metric)}
+                    className="flex h-6 w-6 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600 hover:bg-red-100"
+                    aria-label={`Remove ${metric}`}
+                  >
+                    ×
+                  </button>
+                </div>
+                <input
+                  value={trackerDraftValues[contextKey]?.[metric] || ""}
+                  onChange={(event) => updateTrackerMetricDraftValue(contextKey, metric, event.target.value)}
+                  placeholder="Enter value"
+                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                />
+              </div>
+            ))}
+            <div className="grid grid-cols-[120px_1fr] items-center gap-2 pt-1">
+              <div className="text-sm font-semibold text-zinc-700">Date</div>
+              <input
+                type="date"
+                value={getTrackerEntryDate(contextKey)}
+                onChange={(event) => setTrackerEntryDateByExercise((current) => ({ ...current, [contextKey]: event.target.value }))}
+                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <PrimaryButton onClick={() => requestTrackerEntryConfirmation(exercise.id, workoutSlotId)}>Enter</PrimaryButton>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">Choose a metric above to begin logging entries for this exercise.</div>
+      )}
+
+      <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">
+        Saved entries: {savedEntries.length}
+      </div>
+    </div>
+  );
 
   const confirmTrackerEntry = () => {
     if (!pendingTrackerEntryExerciseId) return;
     const exerciseId = pendingTrackerEntryExerciseId;
-    const entryDate = getTrackerEntryDate(exerciseId);
-    const draftValues = trackerDraftValues[exerciseId] || {};
+    const contextKey = getTrackerContextKey(exerciseId, pendingTrackerWorkoutSlotId);
+    const entryDate = getTrackerEntryDate(contextKey);
+    const draftValues = trackerDraftValues[contextKey] || {};
+    const exercise = trackerExercises.find((item) => item.id === exerciseId);
+    const metrics = exercise?.metrics || [];
+    const values = Object.fromEntries(metrics.map((metric) => [metric, String(draftValues[metric] || "").trim()])) as Record<string, string>;
+    const entry: TrackerEntry = {
+      id: pendingTrackerExistingEntry?.id || uid(),
+      entryDate,
+      createdAt: new Date().toISOString(),
+      values,
+    };
 
-    updateTrackerExercise(exerciseId, (exercise) => {
-      const metrics = exercise.metrics || [];
-      const values = Object.fromEntries(metrics.map((metric) => [metric, String(draftValues[metric] || "").trim()])) as Record<string, string>;
-      const existingEntry = (exercise.entries || []).find((entry) => entry.entryDate === entryDate);
-      const entry: TrackerEntry = {
-        id: existingEntry?.id || uid(),
-        entryDate,
-        createdAt: new Date().toISOString(),
-        values,
-      };
-
-      return {
-        ...exercise,
-        entries: existingEntry
-          ? (exercise.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
-          : [...(exercise.entries || []), entry],
-      };
-    });
+    if (pendingTrackerWorkoutSlotId) {
+      setTrackerWorkouts((current) =>
+        current.map((workout) => {
+          const normalized = normalizeTrackerWorkout(workout);
+          const nextSlots = (normalized.exerciseSlots || []).map((slot) => {
+            if (slot.id !== pendingTrackerWorkoutSlotId) return slot;
+            const existingEntry = (slot.entries || []).find((item) => item.entryDate === entryDate);
+            return {
+              ...slot,
+              entries: existingEntry
+                ? (slot.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
+                : [...(slot.entries || []), entry],
+            };
+          });
+          return normalized.id === pendingTrackerWorkoutSlot?.workout.id ? { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) } : workout;
+        })
+      );
+    } else {
+      updateTrackerExercise(exerciseId, (exercise) => {
+        const existingEntry = (exercise.entries || []).find((item) => item.entryDate === entryDate);
+        return {
+          ...exercise,
+          entries: existingEntry
+            ? (exercise.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
+            : [...(exercise.entries || []), entry],
+        };
+      });
+    }
 
     setTrackerDraftValues((current) => ({
       ...current,
-      [exerciseId]: Object.fromEntries(((trackerExercises.find((item) => item.id === exerciseId)?.metrics || [])).map((metric) => [metric, ""])),
+      [contextKey]: Object.fromEntries(metrics.map((metric) => [metric, ""])),
     }));
-    setTrackerEntryDateByExercise((current) => ({ ...current, [exerciseId]: getTodayInputDate() }));
+    setTrackerEntryDateByExercise((current) => ({ ...current, [contextKey]: getTodayInputDate() }));
     setPendingTrackerEntryExerciseId(null);
+    setPendingTrackerWorkoutSlotId(null);
   };
 
   const addTrackerWorkout = () => {
@@ -5815,6 +6039,7 @@ export default function App() {
       memberId: selectedMember.id,
       name,
       exerciseIds: [],
+      exerciseSlots: [],
       archived: false,
       createdAt: new Date().toISOString(),
     };
@@ -5838,18 +6063,26 @@ export default function App() {
     if (!selectedWorkoutExerciseId) return;
     setTrackerWorkouts((current) =>
       current.map((workout) => {
-        if (workout.id !== workoutId || workout.exerciseIds.includes(selectedWorkoutExerciseId)) return workout;
-        return { ...workout, exerciseIds: [...workout.exerciseIds, selectedWorkoutExerciseId] };
+        if (workout.id !== workoutId) return workout;
+        const normalized = normalizeTrackerWorkout(workout);
+        const nextSlots = [
+          ...(normalized.exerciseSlots || []),
+          { id: uid(), exerciseId: selectedWorkoutExerciseId, createdAt: new Date().toISOString(), entries: [] },
+        ];
+        return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
       })
     );
     setSelectedWorkoutExerciseId("");
   };
 
-  const removeExerciseFromWorkout = (workoutId: string, exerciseId: string) => {
+  const removeExerciseFromWorkout = (workoutId: string, workoutSlotId: string) => {
     setTrackerWorkouts((current) =>
-      current.map((workout) =>
-        workout.id === workoutId ? { ...workout, exerciseIds: workout.exerciseIds.filter((id) => id !== exerciseId) } : workout
-      )
+      current.map((workout) => {
+        if (workout.id !== workoutId) return workout;
+        const normalized = normalizeTrackerWorkout(workout);
+        const nextSlots = (normalized.exerciseSlots || []).filter((slot) => slot.id !== workoutSlotId);
+        return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
+      })
     );
   };
 
@@ -5866,18 +6099,19 @@ export default function App() {
     });
   };
 
-  const reorderWorkoutExercises = (workoutId: string, draggedExerciseId: string, targetExerciseId: string) => {
-    if (draggedExerciseId === targetExerciseId) return;
+  const reorderWorkoutExercises = (workoutId: string, draggedSlotId: string, targetSlotId: string) => {
+    if (draggedSlotId === targetSlotId) return;
     setTrackerWorkouts((current) =>
       current.map((workout) => {
         if (workout.id !== workoutId) return workout;
-        const draggedIndex = workout.exerciseIds.indexOf(draggedExerciseId);
-        const targetIndex = workout.exerciseIds.indexOf(targetExerciseId);
+        const normalized = normalizeTrackerWorkout(workout);
+        const nextSlots = [...(normalized.exerciseSlots || [])];
+        const draggedIndex = nextSlots.findIndex((slot) => slot.id === draggedSlotId);
+        const targetIndex = nextSlots.findIndex((slot) => slot.id === targetSlotId);
         if (draggedIndex < 0 || targetIndex < 0) return workout;
-        const nextExerciseIds = [...workout.exerciseIds];
-        const [dragged] = nextExerciseIds.splice(draggedIndex, 1);
-        nextExerciseIds.splice(targetIndex, 0, dragged);
-        return { ...workout, exerciseIds: nextExerciseIds };
+        const [dragged] = nextSlots.splice(draggedIndex, 1);
+        nextSlots.splice(targetIndex, 0, dragged);
+        return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
       })
     );
   };
@@ -5964,7 +6198,7 @@ export default function App() {
     }
     if (screen === "programs") return "Back to Member View";
     if (screen === "openTracker") return "Back to Member View";
-    if (screen === "trackerWorkouts") return "Back to Open Tracker";
+    if (screen === "trackerWorkouts") return "Back to Gym Tracker";
     if (screen === "trackerWorkoutBuilder") return "Back to Workouts";
     if (screen === "trainerSupport") return "Back to Member View";
     if (screen === "routines") return "Back to My Programs";
@@ -6289,13 +6523,13 @@ export default function App() {
       return [{ label: "Member" }, { label: "Member View" }];
     }
     if (role === "member" && screen === "openTracker") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Open Tracker" }];
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker" }];
     }
     if (role === "member" && screen === "trackerWorkouts") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Open Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
     }
     if (role === "member" && screen === "trackerWorkoutBuilder") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Open Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
     }
     if (role === "member" && screen === "trainerSupport") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "Trainer Support" }];
@@ -7101,7 +7335,7 @@ export default function App() {
                     </div>
 
                     <button onClick={() => setScreen("openTracker")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
-                      <div className="text-lg font-semibold text-zinc-900">Open Tracker</div>
+                      <div className="text-lg font-semibold text-zinc-900">Gym Tracker</div>
                       <div className="mt-1 text-sm text-zinc-500">Track custom workouts and exercise metrics.</div>
                     </button>
 
@@ -7133,25 +7367,29 @@ export default function App() {
               )}
 
               {role === "member" && screen === "openTracker" && (
-                <SectionCard title="Open Tracker" collapsible>
+                <SectionCard title="Gym Tracker" collapsible>
                   <div className="space-y-5">
                     <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
-                      Open Tracker libraries are member-created only. Structured-program exercises stay separate from this tracker.
+                      Gym Tracker libraries are member-created only. Structured-program exercises stay separate from this tracker.
                     </div>
 
-                    <button
-                      onClick={() => setScreen("trackerWorkouts")}
-                      className="w-full rounded-2xl border border-zinc-200 bg-white p-4 text-left transition hover:border-zinc-400 hover:bg-zinc-50"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-lg font-semibold text-zinc-900">Create Workout</div>
-                          <div className="mt-1 text-sm text-zinc-500">Create, open, and edit saved workouts.</div>
-                        </div>
-                        <div className="rounded-xl bg-zinc-900 px-3 py-2 text-sm font-semibold text-white">Open</div>
-                      </div>
-                    </button>
+                    <div className="grid grid-cols-2 gap-2 rounded-2xl border border-zinc-200 bg-white p-2">
+                      <button
+                        onClick={() => setTrackerTab("exercises")}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${trackerTab === "exercises" ? "bg-zinc-900 text-white" : "bg-zinc-50 text-zinc-600"}`}
+                      >
+                        My Exercises
+                      </button>
+                      <button
+                        onClick={() => setTrackerTab("workouts")}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${trackerTab === "workouts" ? "bg-zinc-900 text-white" : "bg-zinc-50 text-zinc-600"}`}
+                      >
+                        My Workouts
+                      </button>
+                    </div>
 
+                    {trackerTab === "exercises" ? (
+                      <>
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="mb-3 text-sm font-semibold text-zinc-900">Add Exercise</div>
                       <div className="grid gap-3 md:grid-cols-[1fr_150px_auto]">
@@ -7219,78 +7457,13 @@ export default function App() {
                                 </div>
 
                                 {isExpanded ? (
-                                  <div className="mt-3 space-y-3">
-                                    <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Add Metric</div>
-                                      <div className="flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
-                                        <input
-                                          list={`tracker-metric-options-${exercise.id}`}
-                                          value={selectedTrackerMetricByExercise[exercise.id] || ""}
-                                          onChange={(event) => setSelectedTrackerMetricByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
-                                          onKeyDown={(event) => {
-                                            if (event.key === "Enter") addMetricToTrackerExercise(exercise.id);
-                                          }}
-                                          placeholder="Metric name"
-                                          className="min-w-0 flex-1 bg-white px-3 py-2 text-sm text-zinc-900 outline-none"
-                                        />
-                                        <datalist id={`tracker-metric-options-${exercise.id}`}>
-                                          {TRACKER_METRIC_OPTIONS.map((metric) => (
-                                            <option key={metric} value={metric} />
-                                          ))}
-                                        </datalist>
-                                        <button
-                                          onClick={() => addMetricToTrackerExercise(exercise.id)}
-                                          disabled={!String(selectedTrackerMetricByExercise[exercise.id] || "").trim()}
-                                          className="border-l border-zinc-300 bg-zinc-900 px-4 text-sm font-bold text-white disabled:bg-zinc-300"
-                                        >
-                                          +
-                                        </button>
-                                      </div>
-                                      <div className="mt-2 text-xs text-zinc-500">Type a custom metric or choose a preset from the dropdown.</div>
-                                    </div>
-
-                                    {(exercise.metrics || []).length ? (
-                                      <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                        <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">Log Entry</div>
-                                        <div className="space-y-2">
-                                          {(exercise.metrics || []).map((metric) => (
-                                            <div key={metric} className="grid grid-cols-[90px_1fr] items-center gap-2">
-                                              <div className="text-sm font-semibold text-zinc-700">{metric}</div>
-                                              <input
-                                                value={trackerDraftValues[exercise.id]?.[metric] || ""}
-                                                onChange={(event) => updateTrackerMetricDraftValue(exercise.id, metric, event.target.value)}
-                                                placeholder="Enter value"
-                                                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                              />
-                                            </div>
-                                          ))}
-                                          <div className="grid grid-cols-[90px_1fr] items-center gap-2 pt-1">
-                                            <div className="text-sm font-semibold text-zinc-700">Date</div>
-                                            <input
-                                              type="date"
-                                              value={getTrackerEntryDate(exercise.id)}
-                                              onChange={(event) => setTrackerEntryDateByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
-                                              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                            />
-                                          </div>
-                                        </div>
-                                        <div className="mt-3 flex justify-end">
-                                          <PrimaryButton onClick={() => requestTrackerEntryConfirmation(exercise.id)}>Enter</PrimaryButton>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">Choose a metric above to begin logging entries for this exercise.</div>
-                                    )}
-
-                                    <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">
-                                      Saved entries: {(exercise.entries || []).length}
-                                    </div>
-
-                                    <div className="flex flex-wrap justify-end gap-2">
+                                  <>
+                                    {renderTrackerExerciseLogPanel(exercise, exercise.id, exercise.entries || [])}
+                                    <div className="mt-3 flex flex-wrap justify-end gap-2">
                                       <SmallButton onClick={() => setDataViewerExerciseId(exercise.id)}>View Data</SmallButton>
                                       <SmallButton onClick={() => archiveTrackerExercise(exercise.id)}>Archive Exercise</SmallButton>
                                     </div>
-                                  </div>
+                                  </>
                                 ) : null}
                               </div>
                             );
@@ -7300,6 +7473,61 @@ export default function App() {
                         )}
                       </div>
                     </div>
+                      </>
+                    ) : (
+                      <div className="space-y-5">
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="mb-3 text-sm font-semibold text-zinc-900">New Workout</div>
+                          <div className="space-y-3">
+                            <input
+                              value={newWorkoutName}
+                              onChange={(event) => setNewWorkoutName(event.target.value)}
+                              placeholder="Workout name"
+                              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              {WORKOUT_QUICK_FILL_OPTIONS.map((option) => (
+                                <SmallButton key={option} onClick={() => setNewWorkoutName(option)}>{option}</SmallButton>
+                              ))}
+                            </div>
+                            <PrimaryButton onClick={addTrackerWorkout} disabled={!newWorkoutName.trim()}>Create Workout</PrimaryButton>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold text-zinc-900">My Workouts</div>
+                              <div className="text-xs text-zinc-500">Open a saved workout to log exercises in order.</div>
+                            </div>
+                            <div className="text-xs text-zinc-500">{activeTrackerWorkouts.length}</div>
+                          </div>
+                          <div className="space-y-3">
+                            {activeTrackerWorkouts.length ? (
+                              activeTrackerWorkouts.map((workout) => {
+                                const workoutSlots = workout.exerciseSlots || [];
+                                return (
+                                  <div key={workout.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <button onClick={() => openTrackerWorkout(workout.id)} className="flex flex-1 items-center gap-2 text-left">
+                                        <span className="text-zinc-400">▶</span>
+                                        <div>
+                                          <div className="text-sm font-semibold text-zinc-900">{workout.name}</div>
+                                          <div className="text-xs text-zinc-500">{workoutSlots.length} exercises</div>
+                                        </div>
+                                      </button>
+                                      <SmallButton onClick={() => archiveTrackerWorkout(workout.id)}>Archive</SmallButton>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No workouts yet. Create one above.</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </SectionCard>
               )}
@@ -7409,8 +7637,12 @@ export default function App() {
                             if (createdExerciseId) {
                               setTrackerWorkouts((current) =>
                                 current.map((workout) =>
-                                  workout.id === selectedTrackerWorkout.id && !workout.exerciseIds.includes(createdExerciseId)
-                                    ? { ...workout, exerciseIds: [...workout.exerciseIds, createdExerciseId] }
+                                  workout.id === selectedTrackerWorkout.id
+                                    ? (() => {
+                                        const normalized = normalizeTrackerWorkout(workout);
+                                        const nextSlots = [...(normalized.exerciseSlots || []), { id: uid(), exerciseId: createdExerciseId, createdAt: new Date().toISOString(), entries: [] }];
+                                        return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
+                                      })()
                                     : workout
                                 )
                               );
@@ -7429,41 +7661,49 @@ export default function App() {
                           <div className="text-sm font-semibold text-zinc-900">Workout Exercises</div>
                           <div className="text-xs text-zinc-500">Exercises assigned to this workout. Drag cards to reorder.</div>
                         </div>
-                        <div className="text-xs text-zinc-500">{selectedTrackerWorkout.exerciseIds.length}</div>
+                        <div className="text-xs text-zinc-500">{(selectedTrackerWorkout.exerciseSlots || []).length}</div>
                       </div>
 
                       <div className="space-y-3">
-                        {selectedTrackerWorkout.exerciseIds.length ? (
-                          selectedTrackerWorkout.exerciseIds.map((exerciseId) => {
-                            const exercise = trackerExerciseById.get(exerciseId);
+                        {(selectedTrackerWorkout.exerciseSlots || []).length ? (
+                          (selectedTrackerWorkout.exerciseSlots || []).map((slot, slotIndex) => {
+                            const exercise = trackerExerciseById.get(slot.exerciseId);
                             if (!exercise) return null;
+                            const isNextWorkoutSlot = slot.id === selectedWorkoutNextSlotId;
+                            const isCompleteToday = hasWorkoutSlotEntryForDate(slot);
+                            const contextKey = getTrackerContextKey(exercise.id, slot.id);
                             return (
                               <div
-                                key={exercise.id}
+                                key={slot.id}
                                 draggable
-                                onDragStart={() => setDraggedWorkoutExerciseId(exercise.id)}
+                                onDragStart={() => setDraggedWorkoutExerciseId(slot.id)}
                                 onDragOver={(event) => event.preventDefault()}
                                 onDrop={() => {
-                                  if (draggedWorkoutExerciseId) reorderWorkoutExercises(selectedTrackerWorkout.id, draggedWorkoutExerciseId, exercise.id);
+                                  if (draggedWorkoutExerciseId) reorderWorkoutExercises(selectedTrackerWorkout.id, draggedWorkoutExerciseId, slot.id);
                                   setDraggedWorkoutExerciseId(null);
                                 }}
                                 onDragEnd={() => setDraggedWorkoutExerciseId(null)}
-                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3"
+                                className={`rounded-2xl border p-3 ${isNextWorkoutSlot ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex items-center gap-2">
                                     <span className="cursor-grab text-zinc-400" title="Drag to reorder">☰</span>
                                     <div>
-                                      <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                      <div className="text-xs text-zinc-500">{exercise.muscleGroup}</div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                        {isNextWorkoutSlot ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
+                                        {isCompleteToday ? <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Done Today</span> : null}
+                                      </div>
+                                      <div className="text-xs text-zinc-500">{exercise.muscleGroup} • Slot {slotIndex + 1}</div>
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <button disabled title="Graph placeholder" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm opacity-50">📈</button>
-                                    <SmallButton onClick={() => setDataViewerExerciseId(exercise.id)}>View Data</SmallButton>
-                                    <SmallButton onClick={() => removeExerciseFromWorkout(selectedTrackerWorkout.id, exercise.id)}>Remove</SmallButton>
+                                    <SmallButton onClick={() => setDataViewerWorkoutSlotId(slot.id)}>View Data</SmallButton>
+                                    <SmallButton onClick={() => removeExerciseFromWorkout(selectedTrackerWorkout.id, slot.id)}>Remove</SmallButton>
                                   </div>
                                 </div>
+                                {renderTrackerExerciseLogPanel(exercise, contextKey, slot.entries || [], slot.id)}
                               </div>
                             );
                           })
@@ -7491,7 +7731,7 @@ export default function App() {
                     <div className="mt-1 text-sm text-zinc-500">Are these inputs correct?</div>
                     <div className="mt-4 rounded-2xl bg-zinc-50 p-4">
                       <div className="mb-2 font-semibold text-zinc-900">{pendingTrackerEntryExercise.name}</div>
-                      <div className="mb-2 text-sm text-zinc-600">Date: {getTrackerEntryDate(pendingTrackerEntryExercise.id)}</div>
+                      <div className="mb-2 text-sm text-zinc-600">Date: {getTrackerEntryDate(pendingTrackerEntryContextKey)}</div>
                       {pendingTrackerExistingEntry ? (
                         <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                           This exercise already has an entry for this date. Confirming will replace the existing saved entry.
@@ -7501,14 +7741,27 @@ export default function App() {
                         {(pendingTrackerEntryExercise.metrics || []).map((metric) => (
                           <div key={metric} className="flex justify-between gap-3">
                             <span>{metric}</span>
-                            <span className="font-semibold">{trackerDraftValues[pendingTrackerEntryExercise.id]?.[metric] || "—"}</span>
+                            <span className="font-semibold">{trackerDraftValues[pendingTrackerEntryContextKey]?.[metric] || "—"}</span>
                           </div>
                         ))}
                       </div>
                     </div>
                     <div className="mt-5 grid grid-cols-2 gap-3">
-                      <SmallButton onClick={() => setPendingTrackerEntryExerciseId(null)}>Cancel</SmallButton>
+                      <SmallButton onClick={() => { setPendingTrackerEntryExerciseId(null); setPendingTrackerWorkoutSlotId(null); }}>Cancel</SmallButton>
                       <PrimaryButton onClick={confirmTrackerEntry}>Confirm</PrimaryButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {pendingMetricRemoval && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="text-lg font-bold text-zinc-900">Remove Metric?</div>
+                    <div className="mt-2 text-sm text-zinc-600">This will remove <span className="font-semibold">{pendingMetricRemoval.metric}</span> from this exercise and its saved values.</div>
+                    <div className="mt-5 grid grid-cols-2 gap-3">
+                      <SmallButton onClick={() => setPendingMetricRemoval(null)}>Cancel</SmallButton>
+                      <button onClick={confirmRemoveMetric} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Remove</button>
                     </div>
                   </div>
                 </div>
@@ -7533,6 +7786,43 @@ export default function App() {
                               <div className="mb-2 text-sm font-semibold text-zinc-900">{entry.entryDate}</div>
                               <div className="space-y-1 text-sm text-zinc-700">
                                 {(dataViewerExercise.metrics || Object.keys(entry.values || {})).map((metric) => (
+                                  <div key={metric} className="flex justify-between gap-3">
+                                    <span>{metric}</span>
+                                    <span className="font-semibold">{entry.values?.[metric] || "—"}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No saved entries yet.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+
+
+              {dataViewerWorkoutSlot && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">{dataViewerWorkoutSlot.exercise?.name || "Workout Exercise"} Data</div>
+                        <div className="mt-1 text-sm text-zinc-500">{dataViewerWorkoutSlot.workout.name} • workout-specific history.</div>
+                      </div>
+                      <SmallButton onClick={() => setDataViewerWorkoutSlotId(null)}>Close</SmallButton>
+                    </div>
+                    <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+                      {(dataViewerWorkoutSlot.slot.entries || []).length ? (
+                        [...(dataViewerWorkoutSlot.slot.entries || [])]
+                          .sort((a, b) => getSafeDateTime(b.entryDate || b.createdAt) - getSafeDateTime(a.entryDate || a.createdAt))
+                          .map((entry) => (
+                            <div key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                              <div className="mb-2 text-sm font-semibold text-zinc-900">{entry.entryDate}</div>
+                              <div className="space-y-1 text-sm text-zinc-700">
+                                {((dataViewerWorkoutSlot.exercise?.metrics || Object.keys(entry.values || {}))).map((metric) => (
                                   <div key={metric} className="flex justify-between gap-3">
                                     <span>{metric}</span>
                                     <span className="font-semibold">{entry.values?.[metric] || "—"}</span>
@@ -7581,9 +7871,12 @@ export default function App() {
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
                       Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
                     </div>
+                    {selectedProgramIsComplete ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">Program Complete</div>
+                    ) : null}
                     <div className="space-y-3">
                       {selectedProgram.routines.map((routine) => {
-                        const isNextRoutine = premiumProgramInputActive && routine.id === premiumNextRoutineId;
+                        const isNextRoutine = routine.id === nextRoutineId;
                         return (
                           <button
                             key={routine.id}
