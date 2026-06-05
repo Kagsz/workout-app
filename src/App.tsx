@@ -6014,7 +6014,6 @@ export default function App() {
   const renderTrackerExerciseLogPanel = (
     exercise: TrackerExercise,
     contextKey: string,
-    savedEntries: TrackerEntry[],
     workoutSlotId?: string,
     optionsId?: string,
     workoutId?: string
@@ -7538,7 +7537,7 @@ export default function App() {
                                   </div>
                                 </div>
 
-                                {isExpanded ? renderTrackerExerciseLogPanel(exercise, exercise.id, exercise.entries || [], undefined, `exercise-options-${exercise.id}`) : null}
+                                {isExpanded ? renderTrackerExerciseLogPanel(exercise, exercise.id, undefined, `exercise-options-${exercise.id}`) : null}
                               </div>
                             );
                           })
@@ -7780,7 +7779,7 @@ export default function App() {
                                     <SmallButton onClick={() => setDataViewerWorkoutSlotId(slot.id)}>View Data</SmallButton>
                                   </div>
                                 </div>
-                                {isWorkoutSlotExpanded ? renderTrackerExerciseLogPanel(exercise, contextKey, slot.entries || [], slot.id, `workout-slot-options-${slot.id}`, selectedTrackerWorkout.id) : null}
+                                {isWorkoutSlotExpanded ? renderTrackerExerciseLogPanel(exercise, contextKey, slot.id, `workout-slot-options-${slot.id}`, selectedTrackerWorkout.id) : null}
                               </div>
                             );
                           })
