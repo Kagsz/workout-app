@@ -63,7 +63,7 @@ type Member = {
   memberPlan?: MemberPlan;
 };
 
-type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Legs" | "Core" | "Cardio" | "Full Body" | "Other";
+type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
 type TrackerMetric = string;
 
 type TrackerEntry = {
@@ -397,7 +397,7 @@ const getProgramInputMode = (program: Program | null | undefined, member?: Membe
 const canMemberEnterProgramResults = (program: Program | null | undefined, member?: Member | null) =>
   !!program && !!member && (member.memberPlan === "premium" || getProgramInputMode(program, member) === "memberInput");
 
-const MUSCLE_GROUP_OPTIONS: MuscleGroup[] = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Legs", "Core", "Cardio", "Full Body", "Other"];
+const MUSCLE_GROUP_OPTIONS: MuscleGroup[] = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Forearm/Wrist", "Hand/Grip", "Legs", "Upper Body", "Lower Body", "Core", "Cardio", "Full Body", "Other"];
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds"];
 const WORKOUT_QUICK_FILL_OPTIONS = ["Leg Workout", "Upper Body Workout", "Core Workout", "Cardio Workout", "Full Body Workout"];
 
@@ -4992,6 +4992,8 @@ export default function App() {
   const [selectedTrackerWorkoutId, setSelectedTrackerWorkoutId] = useState<string | null>(null);
   const [trackerTab, setTrackerTab] = useState<"exercises" | "workouts">("exercises");
   const [expandedTrackerExerciseIds, setExpandedTrackerExerciseIds] = useState<string[]>([]);
+  const [expandedWorkoutSlotIds, setExpandedWorkoutSlotIds] = useState<string[]>([]);
+  const [expandedTrackerOptionsIds, setExpandedTrackerOptionsIds] = useState<string[]>([]);
   const [selectedTrackerMetricByExercise, setSelectedTrackerMetricByExercise] = useState<Record<string, string>>({});
   const [trackerDraftValues, setTrackerDraftValues] = useState<Record<string, Record<string, string>>>({});
   const [trackerEntryDateByExercise, setTrackerEntryDateByExercise] = useState<Record<string, string>>({});
@@ -5764,6 +5766,18 @@ export default function App() {
     );
   };
 
+  const toggleExpandedWorkoutSlot = (slotId: string) => {
+    setExpandedWorkoutSlotIds((current) =>
+      current.includes(slotId) ? current.filter((id) => id !== slotId) : [...current, slotId]
+    );
+  };
+
+  const toggleExpandedTrackerOptions = (optionsId: string) => {
+    setExpandedTrackerOptionsIds((current) =>
+      current.includes(optionsId) ? current.filter((id) => id !== optionsId) : [...current, optionsId]
+    );
+  };
+
 
   const addTrackerExercise = (nameOverride?: string, muscleGroupOverride?: MuscleGroup) => {
     if (!selectedMember) return null;
@@ -5890,59 +5904,129 @@ export default function App() {
     setPendingMetricRemoval(null);
   };
 
+  const renderTrackerExerciseOptionsPanel = (
+    exercise: TrackerExercise,
+    optionsId: string,
+    workoutSlotId?: string,
+    workoutId?: string
+  ) => {
+    const isOptionsExpanded = expandedTrackerOptionsIds.includes(optionsId);
+
+    return (
+      <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3">
+        <button
+          type="button"
+          onClick={() => toggleExpandedTrackerOptions(optionsId)}
+          className="flex w-full items-center justify-between gap-3 text-left"
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Options</span>
+          <span className="text-zinc-400">{isOptionsExpanded ? "▼" : "▶"}</span>
+        </button>
+
+        {isOptionsExpanded ? (
+          <div className="mt-3 space-y-4">
+            <div className="grid gap-3 md:grid-cols-[1fr_160px]">
+              <label className="space-y-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Exercise Name</div>
+                <input
+                  value={exercise.name}
+                  onChange={(event) => updateTrackerExercise(exercise.id, (current) => ({ ...current, name: event.target.value }))}
+                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Muscle Group</div>
+                <select
+                  value={exercise.muscleGroup}
+                  onChange={(event) => updateTrackerExercise(exercise.id, (current) => ({ ...current, muscleGroup: event.target.value as MuscleGroup }))}
+                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                >
+                  {MUSCLE_GROUP_OPTIONS.map((group) => (
+                    <option key={group} value={group}>{group}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Metrics</div>
+              {(exercise.metrics || []).length ? (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {(exercise.metrics || []).map((metric) => (
+                    <span key={metric} className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
+                      {metric}
+                      <button
+                        type="button"
+                        onClick={() => requestRemoveMetric(exercise.id, metric)}
+                        className="flex h-5 w-5 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600 hover:bg-red-100"
+                        aria-label={`Remove ${metric}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mb-3 text-xs text-zinc-500">No metrics added yet.</div>
+              )}
+
+              <div className="flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
+                <input
+                  list={`tracker-metric-options-${exercise.id}`}
+                  value={selectedTrackerMetricByExercise[exercise.id] || ""}
+                  onChange={(event) => setSelectedTrackerMetricByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") addMetricToTrackerExercise(exercise.id);
+                  }}
+                  placeholder="Metric name"
+                  className="min-w-0 flex-1 bg-white px-3 py-2 text-sm text-zinc-900 outline-none"
+                />
+                <datalist id={`tracker-metric-options-${exercise.id}`}>
+                  {TRACKER_METRIC_OPTIONS.map((metric) => (
+                    <option key={metric} value={metric} />
+                  ))}
+                </datalist>
+                <button
+                  onClick={() => addMetricToTrackerExercise(exercise.id)}
+                  disabled={!String(selectedTrackerMetricByExercise[exercise.id] || "").trim()}
+                  className="border-l border-zinc-300 bg-zinc-900 px-4 text-sm font-bold text-white disabled:bg-zinc-300"
+                >
+                  +
+                </button>
+              </div>
+              <div className="mt-2 text-xs text-zinc-500">Type a custom metric or choose a preset from the dropdown.</div>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
+              {workoutSlotId && workoutId ? (
+                <SmallButton onClick={() => removeExerciseFromWorkout(workoutId, workoutSlotId)}>Remove From Workout</SmallButton>
+              ) : null}
+              {!workoutSlotId ? (
+                <SmallButton onClick={() => archiveTrackerExercise(exercise.id)}>Archive Exercise</SmallButton>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderTrackerExerciseLogPanel = (
     exercise: TrackerExercise,
     contextKey: string,
     savedEntries: TrackerEntry[],
-    workoutSlotId?: string
+    workoutSlotId?: string,
+    optionsId?: string,
+    workoutId?: string
   ) => (
     <div className="mt-3 space-y-3">
-      <div className="rounded-xl border border-zinc-200 bg-white p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Add Metric</div>
-        <div className="flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
-          <input
-            list={`tracker-metric-options-${exercise.id}`}
-            value={selectedTrackerMetricByExercise[exercise.id] || ""}
-            onChange={(event) => setSelectedTrackerMetricByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") addMetricToTrackerExercise(exercise.id);
-            }}
-            placeholder="Metric name"
-            className="min-w-0 flex-1 bg-white px-3 py-2 text-sm text-zinc-900 outline-none"
-          />
-          <datalist id={`tracker-metric-options-${exercise.id}`}>
-            {TRACKER_METRIC_OPTIONS.map((metric) => (
-              <option key={metric} value={metric} />
-            ))}
-          </datalist>
-          <button
-            onClick={() => addMetricToTrackerExercise(exercise.id)}
-            disabled={!String(selectedTrackerMetricByExercise[exercise.id] || "").trim()}
-            className="border-l border-zinc-300 bg-zinc-900 px-4 text-sm font-bold text-white disabled:bg-zinc-300"
-          >
-            +
-          </button>
-        </div>
-        <div className="mt-2 text-xs text-zinc-500">Type a custom metric or choose a preset from the dropdown.</div>
-      </div>
-
       {(exercise.metrics || []).length ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-3">
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">Log Entry</div>
           <div className="space-y-2">
             {(exercise.metrics || []).map((metric) => (
               <div key={metric} className="grid grid-cols-[120px_1fr] items-center gap-2">
-                <div className="flex items-center justify-between gap-2 text-sm font-semibold text-zinc-700">
-                  <span className="truncate">{metric}</span>
-                  <button
-                    type="button"
-                    onClick={() => requestRemoveMetric(exercise.id, metric)}
-                    className="flex h-6 w-6 items-center justify-center rounded-full bg-red-50 text-xs font-bold text-red-600 hover:bg-red-100"
-                    aria-label={`Remove ${metric}`}
-                  >
-                    ×
-                  </button>
-                </div>
+                <div className="truncate text-sm font-semibold text-zinc-700">{metric}</div>
                 <input
                   value={trackerDraftValues[contextKey]?.[metric] || ""}
                   onChange={(event) => updateTrackerMetricDraftValue(contextKey, metric, event.target.value)}
@@ -5966,12 +6050,10 @@ export default function App() {
           </div>
         </div>
       ) : (
-        <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">Choose a metric above to begin logging entries for this exercise.</div>
+        <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">Add a metric in Options before logging entries for this exercise.</div>
       )}
 
-      <div className="rounded-xl bg-white p-3 text-sm text-zinc-600">
-        Saved entries: {savedEntries.length}
-      </div>
+      {renderTrackerExerciseOptionsPanel(exercise, optionsId || contextKey, workoutSlotId, workoutId)}
     </div>
   );
 
@@ -7456,15 +7538,7 @@ export default function App() {
                                   </div>
                                 </div>
 
-                                {isExpanded ? (
-                                  <>
-                                    {renderTrackerExerciseLogPanel(exercise, exercise.id, exercise.entries || [])}
-                                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                                      <SmallButton onClick={() => setDataViewerExerciseId(exercise.id)}>View Data</SmallButton>
-                                      <SmallButton onClick={() => archiveTrackerExercise(exercise.id)}>Archive Exercise</SmallButton>
-                                    </div>
-                                  </>
-                                ) : null}
+                                {isExpanded ? renderTrackerExerciseLogPanel(exercise, exercise.id, exercise.entries || [], undefined, `exercise-options-${exercise.id}`) : null}
                               </div>
                             );
                           })
@@ -7672,6 +7746,7 @@ export default function App() {
                             const isNextWorkoutSlot = slot.id === selectedWorkoutNextSlotId;
                             const isCompleteToday = hasWorkoutSlotEntryForDate(slot);
                             const contextKey = getTrackerContextKey(exercise.id, slot.id);
+                            const isWorkoutSlotExpanded = expandedWorkoutSlotIds.includes(slot.id);
                             return (
                               <div
                                 key={slot.id}
@@ -7686,24 +7761,26 @@ export default function App() {
                                 className={`rounded-2xl border p-3 ${isNextWorkoutSlot ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}
                               >
                                 <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex min-w-0 flex-1 items-center gap-2">
                                     <span className="cursor-grab text-zinc-400" title="Drag to reorder">☰</span>
-                                    <div>
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                        {isNextWorkoutSlot ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
-                                        {isCompleteToday ? <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Done Today</span> : null}
+                                    <button onClick={() => toggleExpandedWorkoutSlot(slot.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                                      <span className="text-zinc-400">{isWorkoutSlotExpanded ? "▼" : "▶"}</span>
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <div className="truncate text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                          {isNextWorkoutSlot ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
+                                          {isCompleteToday ? <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Done Today</span> : null}
+                                        </div>
+                                        <div className="text-xs text-zinc-500">{exercise.muscleGroup} • Slot {slotIndex + 1}</div>
                                       </div>
-                                      <div className="text-xs text-zinc-500">{exercise.muscleGroup} • Slot {slotIndex + 1}</div>
-                                    </div>
+                                    </button>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <button disabled title="Graph placeholder" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm opacity-50">📈</button>
                                     <SmallButton onClick={() => setDataViewerWorkoutSlotId(slot.id)}>View Data</SmallButton>
-                                    <SmallButton onClick={() => removeExerciseFromWorkout(selectedTrackerWorkout.id, slot.id)}>Remove</SmallButton>
                                   </div>
                                 </div>
-                                {renderTrackerExerciseLogPanel(exercise, contextKey, slot.entries || [], slot.id)}
+                                {isWorkoutSlotExpanded ? renderTrackerExerciseLogPanel(exercise, contextKey, slot.entries || [], slot.id, `workout-slot-options-${slot.id}`, selectedTrackerWorkout.id) : null}
                               </div>
                             );
                           })
@@ -7773,7 +7850,7 @@ export default function App() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-lg font-bold text-zinc-900">{dataViewerExercise.name} Data</div>
-                        <div className="mt-1 text-sm text-zinc-500">Read-only entry history.</div>
+                        <div className="mt-1 text-sm text-zinc-500">Read-only entry history • {(dataViewerExercise.entries || []).length} total entries.</div>
                       </div>
                       <SmallButton onClick={() => setDataViewerExerciseId(null)}>Close</SmallButton>
                     </div>
@@ -7810,7 +7887,7 @@ export default function App() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-lg font-bold text-zinc-900">{dataViewerWorkoutSlot.exercise?.name || "Workout Exercise"} Data</div>
-                        <div className="mt-1 text-sm text-zinc-500">{dataViewerWorkoutSlot.workout.name} • workout-specific history.</div>
+                        <div className="mt-1 text-sm text-zinc-500">{dataViewerWorkoutSlot.workout.name} • workout-specific history • {(dataViewerWorkoutSlot.slot.entries || []).length} total entries.</div>
                       </div>
                       <SmallButton onClick={() => setDataViewerWorkoutSlotId(null)}>Close</SmallButton>
                     </div>
