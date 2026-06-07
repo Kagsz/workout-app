@@ -108,6 +108,9 @@ type TrackerWorkoutCycle = {
   memberId: string;
   name: string;
   workoutIds: string[];
+  nextWorkoutId?: string;
+  startedAt?: string;
+  completedAt?: string;
   archived?: boolean;
   createdAt: string;
 };
@@ -5010,6 +5013,7 @@ export default function App() {
   const [selectedCycleWorkoutId, setSelectedCycleWorkoutId] = useState("");
   const [selectedTrackerWorkoutId, setSelectedTrackerWorkoutId] = useState<string | null>(null);
   const [selectedTrackerCycleId, setSelectedTrackerCycleId] = useState<string | null>(null);
+  const [trackerWorkoutReturnCycleId, setTrackerWorkoutReturnCycleId] = useState<string | null>(null);
   const [trackerTab, setTrackerTab] = useState<"exercises" | "workouts" | "cycles">("exercises");
   const [expandedTrackerExerciseIds, setExpandedTrackerExerciseIds] = useState<string[]>([]);
   const [expandedWorkoutSlotIds, setExpandedWorkoutSlotIds] = useState<string[]>([]);
@@ -5066,6 +5070,16 @@ export default function App() {
     [trackerCycles, selectedMember?.id]
   );
 
+  const archivedTrackerWorkouts = useMemo(
+    () => trackerWorkouts.map(normalizeTrackerWorkout).filter((workout) => workout.memberId === selectedMember?.id && workout.archived),
+    [trackerWorkouts, selectedMember?.id]
+  );
+
+  const archivedTrackerCycles = useMemo(
+    () => trackerCycles.filter((cycle) => cycle.memberId === selectedMember?.id && cycle.archived),
+    [trackerCycles, selectedMember?.id]
+  );
+
   const trackerExerciseById = useMemo(
     () => new Map(activeTrackerExercises.map((exercise) => [exercise.id, exercise])),
     [activeTrackerExercises]
@@ -5103,29 +5117,42 @@ export default function App() {
   const isTrackerWorkoutIncomplete = (workout: TrackerWorkout | null | undefined) => Boolean(getWorkoutFirstIncompleteSlotId(workout));
   const isTrackerWorkoutComplete = (workout: TrackerWorkout | null | undefined) => Boolean(workout?.completedAt) && !isTrackerWorkoutIncomplete(workout);
 
-  const getCycleNextWorkoutId = (cycle: TrackerWorkoutCycle | null | undefined) => {
-    if (!cycle?.workoutIds.length) return null;
-    const cycleWorkouts = cycle.workoutIds.map((id) => trackerWorkoutById.get(id)).filter(Boolean) as TrackerWorkout[];
-    if (!cycleWorkouts.length) return null;
-    if (cycleWorkouts.some(isTrackerWorkoutIncomplete)) return null;
-
-    let latestIndex = -1;
-    let latestTime = -Infinity;
-    cycleWorkouts.forEach((workout, index) => {
-      const normalized = normalizeTrackerWorkout(workout);
-      const slotTimes = (normalized.exerciseSlots || []).flatMap((slot) => (slot.entries || []).map((entry) => getSafeDateTime(entry.createdAt || entry.entryDate)));
-      const time = Math.max(getSafeDateTime(normalized.completedAt || ""), ...slotTimes, -Infinity);
-      if (time > latestTime) {
-        latestTime = time;
-        latestIndex = index;
-      }
-    });
-
-    if (latestIndex < 0 || !Number.isFinite(latestTime)) return cycleWorkouts[0]?.id || null;
-    return cycleWorkouts[(latestIndex + 1) % cycleWorkouts.length]?.id || null;
+  const hasWorkoutSlotEntrySinceCycleStart = (slot: TrackerWorkoutExerciseSlot, cycle: TrackerWorkoutCycle | null | undefined) => {
+    if (!cycle?.startedAt) return false;
+    const startedTime = getSafeDateTime(cycle.startedAt);
+    const startedDate = cycle.startedAt.slice(0, 10);
+    return Boolean((slot.entries || []).find((entry) => getSafeDateTime(entry.createdAt || entry.entryDate) >= startedTime || String(entry.entryDate || "") >= startedDate));
   };
 
-  const selectedWorkoutNextSlotId = useMemo(() => getWorkoutFirstIncompleteSlotId(selectedTrackerWorkout), [selectedTrackerWorkout]);
+  const getCycleWorkoutFirstIncompleteSlotId = (cycle: TrackerWorkoutCycle | null | undefined, workout: TrackerWorkout | null | undefined) => {
+    if (!cycle?.startedAt || cycle.completedAt || !workout) return null;
+    const normalized = normalizeTrackerWorkout(workout);
+    const firstOpenSlot = (normalized.exerciseSlots || []).find((slot) => !hasWorkoutSlotEntrySinceCycleStart(slot, cycle));
+    return firstOpenSlot?.id || null;
+  };
+
+  const getCycleIncompleteWorkoutId = (cycle: TrackerWorkoutCycle | null | undefined) => {
+    if (!cycle?.startedAt || cycle.completedAt) return null;
+    for (const workoutId of cycle.workoutIds || []) {
+      const workout = trackerWorkoutById.get(workoutId);
+      if (getCycleWorkoutFirstIncompleteSlotId(cycle, workout)) return workoutId;
+    }
+    return null;
+  };
+
+  const getCycleNextWorkoutId = (cycle: TrackerWorkoutCycle | null | undefined) => {
+    if (!cycle?.workoutIds.length) return null;
+    const incompleteId = getCycleIncompleteWorkoutId(cycle);
+    if (incompleteId) return null;
+    if (cycle.nextWorkoutId && cycle.workoutIds.includes(cycle.nextWorkoutId)) return cycle.nextWorkoutId;
+    return cycle.workoutIds[0] || null;
+  };
+
+  const selectedWorkoutNextSlotId = useMemo(() => {
+    const cycleContext = trackerWorkoutReturnCycleId ? activeTrackerCycles.find((cycle) => cycle.id === trackerWorkoutReturnCycleId) || null : null;
+    if (cycleContext) return getCycleWorkoutFirstIncompleteSlotId(cycleContext, selectedTrackerWorkout);
+    return getWorkoutFirstIncompleteSlotId(selectedTrackerWorkout);
+  }, [selectedTrackerWorkout, trackerWorkoutReturnCycleId, activeTrackerCycles]);
 
   const pendingTrackerEntryExercise = useMemo(
     () => trackerExercises.find((exercise) => exercise.id === pendingTrackerEntryExerciseId) || null,
@@ -6168,7 +6195,8 @@ export default function App() {
             };
           });
           if (normalized.id !== pendingTrackerWorkoutSlot?.workout.id) return workout;
-          const updatedWorkout = { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
+          const startedAt = normalized.startedAt || new Date().toISOString();
+          const updatedWorkout = { ...normalized, startedAt, completedAt: undefined, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
           const allSlotsComplete = Boolean(updatedWorkout.startedAt) && (nextSlots.length > 0) && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout));
           return allSlotsComplete ? { ...updatedWorkout, completedAt: new Date().toISOString() } : updatedWorkout;
         })
@@ -6214,13 +6242,19 @@ export default function App() {
     setNewWorkoutName("");
   };
 
-  const openTrackerWorkout = (workoutId: string) => {
+  const openTrackerWorkout = (workoutId: string, returnCycleId?: string | null) => {
     setSelectedTrackerWorkoutId(workoutId);
+    setTrackerWorkoutReturnCycleId(returnCycleId || null);
+    if (returnCycleId) setSelectedTrackerCycleId(returnCycleId);
     setSelectedWorkoutExerciseId("");
     setScreen("trackerWorkoutBuilder");
   };
 
+  const workoutHasAnyData = (workout: TrackerWorkout | null | undefined) => Boolean(workout?.startedAt || workout?.completedAt || normalizeTrackerWorkout(workout as TrackerWorkout).exerciseSlots?.some((slot) => (slot.entries || []).length));
+
   const archiveTrackerWorkout = (workoutId: string) => {
+    const workout = trackerWorkouts.find((item) => item.id === workoutId);
+    if (workout && !window.confirm(`Archive ${workout.name}?`)) return;
     setTrackerWorkouts((current) => current.map((workout) => (workout.id === workoutId ? { ...workout, archived: true } : workout)));
   };
 
@@ -6229,8 +6263,32 @@ export default function App() {
   };
 
   const deleteTrackerWorkoutPermanently = (workoutId: string) => {
+    const workout = trackerWorkouts.find((item) => item.id === workoutId);
+    if (workoutHasAnyData(workout) && !window.confirm(`Delete ${workout?.name || "this workout"} and its saved workout data?`)) return;
     setTrackerWorkouts((current) => current.filter((workout) => workout.id !== workoutId));
-    setTrackerCycles((current) => current.map((cycle) => ({ ...cycle, workoutIds: cycle.workoutIds.filter((id) => id !== workoutId) })));
+    setTrackerCycles((current) => current.map((cycle) => ({ ...cycle, workoutIds: cycle.workoutIds.filter((id) => id !== workoutId), nextWorkoutId: cycle.nextWorkoutId === workoutId ? undefined : cycle.nextWorkoutId })));
+    if (selectedTrackerWorkoutId === workoutId) {
+      setSelectedTrackerWorkoutId(null);
+      setScreen("openTracker");
+      setTrackerTab("workouts");
+    }
+  };
+
+  const archiveTrackerCycle = (cycleId: string) => {
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    if (cycle && !window.confirm(`Archive ${cycle.name}?`)) return;
+    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, archived: true } : cycle));
+  };
+
+  const restoreTrackerCycle = (cycleId: string) => {
+    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, archived: false } : cycle));
+  };
+
+  const deleteTrackerCyclePermanently = (cycleId: string) => {
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    if (cycle?.startedAt && !window.confirm(`Delete ${cycle.name} and its cycle progress?`)) return;
+    setTrackerCycles((current) => current.filter((cycle) => cycle.id !== cycleId));
+    if (selectedTrackerCycleId === cycleId) setSelectedTrackerCycleId(null);
   };
 
   const startTrackerWorkout = (workoutId: string) => {
@@ -6247,6 +6305,23 @@ export default function App() {
     );
   };
 
+  const startTrackerCycle = (cycleId: string) => {
+    const now = new Date().toISOString();
+    setTrackerCycles((current) => current.map((cycle) => {
+      if (cycle.id !== cycleId) return cycle;
+      const validNext = cycle.nextWorkoutId && cycle.workoutIds.includes(cycle.nextWorkoutId) ? cycle.nextWorkoutId : cycle.workoutIds[0];
+      return { ...cycle, startedAt: now, completedAt: undefined, nextWorkoutId: validNext };
+    }));
+  };
+
+  const markTrackerCycleComplete = (cycleId: string) => {
+    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, completedAt: new Date().toISOString(), startedAt: cycle.startedAt || new Date().toISOString() } : cycle));
+  };
+
+  const setCycleNextWorkout = (cycleId: string, workoutId: string) => {
+    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, nextWorkoutId: workoutId, completedAt: undefined } : cycle));
+  };
+
   const addTrackerCycle = () => {
     if (!selectedMember) return;
     const name = newCycleName.trim();
@@ -6256,12 +6331,12 @@ export default function App() {
       memberId: selectedMember.id,
       name,
       workoutIds: [],
+      nextWorkoutId: undefined,
       archived: false,
       createdAt: new Date().toISOString(),
     };
     setTrackerCycles((current) => [cycle, ...current]);
     setSelectedTrackerCycleId(cycle.id);
-    setExpandedTrackerCycleIds((current) => [cycle.id, ...current]);
     setNewCycleName("");
     setTrackerTab("cycles");
   };
@@ -6270,15 +6345,20 @@ export default function App() {
     if (!selectedCycleWorkoutId) return;
     setTrackerCycles((current) =>
       current.map((cycle) => {
-        if (cycle.id !== cycleId || cycle.workoutIds.includes(selectedCycleWorkoutId)) return cycle;
-        return { ...cycle, workoutIds: [...cycle.workoutIds, selectedCycleWorkoutId] };
+        if (cycle.id !== cycleId) return cycle;
+        const nextWorkoutIds = [...cycle.workoutIds, selectedCycleWorkoutId];
+        return { ...cycle, workoutIds: nextWorkoutIds, nextWorkoutId: cycle.nextWorkoutId || selectedCycleWorkoutId };
       })
     );
     setSelectedCycleWorkoutId("");
   };
 
   const removeWorkoutFromCycle = (cycleId: string, workoutId: string) => {
-    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, workoutIds: cycle.workoutIds.filter((id) => id !== workoutId) } : cycle));
+    setTrackerCycles((current) => current.map((cycle) => {
+      if (cycle.id !== cycleId) return cycle;
+      const nextWorkoutIds = cycle.workoutIds.filter((id) => id !== workoutId);
+      return { ...cycle, workoutIds: nextWorkoutIds, nextWorkoutId: cycle.nextWorkoutId === workoutId ? nextWorkoutIds[0] : cycle.nextWorkoutId };
+    }));
   };
 
   const moveCycleWorkout = (cycleId: string, workoutId: string, direction: -1 | 1) => {
@@ -6354,10 +6434,10 @@ export default function App() {
   };
 
 
-  const renderTrackerWorkoutCard = (workout: TrackerWorkout, cycleNextWorkoutId?: string | null) => {
+  const renderTrackerWorkoutCard = (workout: TrackerWorkout, cycleNextWorkoutId?: string | null, cycleContext?: TrackerWorkoutCycle | null) => {
     const normalized = normalizeTrackerWorkout(workout);
     const workoutSlots = normalized.exerciseSlots || [];
-    const isIncomplete = isTrackerWorkoutIncomplete(normalized);
+    const isIncomplete = cycleContext ? Boolean(getCycleWorkoutFirstIncompleteSlotId(cycleContext, normalized)) : isTrackerWorkoutIncomplete(normalized);
     const isNextUp = !isIncomplete && cycleNextWorkoutId === normalized.id;
     const isComplete = isTrackerWorkoutComplete(normalized);
     const cardClass = isIncomplete
@@ -6369,7 +6449,7 @@ export default function App() {
     return (
       <div key={normalized.id} className={`rounded-2xl border p-3 ${cardClass}`}>
         <div className="flex items-center justify-between gap-3">
-          <button onClick={() => openTrackerWorkout(normalized.id)} className="flex flex-1 items-center gap-2 text-left">
+          <button onClick={() => openTrackerWorkout(normalized.id, cycleContext?.id || null)} className="flex flex-1 items-center gap-2 text-left">
             <span className="text-zinc-400">▶</span>
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -6382,7 +6462,8 @@ export default function App() {
             </div>
           </button>
           <div className="flex flex-wrap justify-end gap-2">
-            <SmallButton onClick={() => startTrackerWorkout(normalized.id)}>{isIncomplete ? "Resume" : "Start"}</SmallButton>
+            {cycleContext ? <SmallButton onClick={() => setCycleNextWorkout(cycleContext.id, normalized.id)}>Set Next Up</SmallButton> : null}
+            <SmallButton onClick={() => cycleContext ? openTrackerWorkout(normalized.id, cycleContext.id) : startTrackerWorkout(normalized.id)}>{isIncomplete ? "Resume" : "Start"}</SmallButton>
           </div>
         </div>
       </div>
@@ -6438,7 +6519,14 @@ export default function App() {
       return;
     }
     if (screen === "trackerWorkoutBuilder") {
-      setScreen("trackerWorkouts");
+      if (trackerWorkoutReturnCycleId) {
+        setScreen("openTracker");
+        setTrackerTab("cycles");
+        setExpandedTrackerCycleIds((current) => current.includes(trackerWorkoutReturnCycleId) ? current : [trackerWorkoutReturnCycleId, ...current]);
+      } else {
+        setScreen("trackerWorkouts");
+      }
+      setTrackerWorkoutReturnCycleId(null);
       return;
     }
     if (screen === "routines") {
@@ -6472,7 +6560,7 @@ export default function App() {
     if (screen === "programs") return "Back to Member View";
     if (screen === "openTracker") return "Back to Member View";
     if (screen === "trackerWorkouts") return "Back to Gym Tracker";
-    if (screen === "trackerWorkoutBuilder") return "Back to Workouts";
+    if (screen === "trackerWorkoutBuilder") return trackerWorkoutReturnCycleId ? "Back to Cycle" : "Back to Workouts";
     if (screen === "trainerSupport") return "Back to Member View";
     if (screen === "routines") return "Back to My Programs";
     if (screen === "routine") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to My Programs";
@@ -7607,7 +7695,7 @@ export default function App() {
                       {getMemberPlanLabel(selectedMember.memberPlan)}
                     </div>
 
-                    <button onClick={() => setScreen("openTracker")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
+                    <button onClick={() => { setTrackerTab("exercises"); setScreen("openTracker"); }} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
                       <div className="text-lg font-semibold text-zinc-900">Gym Tracker</div>
                       <div className="mt-1 text-sm text-zinc-500">Track custom workouts and exercise metrics.</div>
                     </button>
@@ -7642,10 +7730,6 @@ export default function App() {
               {role === "member" && screen === "openTracker" && (
                 <SectionCard title="Gym Tracker" collapsible>
                   <div className="space-y-5">
-                    <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
-                      Gym Tracker libraries are member-created only. Structured-program exercises stay separate from this tracker.
-                    </div>
-
                     <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2">
                       <button
                         onClick={() => setTrackerTab("exercises")}
@@ -7787,25 +7871,30 @@ export default function App() {
 
 
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                          <div className="mb-3 text-sm font-semibold text-zinc-900">Archived Workouts</div>
-                          <div className="space-y-2">
-                            {trackerWorkouts.filter((workout) => workout.memberId === selectedMember?.id && workout.archived).length ? (
-                              trackerWorkouts.filter((workout) => workout.memberId === selectedMember?.id && workout.archived).map((workout) => (
-                                <div key={workout.id} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                                  <div>
-                                    <div className="text-sm font-semibold text-zinc-900">{workout.name}</div>
-                                    <div className="text-xs text-zinc-500">Archived</div>
+                          <button type="button" onClick={() => toggleExpandedTrackerOptions("archived-workouts")} className="flex w-full items-center justify-between gap-3 text-left">
+                            <span className="text-sm font-semibold text-zinc-900">Archived Workouts</span>
+                            <span className="text-zinc-400">{expandedTrackerOptionsIds.includes("archived-workouts") ? "▼" : "▶"}</span>
+                          </button>
+                          {expandedTrackerOptionsIds.includes("archived-workouts") ? (
+                            <div className="mt-3 space-y-2 border-t border-zinc-100 pt-3">
+                              {archivedTrackerWorkouts.length ? (
+                                archivedTrackerWorkouts.map((workout) => (
+                                  <div key={workout.id} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                    <div>
+                                      <div className="text-sm font-semibold text-zinc-900">{workout.name}</div>
+                                      <div className="text-xs text-zinc-500">Archived</div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <SmallButton onClick={() => restoreTrackerWorkout(workout.id)}>Restore</SmallButton>
+                                      <button onClick={() => deleteTrackerWorkoutPermanently(workout.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete</button>
+                                    </div>
                                   </div>
-                                  <div className="flex gap-2">
-                                    <SmallButton onClick={() => restoreTrackerWorkout(workout.id)}>Restore</SmallButton>
-                                    <button onClick={() => deleteTrackerWorkoutPermanently(workout.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete</button>
-                                  </div>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-center text-sm text-zinc-500">No archived workouts.</div>
-                            )}
-                          </div>
+                                ))
+                              ) : (
+                                <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-center text-sm text-zinc-500">No archived workouts.</div>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ) : (
@@ -7840,7 +7929,8 @@ export default function App() {
                               activeTrackerCycles.map((cycle) => {
                                 const isExpanded = expandedTrackerCycleIds.includes(cycle.id);
                                 const cycleWorkouts = cycle.workoutIds.map((id) => trackerWorkoutById.get(id)).filter(Boolean) as TrackerWorkout[];
-                                const hasIncomplete = cycleWorkouts.some(isTrackerWorkoutIncomplete);
+                                const cycleIncompleteWorkoutId = getCycleIncompleteWorkoutId(cycle);
+                                const hasIncomplete = Boolean(cycleIncompleteWorkoutId);
                                 const cycleNextWorkoutId = getCycleNextWorkoutId(cycle);
                                 return (
                                   <div key={cycle.id} className={`rounded-2xl border p-3 ${hasIncomplete ? "border-amber-300 bg-amber-50" : "border-zinc-200 bg-zinc-50"}`}>
@@ -7855,6 +7945,9 @@ export default function App() {
                                           <div className="text-xs text-zinc-500">{cycle.workoutIds.length} workouts</div>
                                         </div>
                                       </div>
+                                      <span className="flex shrink-0 gap-2" onClick={(event) => event.stopPropagation()}>
+                                        <SmallButton onClick={() => startTrackerCycle(cycle.id)}>{cycle.startedAt && !cycle.completedAt ? "Resume Cycle" : "Start Cycle"}</SmallButton>
+                                      </span>
                                     </button>
                                     {isExpanded ? (
                                       <div className="mt-3 space-y-3">
@@ -7876,21 +7969,21 @@ export default function App() {
                                             const workout = trackerWorkoutById.get(workoutId);
                                             if (!workout) return null;
                                             return (
-                                              <div key={`${cycle.id}-${workoutId}`} className="rounded-xl border border-zinc-200 bg-white p-2">
+                                              <div key={`${cycle.id}-${workoutId}-${index}`} onClick={() => openTrackerWorkout(workout.id, cycle.id)} className="cursor-pointer rounded-xl border border-zinc-200 bg-white p-2 transition hover:border-zinc-400">
                                                 <div className="flex items-center justify-between gap-2">
                                                   <div className="min-w-0">
                                                     <div className="flex flex-wrap items-center gap-2">
                                                       <span className="text-sm font-semibold text-zinc-900">{index + 1}. {workout.name}</span>
-                                                      {isTrackerWorkoutIncomplete(workout) ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Incomplete</span> : null}
+                                                      {cycleIncompleteWorkoutId === workout.id ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Incomplete</span> : null}
                                                       {cycleNextWorkoutId === workout.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                                     </div>
                                                   </div>
                                                   <div className="flex flex-wrap justify-end gap-1">
-                                                    <SmallButton onClick={() => openTrackerWorkout(workout.id)}>Open</SmallButton>
-                                                    <SmallButton onClick={() => startTrackerWorkout(workout.id)}>{isTrackerWorkoutIncomplete(workout) ? "Resume" : "Start"}</SmallButton>
-                                                    <SmallButton onClick={() => moveCycleWorkout(cycle.id, workout.id, -1)} disabled={index === 0}>↑</SmallButton>
-                                                    <SmallButton onClick={() => moveCycleWorkout(cycle.id, workout.id, 1)} disabled={index === cycle.workoutIds.length - 1}>↓</SmallButton>
-                                                    <SmallButton onClick={() => removeWorkoutFromCycle(cycle.id, workout.id)}>Remove</SmallButton>
+                                                    <SmallButton onClick={(event) => { event.stopPropagation(); setCycleNextWorkout(cycle.id, workout.id); }}>Set Next Up</SmallButton>
+                                                    <SmallButton onClick={(event) => { event.stopPropagation(); startTrackerCycle(cycle.id); openTrackerWorkout(workout.id, cycle.id); }}>{cycleIncompleteWorkoutId === workout.id ? "Resume" : "Start"}</SmallButton>
+                                                    <SmallButton onClick={(event) => { event.stopPropagation(); moveCycleWorkout(cycle.id, workout.id, -1); }} disabled={index === 0}>↑</SmallButton>
+                                                    <SmallButton onClick={(event) => { event.stopPropagation(); moveCycleWorkout(cycle.id, workout.id, 1); }} disabled={index === cycle.workoutIds.length - 1}>↓</SmallButton>
+                                                    <SmallButton onClick={(event) => { event.stopPropagation(); removeWorkoutFromCycle(cycle.id, workout.id); }}>Remove</SmallButton>
                                                   </div>
                                                 </div>
                                               </div>
@@ -7898,6 +7991,19 @@ export default function App() {
                                           }) : (
                                             <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-4 text-center text-sm text-zinc-500">No workouts in this cycle yet.</div>
                                           )}
+                                        </div>
+                                        <div className="rounded-xl border border-zinc-200 bg-white p-3">
+                                          <button type="button" onClick={() => toggleExpandedTrackerOptions(`cycle-options-${cycle.id}`)} className="flex w-full items-center justify-between gap-3 text-left">
+                                            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Cycle Options</span>
+                                            <span className="text-zinc-400">{expandedTrackerOptionsIds.includes(`cycle-options-${cycle.id}`) ? "▼" : "▶"}</span>
+                                          </button>
+                                          {expandedTrackerOptionsIds.includes(`cycle-options-${cycle.id}`) ? (
+                                            <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
+                                              {cycle.startedAt && !cycle.completedAt ? <SmallButton onClick={() => markTrackerCycleComplete(cycle.id)}>Mark Cycle Complete</SmallButton> : null}
+                                              <SmallButton onClick={() => archiveTrackerCycle(cycle.id)}>Archive Cycle</SmallButton>
+                                              <button onClick={() => deleteTrackerCyclePermanently(cycle.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete Cycle</button>
+                                            </div>
+                                          ) : null}
                                         </div>
                                       </div>
                                     ) : null}
@@ -7908,6 +8014,29 @@ export default function App() {
                               <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No cycles yet. Create one above.</div>
                             )}
                           </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <button type="button" onClick={() => toggleExpandedTrackerOptions("archived-cycles")} className="flex w-full items-center justify-between gap-3 text-left">
+                            <span className="text-sm font-semibold text-zinc-900">Archived Cycles</span>
+                            <span className="text-zinc-400">{expandedTrackerOptionsIds.includes("archived-cycles") ? "▼" : "▶"}</span>
+                          </button>
+                          {expandedTrackerOptionsIds.includes("archived-cycles") ? (
+                            <div className="mt-3 space-y-2 border-t border-zinc-100 pt-3">
+                              {archivedTrackerCycles.length ? archivedTrackerCycles.map((cycle) => (
+                                <div key={cycle.id} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                  <div>
+                                    <div className="text-sm font-semibold text-zinc-900">{cycle.name}</div>
+                                    <div className="text-xs text-zinc-500">Archived</div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <SmallButton onClick={() => restoreTrackerCycle(cycle.id)}>Restore</SmallButton>
+                                    <button onClick={() => deleteTrackerCyclePermanently(cycle.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete</button>
+                                  </div>
+                                </div>
+                              )) : <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-center text-sm text-zinc-500">No archived cycles.</div>}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     )}
@@ -7960,17 +8089,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <button type="button" onClick={() => toggleExpandedTrackerOptions(`workout-options-${selectedTrackerWorkout.id}`)} className="flex w-full items-center justify-between gap-3 text-left">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Workout Options</span>
-                        <span className="text-zinc-400">{expandedTrackerOptionsIds.includes(`workout-options-${selectedTrackerWorkout.id}`) ? "▼" : "▶"}</span>
-                      </button>
-                      {expandedTrackerOptionsIds.includes(`workout-options-${selectedTrackerWorkout.id}`) ? (
-                        <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
-                          <SmallButton onClick={() => archiveTrackerWorkout(selectedTrackerWorkout.id)}>Archive Workout</SmallButton>
-                        </div>
-                      ) : null}
-                    </div>
                   </div>
                 </SectionCard>
               )}
@@ -7978,25 +8096,9 @@ export default function App() {
               {role === "member" && screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
                 <SectionCard title={selectedTrackerWorkout.name} collapsible>
                   <div className="space-y-5">
-                    <div className={`rounded-2xl border p-4 ${isTrackerWorkoutIncomplete(selectedTrackerWorkout) ? "border-amber-300 bg-amber-50" : isTrackerWorkoutComplete(selectedTrackerWorkout) ? "border-zinc-200 bg-zinc-50" : "border-zinc-200 bg-white"}`}>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-zinc-900">Workout Session</div>
-                          <div className="text-xs text-zinc-500">Start a workout to activate in-workout guidance. Incomplete sessions stay amber until completed.</div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <PrimaryButton onClick={() => startTrackerWorkout(selectedTrackerWorkout.id)}>{isTrackerWorkoutIncomplete(selectedTrackerWorkout) ? "Resume Workout" : "Start Workout"}</PrimaryButton>
-                          {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? (
-                            <SmallButton onClick={() => markTrackerWorkoutComplete(selectedTrackerWorkout.id)}>Mark Complete</SmallButton>
-                          ) : null}
-                        </div>
-                      </div>
-                      {isTrackerWorkoutIncomplete(selectedTrackerWorkout) ? (
-                        <div className="mt-3 rounded-xl border border-amber-200 bg-white/70 p-3 text-sm text-amber-800">This workout has missing exercise data. Fill the highlighted exercise or mark the workout complete.</div>
-                      ) : null}
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="mb-3 text-sm font-semibold text-zinc-900">Add Exercise From Library</div>
+                    <details open={(selectedTrackerWorkout.exerciseSlots || []).length === 0} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <summary className="cursor-pointer text-sm font-semibold text-zinc-900">Add Exercise From Library</summary>
+                      <div className="mt-3">
                       <div className="grid gap-2 md:grid-cols-[1fr_auto]">
                         <select
                           value={selectedWorkoutExerciseId}
@@ -8010,10 +8112,12 @@ export default function App() {
                         </select>
                         <SmallButton onClick={() => addExistingExerciseToWorkout(selectedTrackerWorkout.id)} disabled={!selectedWorkoutExerciseId}>Add</SmallButton>
                       </div>
-                    </div>
+                      </div>
+                    </details>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                      <div className="mb-3 text-sm font-semibold text-zinc-900">Create New Exercise For This Workout</div>
+                    <details open={(selectedTrackerWorkout.exerciseSlots || []).length === 0} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                      <summary className="cursor-pointer text-sm font-semibold text-zinc-900">Create New Exercise For This Workout</summary>
+                      <div className="mt-3">
                       <div className="grid gap-3 md:grid-cols-[1fr_150px_auto]">
                         <input
                           value={newTrackerExerciseName}
@@ -8052,8 +8156,26 @@ export default function App() {
                           +
                         </PrimaryButton>
                       </div>
-                    </div>
+                      </div>
+                    </details>
 
+                    <div className={`rounded-2xl border p-4 ${selectedWorkoutNextSlotId ? "border-amber-300 bg-amber-50" : isTrackerWorkoutComplete(selectedTrackerWorkout) ? "border-zinc-200 bg-zinc-50" : "border-zinc-200 bg-white"}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-zinc-900">Workout Session</div>
+                          <div className="text-xs text-zinc-500">Start a workout to activate in-workout guidance. Incomplete sessions stay amber until completed.</div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <PrimaryButton onClick={() => trackerWorkoutReturnCycleId ? startTrackerCycle(trackerWorkoutReturnCycleId) : startTrackerWorkout(selectedTrackerWorkout.id)}>{selectedWorkoutNextSlotId ? "Resume Workout" : "Start Workout"}</PrimaryButton>
+                          {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? (
+                            <SmallButton onClick={() => markTrackerWorkoutComplete(selectedTrackerWorkout.id)}>Mark Complete</SmallButton>
+                          ) : null}
+                        </div>
+                      </div>
+                      {selectedWorkoutNextSlotId ? (
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-white/70 p-3 text-sm text-amber-800">This workout has missing exercise data. Fill the highlighted exercise or mark the workout complete.</div>
+                      ) : null}
+                    </div>
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div>
@@ -8069,7 +8191,8 @@ export default function App() {
                             const exercise = trackerExerciseById.get(slot.exerciseId);
                             if (!exercise) return null;
                             const isNextWorkoutSlot = slot.id === selectedWorkoutNextSlotId;
-                            const isCompleteThisSession = hasWorkoutSlotEntrySinceStart(slot, selectedTrackerWorkout);
+                            const cycleContext = trackerWorkoutReturnCycleId ? activeTrackerCycles.find((cycle) => cycle.id === trackerWorkoutReturnCycleId) || null : null;
+                            const isCompleteThisSession = cycleContext ? hasWorkoutSlotEntrySinceCycleStart(slot, cycleContext) : hasWorkoutSlotEntrySinceStart(slot, selectedTrackerWorkout);
                             const contextKey = getTrackerContextKey(exercise.id, slot.id);
                             const isWorkoutSlotExpanded = expandedWorkoutSlotIds.includes(slot.id);
                             return (
