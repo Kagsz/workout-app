@@ -6252,11 +6252,7 @@ export default function App() {
 
   const workoutHasAnyData = (workout: TrackerWorkout | null | undefined) => Boolean(workout?.startedAt || workout?.completedAt || normalizeTrackerWorkout(workout as TrackerWorkout).exerciseSlots?.some((slot) => (slot.entries || []).length));
 
-  const archiveTrackerWorkout = (workoutId: string) => {
-    const workout = trackerWorkouts.find((item) => item.id === workoutId);
-    if (workout && !window.confirm(`Archive ${workout.name}?`)) return;
-    setTrackerWorkouts((current) => current.map((workout) => (workout.id === workoutId ? { ...workout, archived: true } : workout)));
-  };
+
 
   const restoreTrackerWorkout = (workoutId: string) => {
     setTrackerWorkouts((current) => current.map((workout) => (workout.id === workoutId ? { ...workout, archived: false } : workout)));
@@ -7928,7 +7924,6 @@ export default function App() {
                             {activeTrackerCycles.length ? (
                               activeTrackerCycles.map((cycle) => {
                                 const isExpanded = expandedTrackerCycleIds.includes(cycle.id);
-                                const cycleWorkouts = cycle.workoutIds.map((id) => trackerWorkoutById.get(id)).filter(Boolean) as TrackerWorkout[];
                                 const cycleIncompleteWorkoutId = getCycleIncompleteWorkoutId(cycle);
                                 const hasIncomplete = Boolean(cycleIncompleteWorkoutId);
                                 const cycleNextWorkoutId = getCycleNextWorkoutId(cycle);
