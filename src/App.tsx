@@ -134,7 +134,11 @@ type TrackerMetricGraphPoint = {
   unitLabel: string;
   exerciseName: string;
   contextLabel: string;
+  supportValues: Record<string, string>;
+  weightValue: string;
 };
+
+type TrackerMetricRole = "measured" | "color" | "support" | "completion" | "stored";
 
 type TrackerMetricGraphSeries = {
   metric: string;
@@ -142,6 +146,9 @@ type TrackerMetricGraphSeries = {
   contextLabel: string;
   points: TrackerMetricGraphPoint[];
   skippedValues: TrackerParsedMetricValue[];
+  supportMetrics: string[];
+  colorMetric?: string;
+  completionOnly?: boolean;
 };
 
 type SessionExerciseInput = {
@@ -441,7 +448,7 @@ const canMemberEnterProgramResults = (program: Program | null | undefined, membe
   !!program && !!member && (member.memberPlan === "premium" || getProgramInputMode(program, member) === "memberInput");
 
 const MUSCLE_GROUP_OPTIONS: MuscleGroup[] = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Forearm/Wrist", "Hand/Grip", "Legs", "Upper Body", "Lower Body", "Core", "Cardio", "Full Body", "Other"];
-const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds"];
+const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds", "Completion"];
 const WORKOUT_QUICK_FILL_OPTIONS = ["Leg Workout", "Upper Body Workout", "Core Workout", "Cardio Workout", "Full Body Workout"];
 
 const getTodayInputDate = () => new Date().toISOString().slice(0, 10);
@@ -499,6 +506,22 @@ const parseTrackerMetricValue = (value: string): TrackerParsedMetricValue => {
   };
 };
 
+const normalizeTrackerMetricName = (metric: string) => String(metric || "").trim().toLowerCase();
+
+const isTrackerMetricNamed = (metric: string, names: string[]) => {
+  const normalized = normalizeTrackerMetricName(metric);
+  return names.some((name) => normalized === name.toLowerCase());
+};
+
+const isCompletionMetric = (metric: string) => isTrackerMetricNamed(metric, ["completion", "completed", "done", "check", "checkmark"]);
+const isWeightMetric = (metric: string) => isTrackerMetricNamed(metric, ["weight", "load"]);
+const isTimeMetric = (metric: string) => isTrackerMetricNamed(metric, ["time"]);
+const isDistanceMetric = (metric: string) => isTrackerMetricNamed(metric, ["distance", "miles", "yards"]);
+const isSetMetric = (metric: string) => isTrackerMetricNamed(metric, ["sets", "set"]);
+const isRepMetric = (metric: string) => isTrackerMetricNamed(metric, ["reps", "rep", "repetitions"]);
+
+const isTruthyCompletionValue = (value: string) => /^(true|yes|y|done|complete|completed|check|checked|✓|✔|x|1)$/i.test(String(value || "").trim());
+
 const getTrackerMetricList = (metrics: TrackerMetric[] | undefined, entries: TrackerEntry[]) => {
   const metricSet = new Set<string>();
 
@@ -517,6 +540,73 @@ const getTrackerMetricList = (metrics: TrackerMetric[] | undefined, entries: Tra
   return Array.from(metricSet);
 };
 
+const getMetricNumericValues = (metric: string, entries: TrackerEntry[]) =>
+  entries
+    .map((entry) => parseTrackerMetricValue(entry.values?.[metric] || "").numericValue)
+    .filter((value): value is number => value !== null);
+
+const hasMeaningfulVariation = (values: number[]) => {
+  if (values.length < 2) return false;
+  const rounded = values.map((value) => Number(value.toFixed(4)));
+  return new Set(rounded).size > 1;
+};
+
+const isConstantNumericMetric = (metric: string, entries: TrackerEntry[]) => {
+  const values = getMetricNumericValues(metric, entries);
+  return values.length >= 2 && !hasMeaningfulVariation(values);
+};
+
+const resolveTrackerMetricRoles = (metricList: string[], entries: TrackerEntry[]): Record<string, TrackerMetricRole> => {
+  const roles: Record<string, TrackerMetricRole> = {};
+  const hasSets = metricList.some(isSetMetric);
+  const hasDistance = metricList.some(isDistanceMetric);
+  const hasTime = metricList.some(isTimeMetric);
+
+  metricList.forEach((metric) => {
+    if (isCompletionMetric(metric)) roles[metric] = "completion";
+    else if (isWeightMetric(metric)) roles[metric] = "color";
+    else if (isSetMetric(metric)) roles[metric] = "measured";
+    else if (isRepMetric(metric) && hasSets) roles[metric] = "support";
+    else roles[metric] = "measured";
+  });
+
+  metricList.forEach((metric) => {
+    if (roles[metric] !== "measured") return;
+    if (isConstantNumericMetric(metric, entries)) roles[metric] = "support";
+  });
+
+  const distanceMetric = metricList.find(isDistanceMetric);
+  const timeMetric = metricList.find(isTimeMetric);
+  if (hasDistance && hasTime && distanceMetric && timeMetric) {
+    const distanceValues = getMetricNumericValues(distanceMetric, entries);
+    const timeValues = getMetricNumericValues(timeMetric, entries);
+    const distanceVaries = hasMeaningfulVariation(distanceValues);
+    const timeVaries = hasMeaningfulVariation(timeValues);
+
+    if (distanceVaries && !timeVaries) {
+      roles[distanceMetric] = "measured";
+      roles[timeMetric] = "support";
+    } else if (!distanceVaries && timeVaries) {
+      roles[timeMetric] = "measured";
+      roles[distanceMetric] = "support";
+    } else if (distanceVaries && timeVaries) {
+      roles[distanceMetric] = "measured";
+      roles[timeMetric] = "measured";
+    } else {
+      roles[distanceMetric] = "support";
+      roles[timeMetric] = "support";
+    }
+  }
+
+  const anyMeasured = metricList.some((metric) => roles[metric] === "measured");
+  if (!anyMeasured) {
+    const fallback = metricList.find((metric) => roles[metric] !== "color" && roles[metric] !== "completion" && getMetricNumericValues(metric, entries).length > 0);
+    if (fallback && !isConstantNumericMetric(fallback, entries)) roles[fallback] = "measured";
+  }
+
+  return roles;
+};
+
 const buildTrackerMetricGraphSeries = ({
   exerciseName,
   contextLabel,
@@ -532,8 +622,29 @@ const buildTrackerMetricGraphSeries = ({
     (a, b) => getSafeDateTime(a.entryDate || a.createdAt) - getSafeDateTime(b.entryDate || b.createdAt)
   );
   const metricList = getTrackerMetricList(metrics, sortedEntries);
+  const metricRoles = resolveTrackerMetricRoles(metricList, sortedEntries);
+  const supportMetrics = metricList.filter((metric) => metricRoles[metric] === "support");
+  const colorMetric = metricList.find((metric) => metricRoles[metric] === "color");
+  const completionMetric = metricList.find((metric) => metricRoles[metric] === "completion");
+  const measuredMetrics = metricList.filter((metric) => metricRoles[metric] === "measured");
+  const completionCount = completionMetric
+    ? sortedEntries.filter((entry) => isTruthyCompletionValue(entry.values?.[completionMetric] || "")).length
+    : 0;
 
-  return metricList
+  if (!measuredMetrics.length && completionMetric) {
+    return [{
+      metric: "Consistency Check",
+      exerciseName,
+      contextLabel,
+      points: [],
+      skippedValues: [],
+      supportMetrics,
+      colorMetric,
+      completionOnly: completionCount > 0,
+    }];
+  }
+
+  return measuredMetrics
     .map((metric) => {
       const points: TrackerMetricGraphPoint[] = [];
       const skippedValues: TrackerParsedMetricValue[] = [];
@@ -547,6 +658,13 @@ const buildTrackerMetricGraphSeries = ({
         }
 
         const entryDate = entry.entryDate || entry.createdAt || "";
+        const supportValues = Object.fromEntries(
+          supportMetrics
+            .map((supportMetric) => [supportMetric, String(entry.values?.[supportMetric] || "").trim()])
+            .filter(([, value]) => Boolean(value))
+        ) as Record<string, string>;
+        const weightValue = colorMetric ? String(entry.values?.[colorMetric] || "").trim() : "";
+
         points.push({
           x: index + 1,
           xLabel: entryDate || `Entry ${index + 1}`,
@@ -559,10 +677,12 @@ const buildTrackerMetricGraphSeries = ({
           unitLabel: parsed.unitLabel || metric,
           exerciseName,
           contextLabel,
+          supportValues,
+          weightValue,
         });
       });
 
-      return { metric, exerciseName, contextLabel, points, skippedValues };
+      return { metric, exerciseName, contextLabel, points, skippedValues, supportMetrics, colorMetric };
     })
     .filter((series) => series.points.length || series.skippedValues.length);
 };
@@ -5096,6 +5216,10 @@ function TrackerMetricTooltip({
       <div className="font-semibold text-zinc-900">{point.exerciseName}</div>
       <div className="mt-1 text-zinc-700">{point.contextLabel}</div>
       <div className="mt-1 text-zinc-700">{point.metric}: <span className="font-semibold">{point.rawValue}</span></div>
+      {point.weightValue ? <div className="mt-1 text-zinc-700">Weight: <span className="font-semibold">{point.weightValue}</span></div> : null}
+      {Object.entries(point.supportValues || {}).map(([metric, value]) => (
+        <div key={metric} className="mt-1 text-zinc-700">{metric}: <span className="font-semibold">{value}</span></div>
+      ))}
       <div className="mt-1 text-zinc-500">{point.entryDate}</div>
     </div>
   );
@@ -5107,6 +5231,18 @@ function TrackerMetricChart({ series }: { series: TrackerMetricGraphSeries }) {
   const maxY = yValues.length ? Math.max(...yValues) : 1;
   const padding = Math.max(1, Math.ceil((maxY - minY) * 0.15));
   const domain: [number, number] = [Math.floor(minY - padding), Math.ceil(maxY + padding)];
+  const weightValues = Array.from(new Set(series.points.map((point) => point.weightValue).filter(Boolean)));
+
+  if (series.completionOnly) {
+    return (
+      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+        <div className="text-sm font-bold text-zinc-900">Consistency Check</div>
+        <div className="mt-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
+          This exercise has completion/context entries but no measured output yet. Treat it as completed-as-prescribed rather than a performance trend.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -5126,7 +5262,23 @@ function TrackerMetricChart({ series }: { series: TrackerMetricGraphSeries }) {
               <XAxis dataKey="xLabel" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 10 }} domain={domain} />
               <Tooltip content={<TrackerMetricTooltip />} cursor={false} />
-              <Line type="monotone" dataKey="y" stroke="currentColor" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} isAnimationActive={false} />
+              <Line
+                type="monotone"
+                dataKey="y"
+                stroke="currentColor"
+                strokeWidth={2}
+                dot={({ cx, cy, payload }: any) => {
+                  if (cx == null || cy == null || !payload) return null;
+                  const fill = getStableWeightColor(payload.weightValue || "BW");
+                  return <circle cx={cx} cy={cy} r={4} fill={fill} stroke={fill} strokeWidth={1.5} />;
+                }}
+                activeDot={({ cx, cy, payload }: any) => {
+                  if (cx == null || cy == null || !payload) return null;
+                  const fill = getStableWeightColor(payload.weightValue || "BW");
+                  return <circle cx={cx} cy={cy} r={6} fill={fill} stroke={fill} strokeWidth={1.5} />;
+                }}
+                isAnimationActive={false}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -5136,10 +5288,27 @@ function TrackerMetricChart({ series }: { series: TrackerMetricGraphSeries }) {
         </div>
       ) : (
         <div className="mt-3 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
-          No numeric values found for this metric yet.
+          No measured output detected for this metric yet.
         </div>
       )}
 
+      {weightValues.length ? (
+        <div className="mt-3 rounded-xl border border-zinc-100 bg-zinc-50 p-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Weight Key</div>
+          <div className="flex flex-wrap gap-2">
+            {weightValues.map((weight) => (
+              <span key={weight} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: getStableWeightColor(weight) }} />
+                {weight}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {series.supportMetrics.length ? (
+        <div className="mt-2 text-xs text-zinc-500">Support/context: {series.supportMetrics.join(", ")}</div>
+      ) : null}
       {series.skippedValues.length ? (
         <div className="mt-2 text-xs text-zinc-500">
           Preserved non-graphable value{series.skippedValues.length === 1 ? "" : "s"}: {series.skippedValues.map((value) => value.rawValue).join(", ")}
@@ -5221,6 +5390,8 @@ export default function App() {
   const [pendingMetricRemoval, setPendingMetricRemoval] = useState<{ exerciseId: string; metric: TrackerMetric } | null>(null);
   const [dataViewerExerciseId, setDataViewerExerciseId] = useState<string | null>(null);
   const [dataViewerWorkoutSlotId, setDataViewerWorkoutSlotId] = useState<string | null>(null);
+  const [graphViewerExerciseId, setGraphViewerExerciseId] = useState<string | null>(null);
+  const [graphViewerWorkoutSlotId, setGraphViewerWorkoutSlotId] = useState<string | null>(null);
   const [draggedTrackerExerciseId, setDraggedTrackerExerciseId] = useState<string | null>(null);
   const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
@@ -5383,30 +5554,44 @@ export default function App() {
     return null;
   }, [activeTrackerWorkouts, dataViewerWorkoutSlotId, trackerExerciseById]);
 
-  const dataViewerExerciseGraphSeries = useMemo(
-    () =>
-      dataViewerExercise
-        ? buildTrackerMetricGraphSeries({
-            exerciseName: dataViewerExercise.name,
-            contextLabel: "My Exercises",
-            metrics: dataViewerExercise.metrics,
-            entries: dataViewerExercise.entries,
-          })
-        : [],
-    [dataViewerExercise]
+  const graphViewerExercise = useMemo(
+    () => trackerExercises.find((exercise) => exercise.id === graphViewerExerciseId) || null,
+    [trackerExercises, graphViewerExerciseId]
   );
 
-  const dataViewerWorkoutSlotGraphSeries = useMemo(
+  const graphViewerWorkoutSlot = useMemo(() => {
+    if (!graphViewerWorkoutSlotId) return null;
+    for (const workout of activeTrackerWorkouts) {
+      const slot = (workout.exerciseSlots || []).find((item) => item.id === graphViewerWorkoutSlotId);
+      if (slot) return { workout, slot, exercise: trackerExerciseById.get(slot.exerciseId) || null };
+    }
+    return null;
+  }, [activeTrackerWorkouts, graphViewerWorkoutSlotId, trackerExerciseById]);
+
+  const graphViewerExerciseGraphSeries = useMemo(
     () =>
-      dataViewerWorkoutSlot?.exercise
+      graphViewerExercise
         ? buildTrackerMetricGraphSeries({
-            exerciseName: dataViewerWorkoutSlot.exercise.name,
-            contextLabel: dataViewerWorkoutSlot.workout.name,
-            metrics: dataViewerWorkoutSlot.exercise.metrics,
-            entries: dataViewerWorkoutSlot.slot.entries,
+            exerciseName: graphViewerExercise.name,
+            contextLabel: "My Exercises",
+            metrics: graphViewerExercise.metrics,
+            entries: graphViewerExercise.entries,
           })
         : [],
-    [dataViewerWorkoutSlot]
+    [graphViewerExercise]
+  );
+
+  const graphViewerWorkoutSlotGraphSeries = useMemo(
+    () =>
+      graphViewerWorkoutSlot?.exercise
+        ? buildTrackerMetricGraphSeries({
+            exerciseName: graphViewerWorkoutSlot.exercise.name,
+            contextLabel: graphViewerWorkoutSlot.workout.name,
+            metrics: graphViewerWorkoutSlot.exercise.metrics,
+            entries: graphViewerWorkoutSlot.slot.entries,
+          })
+        : [],
+    [graphViewerWorkoutSlot]
   );
 
   const pendingTrackerWorkoutSlot = useMemo(() => {
@@ -6370,12 +6555,24 @@ export default function App() {
             {(exercise.metrics || []).map((metric) => (
               <div key={metric} className="grid grid-cols-[120px_1fr] items-center gap-2">
                 <div className="truncate text-sm font-semibold text-zinc-700">{metric}</div>
-                <input
-                  value={trackerDraftValues[contextKey]?.[metric] || ""}
-                  onChange={(event) => updateTrackerMetricDraftValue(contextKey, metric, event.target.value)}
-                  placeholder="Enter value"
-                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                />
+                {isCompletionMetric(metric) ? (
+                  <label className="flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={isTruthyCompletionValue(trackerDraftValues[contextKey]?.[metric] || "")}
+                      onChange={(event) => updateTrackerMetricDraftValue(contextKey, metric, event.target.checked ? "Completed" : "")}
+                      className="h-4 w-4 rounded border-zinc-300"
+                    />
+                    Completed
+                  </label>
+                ) : (
+                  <input
+                    value={trackerDraftValues[contextKey]?.[metric] || ""}
+                    onChange={(event) => updateTrackerMetricDraftValue(contextKey, metric, event.target.value)}
+                    placeholder="Enter value"
+                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                  />
+                )}
               </div>
             ))}
             <div className="grid grid-cols-[120px_1fr] items-center gap-2 pt-1">
@@ -6408,7 +6605,7 @@ export default function App() {
     const draftValues = trackerDraftValues[contextKey] || {};
     const exercise = trackerExercises.find((item) => item.id === exerciseId);
     const metrics = exercise?.metrics || [];
-    const values = Object.fromEntries(metrics.map((metric) => [metric, String(draftValues[metric] || "").trim()])) as Record<string, string>;
+    const values = Object.fromEntries(metrics.map((metric) => [metric, isCompletionMetric(metric) && isTruthyCompletionValue(draftValues[metric] || "") ? "Completed" : String(draftValues[metric] || "").trim()])) as Record<string, string>;
     const entry: TrackerEntry = {
       id: pendingTrackerExistingEntry?.id || uid(),
       entryDate,
@@ -8055,7 +8252,7 @@ export default function App() {
                                     </div>
                                   </button>
                                   <div className="flex items-center gap-2">
-                                    <button onClick={() => setDataViewerExerciseId(exercise.id)} title="View graph" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm transition hover:border-zinc-500">📈</button>
+                                    <button onClick={() => setGraphViewerExerciseId(exercise.id)} title="View graph" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm transition hover:border-zinc-500">📈</button>
                                     <SmallButton onClick={() => setDataViewerExerciseId(exercise.id)}>View Data</SmallButton>
                                   </div>
                                 </div>
@@ -8459,7 +8656,7 @@ export default function App() {
                                     </button>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <button onClick={() => setDataViewerWorkoutSlotId(slot.id)} title="View graph" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm transition hover:border-zinc-500">📈</button>
+                                    <button onClick={() => setGraphViewerWorkoutSlotId(slot.id)} title="View graph" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm transition hover:border-zinc-500">📈</button>
                                     <SmallButton onClick={() => setDataViewerWorkoutSlotId(slot.id)}>View Data</SmallButton>
                                   </div>
                                 </div>
@@ -8514,7 +8711,7 @@ export default function App() {
                         {(pendingTrackerEntryExercise.metrics || []).map((metric) => (
                           <div key={metric} className="flex justify-between gap-3">
                             <span>{metric}</span>
-                            <span className="font-semibold">{trackerDraftValues[pendingTrackerEntryContextKey]?.[metric] || "—"}</span>
+                            <span className="font-semibold">{isCompletionMetric(metric) && isTruthyCompletionValue(trackerDraftValues[pendingTrackerEntryContextKey]?.[metric] || "") ? "✓ Completed" : (trackerDraftValues[pendingTrackerEntryContextKey]?.[metric] || "—")}</span>
                           </div>
                         ))}
                       </div>
@@ -8540,6 +8737,56 @@ export default function App() {
                 </div>
               )}
 
+              {graphViewerExercise && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">{graphViewerExercise.name} Graph</div>
+                        <div className="mt-1 text-sm text-zinc-500">My Exercises • interpreted metric view.</div>
+                      </div>
+                      <SmallButton onClick={() => setGraphViewerExerciseId(null)}>Close</SmallButton>
+                    </div>
+                    <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
+                      {graphViewerExerciseGraphSeries.length ? (
+                        <div className="space-y-3">
+                          {graphViewerExerciseGraphSeries.map((series) => (
+                            <TrackerMetricChart key={series.metric} series={series} />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No measured graph output yet. Completion/context entries can still appear in View Data.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {graphViewerWorkoutSlot && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">{graphViewerWorkoutSlot.exercise?.name || "Workout Exercise"} Graph</div>
+                        <div className="mt-1 text-sm text-zinc-500">{graphViewerWorkoutSlot.workout.name} • workout-slot specific.</div>
+                      </div>
+                      <SmallButton onClick={() => setGraphViewerWorkoutSlotId(null)}>Close</SmallButton>
+                    </div>
+                    <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
+                      {graphViewerWorkoutSlotGraphSeries.length ? (
+                        <div className="space-y-3">
+                          {graphViewerWorkoutSlotGraphSeries.map((series) => (
+                            <TrackerMetricChart key={series.metric} series={series} />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No measured graph output yet. Completion/context entries can still appear in View Data.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {dataViewerExercise && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
                   <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
@@ -8550,41 +8797,30 @@ export default function App() {
                       </div>
                       <SmallButton onClick={() => setDataViewerExerciseId(null)}>Close</SmallButton>
                     </div>
-                    <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
-                      {dataViewerExerciseGraphSeries.length ? (
-                        <div className="space-y-3">
-                          {dataViewerExerciseGraphSeries.map((series) => (
-                            <TrackerMetricChart key={series.metric} series={series} />
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className="space-y-3">
+                    <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto pr-1">
                       {(dataViewerExercise.entries || []).length ? (
                         [...(dataViewerExercise.entries || [])]
                           .sort((a, b) => getSafeDateTime(b.entryDate || b.createdAt) - getSafeDateTime(a.entryDate || a.createdAt))
                           .map((entry) => (
-                            <div key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                              <div className="mb-2 text-sm font-semibold text-zinc-900">{entry.entryDate}</div>
-                              <div className="space-y-1 text-sm text-zinc-700">
+                            <details key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                              <summary className="cursor-pointer text-sm font-semibold text-zinc-900">{entry.entryDate}</summary>
+                              <div className="mt-3 space-y-1 text-sm text-zinc-700">
                                 {(dataViewerExercise.metrics || Object.keys(entry.values || {})).map((metric) => (
                                   <div key={metric} className="flex justify-between gap-3">
                                     <span>{metric}</span>
-                                    <span className="font-semibold">{entry.values?.[metric] || "—"}</span>
+                                    <span className="font-semibold">{isCompletionMetric(metric) && isTruthyCompletionValue(entry.values?.[metric] || "") ? "✓ Completed" : (entry.values?.[metric] || "—")}</span>
                                   </div>
                                 ))}
                               </div>
-                            </div>
+                            </details>
                           ))
                       ) : (
                         <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No saved entries yet.</div>
                       )}
-                      </div>
                     </div>
                   </div>
                 </div>
               )}
-
-
 
               {dataViewerWorkoutSlot && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
@@ -8596,35 +8832,26 @@ export default function App() {
                       </div>
                       <SmallButton onClick={() => setDataViewerWorkoutSlotId(null)}>Close</SmallButton>
                     </div>
-                    <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
-                      {dataViewerWorkoutSlotGraphSeries.length ? (
-                        <div className="space-y-3">
-                          {dataViewerWorkoutSlotGraphSeries.map((series) => (
-                            <TrackerMetricChart key={series.metric} series={series} />
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className="space-y-3">
+                    <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto pr-1">
                       {(dataViewerWorkoutSlot.slot.entries || []).length ? (
                         [...(dataViewerWorkoutSlot.slot.entries || [])]
                           .sort((a, b) => getSafeDateTime(b.entryDate || b.createdAt) - getSafeDateTime(a.entryDate || a.createdAt))
                           .map((entry) => (
-                            <div key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                              <div className="mb-2 text-sm font-semibold text-zinc-900">{entry.entryDate}</div>
-                              <div className="space-y-1 text-sm text-zinc-700">
+                            <details key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                              <summary className="cursor-pointer text-sm font-semibold text-zinc-900">{entry.entryDate}</summary>
+                              <div className="mt-3 space-y-1 text-sm text-zinc-700">
                                 {((dataViewerWorkoutSlot.exercise?.metrics || Object.keys(entry.values || {}))).map((metric) => (
                                   <div key={metric} className="flex justify-between gap-3">
                                     <span>{metric}</span>
-                                    <span className="font-semibold">{entry.values?.[metric] || "—"}</span>
+                                    <span className="font-semibold">{isCompletionMetric(metric) && isTruthyCompletionValue(entry.values?.[metric] || "") ? "✓ Completed" : (entry.values?.[metric] || "—")}</span>
                                   </div>
                                 ))}
                               </div>
-                            </div>
+                            </details>
                           ))
                       ) : (
                         <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No saved entries yet.</div>
                       )}
-                      </div>
                     </div>
                   </div>
                 </div>
