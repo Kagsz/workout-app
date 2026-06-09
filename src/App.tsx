@@ -151,6 +151,14 @@ type TrackerMetricGraphSeries = {
   completionOnly?: boolean;
 };
 
+type TrackerSummaryInsight = {
+  title: string;
+  label: string;
+  reportAccuracy: AISummaryReportAccuracy;
+  body: string;
+  detail: string;
+};
+
 type SessionExerciseInput = {
   exerciseId: string;
   exerciseName: string;
@@ -686,6 +694,123 @@ const buildTrackerMetricGraphSeries = ({
     })
     .filter((series) => series.points.length || series.skippedValues.length);
 };
+
+
+const formatTrackerMetricValueForSummary = (metric: string, value: string) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (isCompletionMetric(metric) && isTruthyCompletionValue(trimmed)) return "completed";
+  return trimmed;
+};
+
+const getTrackerSummaryEntryCount = (entries?: TrackerEntry[]) => (entries || []).filter((entry) => Object.values(entry.values || {}).some((value) => String(value || "").trim())).length;
+
+const getTrackerSummaryAccuracy = (entryCount: number): AISummaryReportAccuracy =>
+  entryCount >= 6 ? "High" : entryCount >= 3 ? "Moderate" : "Low";
+
+const getTrackerSummaryTrendText = (series: TrackerMetricGraphSeries) => {
+  if (series.completionOnly) return null;
+  const points = series.points || [];
+  if (points.length < 2) return null;
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const delta = last.y - first.y;
+  const metricName = series.metric.toLowerCase();
+  const tolerance = Math.max(0.25, Math.abs(first.y || 0) * 0.03);
+
+  if (Math.abs(delta) <= tolerance) {
+    return `${series.metric} stayed consistent around ${last.rawValue}.`;
+  }
+
+  const direction = delta > 0 ? "increased" : "decreased";
+  const goodDecline = isTimeMetric(series.metric);
+  const phrase = delta < 0 && goodDecline ? "improved by dropping" : direction;
+  return `${series.metric} ${phrase} from ${first.rawValue} to ${last.rawValue}.`;
+};
+
+const getTrackerSummaryWeightText = (series: TrackerMetricGraphSeries[]) => {
+  const weights = series.flatMap((item) => item.points.map((point) => String(point.weightValue || "").trim()).filter(Boolean));
+  const unique = Array.from(new Set(weights));
+  if (!unique.length) return "";
+  if (unique.length === 1) return `Weight context stayed at ${unique[0]}.`;
+  return `Weight context moved from ${unique[0]} to ${unique[unique.length - 1]}.`;
+};
+
+const getTrackerSummarySupportText = (series: TrackerMetricGraphSeries[]) => {
+  const supportNames = Array.from(new Set(series.flatMap((item) => item.supportMetrics || [])));
+  if (!supportNames.length) return "";
+  return `Support/context tracked: ${supportNames.join(", ")}.`;
+};
+
+const buildTrackerSummaryInsight = ({
+  exerciseName,
+  contextLabel,
+  metrics,
+  entries,
+  series,
+}: {
+  exerciseName: string;
+  contextLabel: string;
+  metrics?: TrackerMetric[];
+  entries?: TrackerEntry[];
+  series: TrackerMetricGraphSeries[];
+}): TrackerSummaryInsight | null => {
+  const entryCount = getTrackerSummaryEntryCount(entries);
+  if (!entryCount) return null;
+
+  const metricList = getTrackerMetricList(metrics, entries || []);
+  const completionMetric = metricList.find(isCompletionMetric);
+  const completionCount = completionMetric
+    ? (entries || []).filter((entry) => isTruthyCompletionValue(entry.values?.[completionMetric] || "")).length
+    : 0;
+  const measuredSeries = series.filter((item) => !item.completionOnly && (item.points || []).length);
+  const trendLines = measuredSeries.map(getTrackerSummaryTrendText).filter((value): value is string => Boolean(value));
+  const weightText = getTrackerSummaryWeightText(measuredSeries);
+  const supportText = getTrackerSummarySupportText(series);
+  const reportAccuracy = getTrackerSummaryAccuracy(entryCount);
+
+  if (!measuredSeries.length && completionCount > 0) {
+    return {
+      title: `${exerciseName} Summary`,
+      label: "Consistency Check",
+      reportAccuracy,
+      body: `You logged ${completionCount} completed entr${completionCount === 1 ? "y" : "ies"} for this exercise.`,
+      detail: `This looks like completed-as-prescribed work in ${contextLabel}, so the tracker is treating it as consistency rather than a performance trend.`,
+    };
+  }
+
+  const primaryTrend = trendLines[0] || "There is not enough movement yet to call a clear trend.";
+  const supporting = [weightText, supportText].filter(Boolean).join(" ");
+  const label = trendLines.length ? "Exercise Trend" : "Early Data Check";
+
+  return {
+    title: `${exerciseName} Summary`,
+    label,
+    reportAccuracy,
+    body: primaryTrend,
+    detail: supporting || `This summary is based on ${entryCount} logged entr${entryCount === 1 ? "y" : "ies"} in ${contextLabel}.`,
+  };
+};
+
+function TrackerSummaryCard({ insight }: { insight: TrackerSummaryInsight | null }) {
+  if (!insight) return null;
+
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Gym Tracker Summary</div>
+          <div className="mt-1 text-base font-bold text-zinc-900">{insight.title}</div>
+        </div>
+        <div className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">{insight.reportAccuracy} accuracy</div>
+      </div>
+      <div className="mt-3 inline-flex rounded-full bg-white px-3 py-1 text-xs font-bold text-zinc-700">{insight.label}</div>
+      <p className="mt-3 text-sm font-medium leading-6 text-zinc-800">{insight.body}</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-600">{insight.detail}</p>
+    </div>
+  );
+}
 
 const getProgramLength = (program: Program | null | undefined) => {
   const value = Number(program?.programLength);
@@ -5383,6 +5508,7 @@ export default function App() {
   const [expandedTrackerCycleIds, setExpandedTrackerCycleIds] = useState<string[]>([]);
   const [expandedTrackerOptionsIds, setExpandedTrackerOptionsIds] = useState<string[]>([]);
   const [selectedTrackerMetricByExercise, setSelectedTrackerMetricByExercise] = useState<Record<string, string>>({});
+  const [selectedTrackerPresetMetricsByExercise, setSelectedTrackerPresetMetricsByExercise] = useState<Record<string, string[]>>({});
   const [trackerDraftValues, setTrackerDraftValues] = useState<Record<string, Record<string, string>>>({});
   const [trackerEntryDateByExercise, setTrackerEntryDateByExercise] = useState<Record<string, string>>({});
   const [pendingTrackerEntryExerciseId, setPendingTrackerEntryExerciseId] = useState<string | null>(null);
@@ -5592,6 +5718,34 @@ export default function App() {
           })
         : [],
     [graphViewerWorkoutSlot]
+  );
+
+  const graphViewerExerciseSummaryInsight = useMemo(
+    () =>
+      graphViewerExercise
+        ? buildTrackerSummaryInsight({
+            exerciseName: graphViewerExercise.name,
+            contextLabel: "My Exercises",
+            metrics: graphViewerExercise.metrics,
+            entries: graphViewerExercise.entries,
+            series: graphViewerExerciseGraphSeries,
+          })
+        : null,
+    [graphViewerExercise, graphViewerExerciseGraphSeries]
+  );
+
+  const graphViewerWorkoutSlotSummaryInsight = useMemo(
+    () =>
+      graphViewerWorkoutSlot?.exercise
+        ? buildTrackerSummaryInsight({
+            exerciseName: graphViewerWorkoutSlot.exercise.name,
+            contextLabel: graphViewerWorkoutSlot.workout.name,
+            metrics: graphViewerWorkoutSlot.exercise.metrics,
+            entries: graphViewerWorkoutSlot.slot.entries,
+            series: graphViewerWorkoutSlotGraphSeries,
+          })
+        : null,
+    [graphViewerWorkoutSlot, graphViewerWorkoutSlotGraphSeries]
   );
 
   const pendingTrackerWorkoutSlot = useMemo(() => {
@@ -6370,6 +6524,41 @@ export default function App() {
     setSelectedTrackerMetricByExercise((current) => ({ ...current, [exerciseId]: "" }));
   };
 
+  const togglePresetMetricForTrackerExercise = (exerciseId: string, metric: TrackerMetric) => {
+    setSelectedTrackerPresetMetricsByExercise((current) => {
+      const currentMetrics = current[exerciseId] || [];
+      const exists = currentMetrics.includes(metric);
+      return {
+        ...current,
+        [exerciseId]: exists ? currentMetrics.filter((item) => item !== metric) : [...currentMetrics, metric],
+      };
+    });
+  };
+
+  const addSelectedPresetMetricsToTrackerExercise = (exerciseId: string) => {
+    const selectedMetrics = selectedTrackerPresetMetricsByExercise[exerciseId] || [];
+    if (!selectedMetrics.length) return;
+
+    updateTrackerExercise(exerciseId, (exercise) => {
+      const metrics = exercise.metrics || [];
+      const nextMetrics = [...metrics];
+      selectedMetrics.forEach((selectedMetric) => {
+        const alreadyExists = nextMetrics.some((metric) => metric.trim().toLowerCase() === selectedMetric.toLowerCase());
+        if (!alreadyExists) nextMetrics.push(selectedMetric);
+      });
+      return { ...exercise, metrics: nextMetrics };
+    });
+
+    setTrackerDraftValues((current) => ({
+      ...current,
+      [exerciseId]: {
+        ...(current[exerciseId] || {}),
+        ...Object.fromEntries(selectedMetrics.map((metric) => [metric, current[exerciseId]?.[metric] || ""])),
+      },
+    }));
+    setSelectedTrackerPresetMetricsByExercise((current) => ({ ...current, [exerciseId]: [] }));
+  };
+
   const updateTrackerMetricDraftValue = (contextKey: string, metric: TrackerMetric, value: string) => {
     setTrackerDraftValues((current) => ({
       ...current,
@@ -6499,22 +6688,43 @@ export default function App() {
                 <div className="mb-3 text-xs text-zinc-500">No metrics added yet.</div>
               )}
 
-              <div className="flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
+              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Add Preset Metrics</div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {TRACKER_METRIC_OPTIONS.filter((metric) => !(exercise.metrics || []).some((existing) => existing.trim().toLowerCase() === metric.toLowerCase())).map((metric) => {
+                    const checked = (selectedTrackerPresetMetricsByExercise[exercise.id] || []).includes(metric);
+                    return (
+                      <label key={metric} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${checked ? "border-zinc-900 bg-white text-zinc-900" : "border-zinc-200 bg-white text-zinc-600"}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => togglePresetMetricForTrackerExercise(exercise.id, metric)}
+                          className="h-4 w-4 rounded border-zinc-300"
+                        />
+                        {metric}
+                      </label>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => addSelectedPresetMetricsToTrackerExercise(exercise.id)}
+                  disabled={!(selectedTrackerPresetMetricsByExercise[exercise.id] || []).length}
+                  className="mt-3 w-full rounded-xl bg-zinc-900 px-4 py-2 text-sm font-bold text-white disabled:bg-zinc-300"
+                >
+                  Add Selected Metrics
+                </button>
+              </div>
+
+              <div className="mt-3 flex overflow-hidden rounded-xl border border-zinc-300 bg-white">
                 <input
-                  list={`tracker-metric-options-${exercise.id}`}
                   value={selectedTrackerMetricByExercise[exercise.id] || ""}
                   onChange={(event) => setSelectedTrackerMetricByExercise((current) => ({ ...current, [exercise.id]: event.target.value }))}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") addMetricToTrackerExercise(exercise.id);
                   }}
-                  placeholder="Metric name"
+                  placeholder="Custom metric name"
                   className="min-w-0 flex-1 bg-white px-3 py-2 text-sm text-zinc-900 outline-none"
                 />
-                <datalist id={`tracker-metric-options-${exercise.id}`}>
-                  {TRACKER_METRIC_OPTIONS.map((metric) => (
-                    <option key={metric} value={metric} />
-                  ))}
-                </datalist>
                 <button
                   onClick={() => addMetricToTrackerExercise(exercise.id)}
                   disabled={!String(selectedTrackerMetricByExercise[exercise.id] || "").trim()}
@@ -6523,7 +6733,7 @@ export default function App() {
                   +
                 </button>
               </div>
-              <div className="mt-2 text-xs text-zinc-500">Type a custom metric or choose a preset from the dropdown.</div>
+              <div className="mt-2 text-xs text-zinc-500">Select several preset metrics at once, or add one custom metric by name.</div>
             </div>
 
             <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
@@ -8748,6 +8958,7 @@ export default function App() {
                       <SmallButton onClick={() => setGraphViewerExerciseId(null)}>Close</SmallButton>
                     </div>
                     <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
+                      <TrackerSummaryCard insight={graphViewerExerciseSummaryInsight} />
                       {graphViewerExerciseGraphSeries.length ? (
                         <div className="space-y-3">
                           {graphViewerExerciseGraphSeries.map((series) => (
@@ -8773,6 +8984,7 @@ export default function App() {
                       <SmallButton onClick={() => setGraphViewerWorkoutSlotId(null)}>Close</SmallButton>
                     </div>
                     <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
+                      <TrackerSummaryCard insight={graphViewerWorkoutSlotSummaryInsight} />
                       {graphViewerWorkoutSlotGraphSeries.length ? (
                         <div className="space-y-3">
                           {graphViewerWorkoutSlotGraphSeries.map((series) => (
