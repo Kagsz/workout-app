@@ -154,7 +154,7 @@ type TrackerMetricGraphSeries = {
 type TrackerSummaryInsight = {
   title: string;
   label: string;
-  reportAccuracy: AISummaryReportAccuracy;
+  reportAccuracy: SharedEngineConfidenceBand;
   body: string;
   detail: string;
 };
@@ -442,6 +442,111 @@ const GRAPH_UI_LOCK_CSS = `
   }
 `;
 
+// ===== SHARED ENGINE CORE =====
+// Patch 2 routes only the Gym Tracker summary adapter through this core.
+// Structured Program graphing and summary behavior remain on the existing mature engine.
+
+type SharedEngineDomain = "program" | "tracker";
+type SharedEngineConfidenceBand = "Low" | "Moderate" | "High" | "Strong Read";
+type SharedSummaryTrendDirection = "favorable" | "stable" | "decline" | "unclear" | "completion";
+type SharedSummaryLabel = "Baseline Building" | "Exercise Trend" | "Consistency Check" | "Early Data Check";
+
+type SharedSummaryCoreInput = {
+  domain: SharedEngineDomain;
+  observedCount: number;
+};
+
+type SharedSummaryTextInput = {
+  confidenceBand: SharedEngineConfidenceBand;
+  trendDirection: SharedSummaryTrendDirection;
+  trendLine?: string;
+  contextLabel: string;
+  entryCount: number;
+  supportText?: string;
+};
+
+type SharedGraphCoreInput<TPoint> = {
+  domain: SharedEngineDomain;
+  points: TPoint[];
+};
+
+const SHARED_ENGINE_CORE = {
+  graph: {
+    version: "0.2-tracker-ready",
+    normalizePoints<TPoint>({ points }: SharedGraphCoreInput<TPoint>): TPoint[] {
+      return points;
+    },
+  },
+  summary: {
+    version: "0.2-tracker-routed",
+    resolveConfidenceBand({ domain, observedCount }: SharedSummaryCoreInput): SharedEngineConfidenceBand {
+      if (domain === "tracker") {
+        if (observedCount >= 13) return "Strong Read";
+        if (observedCount >= 9) return "High";
+        if (observedCount >= 5) return "Moderate";
+        return "Low";
+      }
+
+      if (observedCount >= 6) return "High";
+      if (observedCount >= 3) return "Moderate";
+      return "Low";
+    },
+    resolveTrackerLabel({
+      confidenceBand,
+      trendDirection,
+      hasCompletionOnly,
+      hasTrendLine,
+    }: {
+      confidenceBand: SharedEngineConfidenceBand;
+      trendDirection: SharedSummaryTrendDirection;
+      hasCompletionOnly: boolean;
+      hasTrendLine: boolean;
+    }): SharedSummaryLabel {
+      if (hasCompletionOnly) return "Consistency Check";
+      if (confidenceBand === "Low") return "Baseline Building";
+      if (hasTrendLine) return "Exercise Trend";
+      return trendDirection === "unclear" ? "Early Data Check" : "Exercise Trend";
+    },
+    composeTrackerBody({
+      confidenceBand,
+      trendDirection,
+      trendLine,
+    }: SharedSummaryTextInput): string {
+      if (confidenceBand === "Low") {
+        if (trendDirection === "favorable") {
+          return "Your progression is favorable in the early stage of building your baseline.";
+        }
+
+        if (trendDirection === "stable") {
+          return "Your output is holding steady while you build a baseline for this exercise.";
+        }
+
+        if (trendDirection === "decline") {
+          return "Progress forms differently early on, and this pattern still needs more entries before calling a true decline.";
+        }
+
+        return "This is still early baseline-building data, so the tracker is watching for a clearer pattern before calling a trend.";
+      }
+
+      return trendLine || "There is not enough movement yet to call a clear trend.";
+    },
+    composeTrackerDetail({
+      confidenceBand,
+      contextLabel,
+      entryCount,
+      supportText,
+    }: SharedSummaryTextInput): string {
+      const entryLabel = `entr${entryCount === 1 ? "y" : "ies"}`;
+      const baselineNote =
+        confidenceBand === "Low"
+          ? ` This is being treated as baseline-building because it only has ${entryCount} logged ${entryLabel}.`
+          : "";
+
+      return supportText || `This summary is based on ${entryCount} logged ${entryLabel} in ${contextLabel}.${baselineNote}`;
+    },
+  },
+} as const;
+
 const getProgramBlockCount = (program: Program | null | undefined) =>
   program?.routines.reduce((total, routine) => total + routine.blocks.length, 0) || 0;
 
@@ -697,15 +802,17 @@ const buildTrackerMetricGraphSeries = ({
 
 
 
-const getTrackerSummaryEntryCount = (entries?: TrackerEntry[]) => (entries || []).filter((entry) => Object.values(entry.values || {}).some((value) => String(value || "").trim())).length;
+const getTrackerSummaryEntryCount = (entries?: TrackerEntry[]) =>
+  (entries || []).filter((entry) => Object.values(entry.values || {}).some((value) => String(value || "").trim())).length;
 
-const getTrackerSummaryAccuracy = (entryCount: number): AISummaryReportAccuracy =>
-  entryCount >= 6 ? "High" : entryCount >= 3 ? "Moderate" : "Low";
+const getTrackerSeriesTrend = (series: TrackerMetricGraphSeries): {
+  line: string | null;
+  direction: SharedSummaryTrendDirection;
+} => {
+  if (series.completionOnly) return { line: null, direction: "completion" };
 
-const getTrackerSummaryTrendText = (series: TrackerMetricGraphSeries) => {
-  if (series.completionOnly) return null;
   const points = series.points || [];
-  if (points.length < 2) return null;
+  if (points.length < 2) return { line: null, direction: "unclear" };
 
   const first = points[0];
   const last = points[points.length - 1];
@@ -713,27 +820,39 @@ const getTrackerSummaryTrendText = (series: TrackerMetricGraphSeries) => {
   const tolerance = Math.max(0.25, Math.abs(first.y || 0) * 0.03);
 
   if (Math.abs(delta) <= tolerance) {
-    return `${series.metric} stayed consistent around ${last.rawValue}.`;
+    return {
+      line: `${series.metric} stayed consistent around ${last.rawValue}.`,
+      direction: "stable",
+    };
   }
 
-  const direction = delta > 0 ? "increased" : "decreased";
-  const goodDecline = isTimeMetric(series.metric);
-  const phrase = delta < 0 && goodDecline ? "improved by dropping" : direction;
-  return `${series.metric} ${phrase} from ${first.rawValue} to ${last.rawValue}.`;
+  const lowerIsBetter = isTimeMetric(series.metric);
+  const direction: SharedSummaryTrendDirection = delta > 0 || (delta < 0 && lowerIsBetter) ? "favorable" : "decline";
+  const phrase = delta < 0 && lowerIsBetter ? "improved by dropping" : delta > 0 ? "increased" : "decreased";
+
+  return {
+    line: `${series.metric} ${phrase} from ${first.rawValue} to ${last.rawValue}.`,
+    direction,
+  };
 };
 
-const getTrackerSummaryWeightText = (series: TrackerMetricGraphSeries[]) => {
+const getTrackerSummaryContextText = (series: TrackerMetricGraphSeries[]) => {
   const weights = series.flatMap((item) => item.points.map((point) => String(point.weightValue || "").trim()).filter(Boolean));
-  const unique = Array.from(new Set(weights));
-  if (!unique.length) return "";
-  if (unique.length === 1) return `Weight context stayed at ${unique[0]}.`;
-  return `Weight context moved from ${unique[0]} to ${unique[unique.length - 1]}.`;
-};
-
-const getTrackerSummarySupportText = (series: TrackerMetricGraphSeries[]) => {
+  const uniqueWeights = Array.from(new Set(weights));
   const supportNames = Array.from(new Set(series.flatMap((item) => item.supportMetrics || [])));
-  if (!supportNames.length) return "";
-  return `Support/context tracked: ${supportNames.join(", ")}.`;
+  const contextParts: string[] = [];
+
+  if (uniqueWeights.length === 1) {
+    contextParts.push(`Weight context stayed at ${uniqueWeights[0]}.`);
+  } else if (uniqueWeights.length > 1) {
+    contextParts.push(`Weight context moved from ${uniqueWeights[0]} to ${uniqueWeights[uniqueWeights.length - 1]}.`);
+  }
+
+  if (supportNames.length) {
+    contextParts.push(`Support/context tracked: ${supportNames.join(", ")}.`);
+  }
+
+  return contextParts.join(" ");
 };
 
 const buildTrackerSummaryInsight = ({
@@ -758,31 +877,53 @@ const buildTrackerSummaryInsight = ({
     ? (entries || []).filter((entry) => isTruthyCompletionValue(entry.values?.[completionMetric] || "")).length
     : 0;
   const measuredSeries = series.filter((item) => !item.completionOnly && (item.points || []).length);
-  const trendLines = measuredSeries.map(getTrackerSummaryTrendText).filter((value): value is string => Boolean(value));
-  const weightText = getTrackerSummaryWeightText(measuredSeries);
-  const supportText = getTrackerSummarySupportText(series);
-  const reportAccuracy = getTrackerSummaryAccuracy(entryCount);
+  const primaryTrend = measuredSeries.map(getTrackerSeriesTrend).find((trend) => Boolean(trend.line)) || {
+    line: null,
+    direction: measuredSeries.length ? "unclear" : "completion",
+  };
+  const supportText = getTrackerSummaryContextText(measuredSeries.length ? measuredSeries : series);
+  const reportAccuracy = SHARED_ENGINE_CORE.summary.resolveConfidenceBand({
+    domain: "tracker",
+    observedCount: entryCount,
+  });
+  const hasCompletionOnly = !measuredSeries.length && completionCount > 0;
+  const label = SHARED_ENGINE_CORE.summary.resolveTrackerLabel({
+    confidenceBand: reportAccuracy,
+    trendDirection: primaryTrend.direction,
+    hasCompletionOnly,
+    hasTrendLine: Boolean(primaryTrend.line),
+  });
 
-  if (!measuredSeries.length && completionCount > 0) {
+  if (hasCompletionOnly) {
     return {
       title: `${exerciseName} Summary`,
-      label: "Consistency Check",
+      label,
       reportAccuracy,
       body: `You logged ${completionCount} completed entr${completionCount === 1 ? "y" : "ies"} for this exercise.`,
       detail: `This looks like completed-as-prescribed work in ${contextLabel}, so the tracker is treating it as consistency rather than a performance trend.`,
     };
   }
 
-  const primaryTrend = trendLines[0] || "There is not enough movement yet to call a clear trend.";
-  const supporting = [weightText, supportText].filter(Boolean).join(" ");
-  const label = trendLines.length ? "Exercise Trend" : "Early Data Check";
-
   return {
     title: `${exerciseName} Summary`,
     label,
     reportAccuracy,
-    body: primaryTrend,
-    detail: supporting || `This summary is based on ${entryCount} logged entr${entryCount === 1 ? "y" : "ies"} in ${contextLabel}.`,
+    body: SHARED_ENGINE_CORE.summary.composeTrackerBody({
+      confidenceBand: reportAccuracy,
+      trendDirection: primaryTrend.direction,
+      trendLine: primaryTrend.line || undefined,
+      contextLabel,
+      entryCount,
+      supportText,
+    }),
+    detail: SHARED_ENGINE_CORE.summary.composeTrackerDetail({
+      confidenceBand: reportAccuracy,
+      trendDirection: primaryTrend.direction,
+      trendLine: primaryTrend.line || undefined,
+      contextLabel,
+      entryCount,
+      supportText,
+    }),
   };
 };
 
@@ -796,7 +937,7 @@ function TrackerSummaryCard({ insight }: { insight: TrackerSummaryInsight | null
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Gym Tracker Summary</div>
           <div className="mt-1 text-base font-bold text-zinc-900">{insight.title}</div>
         </div>
-        <div className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">{insight.reportAccuracy} accuracy</div>
+        <div className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">{insight.reportAccuracy} confidence</div>
       </div>
       <div className="mt-3 inline-flex rounded-full bg-white px-3 py-1 text-xs font-bold text-zinc-700">{insight.label}</div>
       <p className="mt-3 text-sm font-medium leading-6 text-zinc-800">{insight.body}</p>
@@ -8951,7 +9092,6 @@ export default function App() {
                       <SmallButton onClick={() => setGraphViewerExerciseId(null)}>Close</SmallButton>
                     </div>
                     <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
-                      <TrackerSummaryCard insight={graphViewerExerciseSummaryInsight} />
                       {graphViewerExerciseGraphSeries.length ? (
                         <div className="space-y-3">
                           {graphViewerExerciseGraphSeries.map((series) => (
@@ -8961,6 +9101,7 @@ export default function App() {
                       ) : (
                         <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No measured graph output yet. Completion/context entries can still appear in View Data.</div>
                       )}
+                      <TrackerSummaryCard insight={graphViewerExerciseSummaryInsight} />
                     </div>
                   </div>
                 </div>
@@ -8977,7 +9118,6 @@ export default function App() {
                       <SmallButton onClick={() => setGraphViewerWorkoutSlotId(null)}>Close</SmallButton>
                     </div>
                     <div className="mt-4 max-h-[68vh] space-y-4 overflow-y-auto pr-1">
-                      <TrackerSummaryCard insight={graphViewerWorkoutSlotSummaryInsight} />
                       {graphViewerWorkoutSlotGraphSeries.length ? (
                         <div className="space-y-3">
                           {graphViewerWorkoutSlotGraphSeries.map((series) => (
@@ -8987,6 +9127,7 @@ export default function App() {
                       ) : (
                         <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No measured graph output yet. Completion/context entries can still appear in View Data.</div>
                       )}
+                      <TrackerSummaryCard insight={graphViewerWorkoutSlotSummaryInsight} />
                     </div>
                   </div>
                 </div>
