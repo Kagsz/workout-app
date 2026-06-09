@@ -696,12 +696,6 @@ const buildTrackerMetricGraphSeries = ({
 };
 
 
-const formatTrackerMetricValueForSummary = (metric: string, value: string) => {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return "";
-  if (isCompletionMetric(metric) && isTruthyCompletionValue(trimmed)) return "completed";
-  return trimmed;
-};
 
 const getTrackerSummaryEntryCount = (entries?: TrackerEntry[]) => (entries || []).filter((entry) => Object.values(entry.values || {}).some((value) => String(value || "").trim())).length;
 
@@ -716,7 +710,6 @@ const getTrackerSummaryTrendText = (series: TrackerMetricGraphSeries) => {
   const first = points[0];
   const last = points[points.length - 1];
   const delta = last.y - first.y;
-  const metricName = series.metric.toLowerCase();
   const tolerance = Math.max(0.25, Math.abs(first.y || 0) * 0.03);
 
   if (Math.abs(delta) <= tolerance) {
