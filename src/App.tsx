@@ -449,7 +449,7 @@ const GRAPH_UI_LOCK_CSS = `
 type SharedEngineDomain = "program" | "tracker";
 type SharedEngineConfidenceBand = "Low" | "Moderate" | "High" | "Strong Read";
 type SharedSummaryTrendDirection = "favorable" | "stable" | "decline" | "unclear" | "completion";
-type SharedSummaryLabel = "Baseline Building" | "Exercise Trend" | "Consistency Check" | "Early Data Check";
+type SharedSummaryLabel = "Baseline Building" | "Exceptional Growth" | "Moderate Growth" | "Stable Growth" | "Contextual Decline" | "Exercise Trend" | "Consistency Check" | "Early Data Check";
 
 type SharedSummaryCoreInput = {
   domain: SharedEngineDomain;
@@ -546,6 +546,124 @@ const SHARED_ENGINE_CORE = {
     },
   },
 } as const;
+
+
+type TrackerSummaryVisualToken = {
+  cardClass: string;
+  chipClass: string;
+  confidenceClass: string;
+};
+
+const getTrackerSummaryVisualToken = (label: string, confidenceBand: SharedEngineConfidenceBand): TrackerSummaryVisualToken => {
+  const labelTokens: Record<string, { cardClass: string; chipClass: string }> = {
+    "Baseline Building": {
+      cardClass: "border-sky-200 bg-sky-50",
+      chipClass: "bg-sky-100 text-sky-800",
+    },
+    "Exceptional Growth": {
+      cardClass: "border-emerald-200 bg-emerald-50",
+      chipClass: "bg-emerald-100 text-emerald-800",
+    },
+    "Moderate Growth": {
+      cardClass: "border-teal-200 bg-teal-50",
+      chipClass: "bg-teal-100 text-teal-800",
+    },
+    "Stable Growth": {
+      cardClass: "border-slate-200 bg-slate-50",
+      chipClass: "bg-slate-100 text-slate-700",
+    },
+    "Contextual Decline": {
+      cardClass: "border-amber-200 bg-amber-50",
+      chipClass: "bg-amber-100 text-amber-800",
+    },
+    "Consistency Check": {
+      cardClass: "border-blue-200 bg-blue-50",
+      chipClass: "bg-blue-100 text-blue-800",
+    },
+    "Exercise Trend": {
+      cardClass: "border-zinc-200 bg-zinc-50",
+      chipClass: "bg-white text-zinc-700",
+    },
+    "Early Data Check": {
+      cardClass: "border-sky-200 bg-sky-50",
+      chipClass: "bg-sky-100 text-sky-800",
+    },
+  };
+
+  const confidenceTokens: Record<SharedEngineConfidenceBand, string> = {
+    Low: "bg-white text-sky-700 border border-sky-200",
+    Moderate: "bg-white text-teal-700 border border-teal-200",
+    High: "bg-white text-emerald-700 border border-emerald-200",
+    "Strong Read": "bg-white text-zinc-900 border border-zinc-300",
+  };
+
+  const labelToken = labelTokens[label] || labelTokens["Exercise Trend"];
+  return {
+    cardClass: labelToken.cardClass,
+    chipClass: labelToken.chipClass,
+    confidenceClass: confidenceTokens[confidenceBand],
+  };
+};
+
+type TrackerTutorialStep = {
+  title: string;
+  body: string;
+  detail?: string;
+  focus: string;
+  examples?: string[];
+};
+
+const TRACKER_TUTORIAL_STEPS: TrackerTutorialStep[] = [
+  {
+    title: "Welcome to Gym Tracker",
+    body: "Track custom exercises, workouts, and cycles in one place.",
+    detail: "Use Gym Tracker for flexible training that is not tied to a structured program.",
+    focus: "Gym Tracker card",
+  },
+  {
+    title: "Create Exercises",
+    body: "Create custom exercises for anything you want to track.",
+    detail: "Exercises become available throughout Gym Tracker and can be added to workouts later.",
+    focus: "Add Exercise",
+  },
+  {
+    title: "Choose Metrics",
+    body: "Choose the data you want to track for each exercise.",
+    detail: "Pick the metrics that match the goal of the exercise.",
+    focus: "Metric selection",
+    examples: ["Weight + Reps", "Distance + Time", "Calories", "Completion"],
+  },
+  {
+    title: "Log Progress",
+    body: "Enter workout results after each session.",
+    detail: "Dates are recorded automatically so your history stays organized.",
+    focus: "Log Entry",
+  },
+  {
+    title: "Build Workouts",
+    body: "Group exercises into reusable workouts.",
+    detail: "Start a workout to record results in order.",
+    focus: "My Workouts",
+  },
+  {
+    title: "Build Cycles",
+    body: "Organize workouts into a repeating training schedule.",
+    detail: "Use workout ordering to build your rotation.",
+    focus: "My Cycles",
+  },
+  {
+    title: "Follow Your Routine",
+    body: "Use Next Up guidance and log results as you move through your workout.",
+    detail: "Green highlights show what is next. Amber highlights show missing data.",
+    focus: "Next Up",
+  },
+  {
+    title: "Review Progress",
+    body: "Open graphs or entry history to review progress over time.",
+    detail: "Graphs show trends, summaries interpret patterns, and View Data shows every logged entry.",
+    focus: "Graph + View Data",
+  },
+];
 
 const getProgramBlockCount = (program: Program | null | undefined) =>
   program?.routines.reduce((total, routine) => total + routine.blocks.length, 0) || 0;
@@ -930,16 +1048,18 @@ const buildTrackerSummaryInsight = ({
 function TrackerSummaryCard({ insight }: { insight: TrackerSummaryInsight | null }) {
   if (!insight) return null;
 
+  const visualToken = getTrackerSummaryVisualToken(insight.label, insight.reportAccuracy);
+
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+    <div className={`rounded-2xl border p-4 ${visualToken.cardClass}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Gym Tracker Summary</div>
           <div className="mt-1 text-base font-bold text-zinc-900">{insight.title}</div>
         </div>
-        <div className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600">{insight.reportAccuracy} confidence</div>
+        <div className={`rounded-full px-2 py-1 text-[11px] font-semibold ${visualToken.confidenceClass}`}>{insight.reportAccuracy} confidence</div>
       </div>
-      <div className="mt-3 inline-flex rounded-full bg-white px-3 py-1 text-xs font-bold text-zinc-700">{insight.label}</div>
+      <div className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${visualToken.chipClass}`}>{insight.label}</div>
       <p className="mt-3 text-sm font-medium leading-6 text-zinc-800">{insight.body}</p>
       <p className="mt-2 text-sm leading-6 text-zinc-600">{insight.detail}</p>
     </div>
@@ -1065,6 +1185,7 @@ const STORAGE_KEYS = {
   trackerExercises: "workout-app-tracker-exercises-v1",
   trackerWorkouts: "workout-app-tracker-workouts-v1",
   trackerCycles: "workout-app-tracker-cycles-v1",
+  trackerTutorialDismissed: "workout-app-tracker-tutorial-dismissed-v1",
   seeded: "workout-app-seeded-program1-v1",
   seededProgram2: "workout-app-seeded-program2-v1",
   seededProgram3: "workout-app-seeded-program3-v1",
@@ -2258,11 +2379,13 @@ function SectionCard({
   children,
   collapsible = false,
   defaultOpen = true,
+  headerAction,
 }: {
   title: string;
   children: React.ReactNode;
   collapsible?: boolean;
   defaultOpen?: boolean;
+  headerAction?: React.ReactNode;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
@@ -2270,14 +2393,17 @@ function SectionCard({
     <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="text-lg font-semibold text-zinc-900">{title}</div>
-        {collapsible ? (
-          <button
-            onClick={() => setIsOpen((prev) => !prev)}
-            className="rounded-lg border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
-          >
-            {isOpen ? "Collapse" : "Expand"}
-          </button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {headerAction}
+          {collapsible ? (
+            <button
+              onClick={() => setIsOpen((prev) => !prev)}
+              className="rounded-lg border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
+            >
+              {isOpen ? "Collapse" : "Expand"}
+            </button>
+          ) : null}
+        </div>
       </div>
       {(!collapsible || isOpen) && children}
     </div>
@@ -2326,6 +2452,73 @@ function ToggleButton({ active, children, ...props }: React.ButtonHTMLAttributes
     >
       {children}
     </button>
+  );
+}
+
+
+function TrackerTutorialModal({
+  isOpen,
+  stepIndex,
+  onStepChange,
+  onClose,
+  onNeverShowAgain,
+}: {
+  isOpen: boolean;
+  stepIndex: number;
+  onStepChange: (index: number) => void;
+  onClose: () => void;
+  onNeverShowAgain: () => void;
+}) {
+  if (!isOpen) return null;
+
+  const step = TRACKER_TUTORIAL_STEPS[stepIndex] || TRACKER_TUTORIAL_STEPS[0];
+  const isFirst = stepIndex === 0;
+  const isLast = stepIndex === TRACKER_TUTORIAL_STEPS.length - 1;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-5">
+      <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Gym Tracker Guide</div>
+            <div className="mt-1 text-lg font-bold text-zinc-900">{step.title}</div>
+          </div>
+          <div className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">
+            {stepIndex + 1}/{TRACKER_TUTORIAL_STEPS.length}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Look for</div>
+          <div className="mt-1 text-base font-bold text-zinc-900">{step.focus}</div>
+          <p className="mt-3 text-sm font-medium leading-6 text-zinc-800">{step.body}</p>
+          {step.detail ? <p className="mt-2 text-sm leading-6 text-zinc-600">{step.detail}</p> : null}
+          {step.examples?.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {step.examples.map((example) => (
+                <span key={example} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-zinc-700">{example}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100">
+          <div
+            className="h-full rounded-full bg-zinc-900 transition-all"
+            style={{ width: `${((stepIndex + 1) / TRACKER_TUTORIAL_STEPS.length) * 100}%` }}
+          />
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <SmallButton onClick={() => onStepChange(Math.max(0, stepIndex - 1))} disabled={isFirst}>Back</SmallButton>
+          <PrimaryButton onClick={() => (isLast ? onClose() : onStepChange(stepIndex + 1))}>{isLast ? "Done" : "Next"}</PrimaryButton>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <button onClick={onClose} className="rounded-xl px-3 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-50">Skip</button>
+          <button onClick={onNeverShowAgain} className="rounded-xl px-3 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-50">Never Show Again</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -5656,6 +5849,12 @@ export default function App() {
   const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
+  const [showTrackerTutorial, setShowTrackerTutorial] = useState(false);
+  const [trackerTutorialStepIndex, setTrackerTutorialStepIndex] = useState(0);
+  const [trackerTutorialDismissed, setTrackerTutorialDismissed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(STORAGE_KEYS.trackerTutorialDismissed) === "true";
+  });
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
@@ -5672,6 +5871,25 @@ export default function App() {
     [members, selectedMemberId]
   );
 
+  useEffect(() => {
+    if (role === "member" && screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
+      setTrackerTutorialStepIndex(0);
+      setShowTrackerTutorial(true);
+    }
+  }, [role, screen, trackerTutorialDismissed, showTrackerTutorial]);
+
+  const closeTrackerTutorial = () => {
+    setShowTrackerTutorial(false);
+    setTrackerTutorialDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(STORAGE_KEYS.trackerTutorialDismissed, "true");
+    }
+  };
+
+  const reopenTrackerTutorial = () => {
+    setTrackerTutorialStepIndex(0);
+    setShowTrackerTutorial(true);
+  };
 
   const activeTrackerExercises = useMemo(
     () => trackerExercises.filter((exercise) => exercise.memberId === selectedMember?.id && !exercise.archived),
@@ -8510,7 +8728,20 @@ export default function App() {
               )}
 
               {role === "member" && screen === "openTracker" && (
-                <SectionCard title="Gym Tracker" collapsible>
+                <SectionCard
+                  title="Gym Tracker"
+                  collapsible
+                  headerAction={
+                    <button
+                      type="button"
+                      onClick={reopenTrackerTutorial}
+                      className="rounded-lg border border-zinc-200 px-2 py-1 text-xs font-bold text-zinc-600 hover:bg-zinc-50"
+                      aria-label="Open Gym Tracker tutorial"
+                    >
+                      ?
+                    </button>
+                  }
+                >
                   <div className="space-y-5">
                     <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2">
                       <button
@@ -8984,23 +9215,23 @@ export default function App() {
                                 onDragEnd={() => setDraggedWorkoutExerciseId(null)}
                                 className={`rounded-2xl border p-3 ${isNextWorkoutSlot ? (selectedWorkoutGuidance.tone === "amber" ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50") : (isCompleteThisSession ? "border-zinc-200 bg-zinc-50" : "border-zinc-200 bg-white")}`}
                               >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                                    <span className="cursor-grab text-zinc-400" title="Drag to reorder">☰</span>
-                                    <button onClick={() => toggleExpandedWorkoutSlot(slot.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                                      <span className="text-zinc-400">{isWorkoutSlotExpanded ? "▼" : "▶"}</span>
-                                      <div className="min-w-0">
+                                <div className="space-y-3">
+                                  <div className="flex items-start gap-2">
+                                    <span className="cursor-grab pt-0.5 text-zinc-400" title="Drag to reorder">☰</span>
+                                    <button onClick={() => toggleExpandedWorkoutSlot(slot.id)} className="flex min-w-0 flex-1 items-start gap-2 text-left">
+                                      <span className="pt-0.5 text-zinc-400">{isWorkoutSlotExpanded ? "▼" : "▶"}</span>
+                                      <div className="min-w-0 flex-1">
                                         <div className="flex flex-wrap items-center gap-2">
-                                          <div className="truncate text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                          {isNextWorkoutSlot ? (selectedWorkoutGuidance.tone === "amber" ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Missing</span> : <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span>) : null}
-                                          {isCompleteThisSession ? <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Done</span> : null}
+                                          <div className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-zinc-900">{exercise.name}</div>
+                                          {isNextWorkoutSlot ? (selectedWorkoutGuidance.tone === "amber" ? <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Missing</span> : <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span>) : null}
+                                          {isCompleteThisSession ? <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Done</span> : null}
                                         </div>
-                                        <div className="text-xs text-zinc-500">{exercise.muscleGroup} • Slot {slotIndex + 1}</div>
+                                        <div className="mt-1 text-xs text-zinc-500">{exercise.muscleGroup} • Slot {slotIndex + 1}</div>
                                       </div>
                                     </button>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <button onClick={() => setGraphViewerWorkoutSlotId(slot.id)} title="View graph" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm transition hover:border-zinc-500">📈</button>
+                                  <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
+                                    <button onClick={() => setGraphViewerWorkoutSlotId(slot.id)} title="View graph" className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm transition hover:border-zinc-500">📈 Graph</button>
                                     <SmallButton onClick={() => setDataViewerWorkoutSlotId(slot.id)}>View Data</SmallButton>
                                   </div>
                                 </div>
@@ -9037,6 +9268,14 @@ export default function App() {
                   </div>
                 </SectionCard>
               )}
+
+              <TrackerTutorialModal
+                isOpen={showTrackerTutorial}
+                stepIndex={trackerTutorialStepIndex}
+                onStepChange={setTrackerTutorialStepIndex}
+                onClose={closeTrackerTutorial}
+                onNeverShowAgain={closeTrackerTutorial}
+              />
 
               {pendingTrackerEntryExercise && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
