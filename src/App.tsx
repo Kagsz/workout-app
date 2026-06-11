@@ -575,7 +575,6 @@ const SHARED_ENGINE_CORE = {
         : "The tracker is watching for a clearer pattern before assigning a stronger interpretation.";
     },
     composeTrackerDetail({
-      label,
       confidenceBand,
       contextLabel,
       entryCount,
