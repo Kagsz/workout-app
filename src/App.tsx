@@ -20,11 +20,21 @@ type ProgramInputMode = "trainerInput" | "memberInput";
 type BlockType = "paired" | "single";
 type GraphAxis = "date" | "session";
 
+type ExerciseMetricMode = "target" | "memberInput";
+
+type ExerciseMetricField = {
+  id: string;
+  metric: string;
+  value: string;
+  mode: ExerciseMetricMode;
+};
+
 type Exercise = {
   id: string;
   name: string;
   target: string;
   metric: string;
+  premiumFields?: ExerciseMetricField[];
 };
 
 type Block = {
@@ -33,6 +43,7 @@ type Block = {
   title: string;
   duration: string;
   notes: string;
+  interactionMode?: "alternating" | "na";
   exercises: Exercise[];
 };
 
@@ -290,6 +301,92 @@ const formatTargetLabel = (target: string, metric: string) => {
   const metricPattern = new RegExp(`\\b${escapeRegExp(trimmedMetric)}\\b`, "i");
   return metricPattern.test(trimmedTarget) ? trimmedTarget : `${trimmedTarget} ${trimmedMetric}`.trim();
 };
+
+const formatDurationShort = (duration: string) => {
+  const raw = String(duration || "").trim();
+  if (!raw) return "";
+  const number = extractFirstNumber(raw);
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("hour") || lower.includes("hr")) {
+    return number ? `${number} hr${number === "1" ? "" : "s"}` : raw;
+  }
+
+  if (lower.includes("minute") || lower.includes("min")) {
+    return number ? `${number} min${number === "1" ? "" : "s"}` : raw;
+  }
+
+  return number ? `${number} min${number === "1" ? "" : "s"}` : raw;
+};
+
+const getBlockInteractionLabel = (block: Block) =>
+  block.interactionMode === "alternating" || (block.type === "paired" && /alternate/i.test(block.notes || ""))
+    ? "Alternating"
+    : "";
+
+const createPremiumField = (metric = "Sets", value = "", mode: ExerciseMetricMode = "memberInput"): ExerciseMetricField => ({
+  id: uid(),
+  metric,
+  value,
+  mode,
+});
+
+const getExercisePremiumFields = (exercise: Exercise, blockType?: BlockType): ExerciseMetricField[] => {
+  if (exercise.premiumFields?.length) return exercise.premiumFields;
+
+  const fallbackFields: ExerciseMetricField[] = [];
+  const targetText = String(exercise.target || "").trim();
+  const metricText = String(exercise.metric || "").trim();
+
+  if (targetText || metricText) {
+    fallbackFields.push({
+      id: `${exercise.id}-legacy-target`,
+      metric: metricText || (blockType === "single" ? "Performance" : "Sets"),
+      value: targetText,
+      mode: "target",
+    });
+  }
+
+  fallbackFields.push({
+    id: `${exercise.id}-legacy-input`,
+    metric: blockType === "single" ? "Performance" : "Sets",
+    value: "",
+    mode: "memberInput",
+  });
+
+  return fallbackFields;
+};
+
+const getExerciseTargetFields = (exercise: Exercise, blockType?: BlockType) =>
+  getExercisePremiumFields(exercise, blockType).filter((field) => field.mode === "target");
+
+const getExerciseInputFields = (exercise: Exercise, blockType?: BlockType) =>
+  getExercisePremiumFields(exercise, blockType).filter((field) => field.mode === "memberInput");
+
+const formatPremiumFieldLabel = (field: ExerciseMetricField) =>
+  [field.value, field.metric].filter(Boolean).join(" ").trim() || field.metric || "Target";
+
+const normalizePremiumMetricKey = (metric: string) => String(metric || "").trim().toLowerCase();
+
+const getSessionEntryValueForMetric = (entry: SessionExerciseInput | undefined, metric: string, blockType?: BlockType) => {
+  if (!entry) return "";
+  const key = normalizePremiumMetricKey(metric);
+  if (key.includes("weight") || key === "lbs" || key === "load") return entry.weight || "";
+  if (key.includes("set")) return entry.setsCompleted || "";
+  if (key.includes("performance") || key.includes("output")) return entry.performance || "";
+  return blockType === "single" ? entry.performance || "" : entry.setsCompleted || "";
+};
+
+const applySessionEntryValueForMetric = (entry: SessionExerciseInput, metric: string, value: string, blockType?: BlockType): SessionExerciseInput => {
+  const key = normalizePremiumMetricKey(metric);
+  if (key.includes("weight") || key === "lbs" || key === "load") return { ...entry, weight: normalizeWeightInput(value) };
+  if (key.includes("set")) return { ...entry, setsCompleted: value };
+  if (key.includes("performance") || key.includes("output")) return { ...entry, performance: value };
+  return blockType === "single" ? { ...entry, performance: value } : { ...entry, setsCompleted: value };
+};
+
+const getPrimaryProgramOutcomeMetric = (exercise: Exercise, blockType?: BlockType) =>
+  getExerciseInputFields(exercise, blockType)[0]?.metric || (blockType === "single" ? "Performance" : "Sets");
 
 
 function ExerciseDot({
@@ -838,7 +935,15 @@ const getMuscleGroupSortIndex = (group: MuscleGroup) => {
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds", "Completion"];
 const WORKOUT_QUICK_FILL_OPTIONS = ["Leg Workout", "Upper Body Workout", "Core Workout", "Cardio Workout", "Full Body Workout"];
 
-const getTodayInputDate = () => new Date().toISOString().slice(0, 10);
+const getTodayInputDate = () => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(new Date());
+};
 
 const normalizeTrackerExercise = (exercise: TrackerExercise): TrackerExercise => ({
   ...exercise,
@@ -1283,6 +1388,7 @@ const createExercise = (): Exercise => ({
   name: "Exercise",
   target: "",
   metric: "reps",
+  premiumFields: [createPremiumField("Reps", "", "target"), createPremiumField("Sets", "", "memberInput")],
 });
 
 const createBlock = (type: BlockType): Block => ({
@@ -1291,6 +1397,7 @@ const createBlock = (type: BlockType): Block => ({
   title: type === "paired" ? "Paired Block" : "Single Block",
   duration: type === "paired" ? "10" : "3",
   notes: "",
+  interactionMode: type === "paired" ? "alternating" : "na",
   exercises: type === "paired" ? [createExercise(), createExercise()] : [createExercise()],
 });
 
@@ -1315,8 +1422,8 @@ const createSessionDraft = (programId: string, routine: Routine, memberId: strin
       weight: "",
       performance: "",
       setsCompleted: "",
-      target: exercise.target,
-      metric: exercise.metric,
+      target: getExerciseTargetFields(exercise, block.type).map(formatPremiumFieldLabel).join(" • ") || exercise.target,
+      metric: getPrimaryProgramOutcomeMetric(exercise, block.type),
     })),
   })),
 });
@@ -6010,6 +6117,7 @@ export default function App() {
   const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
+  const [premiumInputFocusedBlockId, setPremiumInputFocusedBlockId] = useState<string | null>(null);
   const [showTrackerTutorial, setShowTrackerTutorial] = useState(false);
   const [trackerTutorialStepIndex, setTrackerTutorialStepIndex] = useState(0);
   const [trackerTutorialDismissed, setTrackerTutorialDismissed] = useState(() => {
@@ -7185,6 +7293,106 @@ export default function App() {
     );
   };
 
+
+  const updateExercisePremiumField = (
+    routineId: string,
+    blockId: string,
+    exerciseId: string,
+    fieldId: string,
+    data: Partial<ExerciseMetricField>
+  ) => {
+    if (!selectedProgram) return;
+    updatePrograms((prev) =>
+      prev.map((program) => {
+        if (program.id !== selectedProgram.id) return program;
+        return {
+          ...program,
+          routines: program.routines.map((routine) => {
+            if (routine.id !== routineId) return routine;
+            return {
+              ...routine,
+              blocks: routine.blocks.map((block) => {
+                if (block.id !== blockId) return block;
+                return {
+                  ...block,
+                  exercises: block.exercises.map((exercise) => {
+                    if (exercise.id !== exerciseId) return exercise;
+                    const currentFields = getExercisePremiumFields(exercise, block.type);
+                    return {
+                      ...exercise,
+                      premiumFields: currentFields.map((field) => (field.id === fieldId ? { ...field, ...data } : field)),
+                    };
+                  }),
+                };
+              }),
+            };
+          }),
+        };
+      })
+    );
+  };
+
+  const addExercisePremiumField = (routineId: string, blockId: string, exerciseId: string) => {
+    if (!selectedProgram) return;
+    updatePrograms((prev) =>
+      prev.map((program) => {
+        if (program.id !== selectedProgram.id) return program;
+        return {
+          ...program,
+          routines: program.routines.map((routine) => {
+            if (routine.id !== routineId) return routine;
+            return {
+              ...routine,
+              blocks: routine.blocks.map((block) => {
+                if (block.id !== blockId) return block;
+                return {
+                  ...block,
+                  exercises: block.exercises.map((exercise) =>
+                    exercise.id === exerciseId
+                      ? {
+                          ...exercise,
+                          premiumFields: [...getExercisePremiumFields(exercise, block.type), createPremiumField()],
+                        }
+                      : exercise
+                  ),
+                };
+              }),
+            };
+          }),
+        };
+      })
+    );
+  };
+
+  const removeExercisePremiumField = (routineId: string, blockId: string, exerciseId: string, fieldId: string) => {
+    if (!selectedProgram) return;
+    updatePrograms((prev) =>
+      prev.map((program) => {
+        if (program.id !== selectedProgram.id) return program;
+        return {
+          ...program,
+          routines: program.routines.map((routine) => {
+            if (routine.id !== routineId) return routine;
+            return {
+              ...routine,
+              blocks: routine.blocks.map((block) => {
+                if (block.id !== blockId) return block;
+                return {
+                  ...block,
+                  exercises: block.exercises.map((exercise) => {
+                    if (exercise.id !== exerciseId) return exercise;
+                    const nextFields = getExercisePremiumFields(exercise, block.type).filter((field) => field.id !== fieldId);
+                    return { ...exercise, premiumFields: nextFields.length ? nextFields : [createPremiumField()] };
+                  }),
+                };
+              }),
+            };
+          }),
+        };
+      })
+    );
+  };
+
   const toggleExpandedTrackerExercise = (exerciseId: string) => {
     setExpandedTrackerExerciseIds((current) =>
       current.includes(exerciseId) ? current.filter((id) => id !== exerciseId) : [...current, exerciseId]
@@ -8286,20 +8494,28 @@ export default function App() {
     ) || null;
   };
 
-  const openMemberInputScreen = (existingSession?: SavedSession | null) => {
+  const openMemberInputScreen = (existingSession?: SavedSession | null, focusBlockId?: string | null) => {
     const draft = createMemberInputDraft(existingSession || null);
     if (!draft) return;
 
+    const nextFocusBlockId = focusBlockId || premiumNextBlockId || selectedRoutine?.blocks[0]?.id || null;
     setMemberInputDraft(draft);
     setEditingMemberInputSessionId(existingSession?.id || null);
+    setPremiumInputFocusedBlockId(nextFocusBlockId);
     setScreen("memberInput");
+
+    if (nextFocusBlockId && typeof window !== "undefined") {
+      window.setTimeout(() => {
+        document.getElementById(`premium-input-block-${nextFocusBlockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 120);
+    }
   };
 
   const updateMemberInputDraftField = (field: "date" | "sessionNumber", value: string) => {
     setMemberInputDraft((current) => (current ? { ...current, [field]: value } : current));
   };
 
-  const updateMemberInputOutcome = (blockId: string, exerciseId: string, value: string) => {
+  const updateMemberInputOutcome = (blockId: string, exerciseId: string, value: string, metricName?: string) => {
     setMemberInputDraft((current) => {
       if (!current || !selectedRoutine) return current;
       const block = selectedRoutine.blocks.find((item) => item.id === blockId);
@@ -8313,9 +8529,7 @@ export default function App() {
                 entries: draftBlock.entries.map((entry) =>
                   entry.exerciseId !== exerciseId
                     ? entry
-                    : block?.type === "single"
-                      ? { ...entry, performance: value }
-                      : { ...entry, setsCompleted: value }
+                    : applySessionEntryValueForMetric(entry, metricName || getPrimaryProgramOutcomeMetric(block?.exercises.find((exercise) => exercise.id === exerciseId) || ({ id: exerciseId, name: "", target: "", metric: "" } as Exercise), block?.type), value, block?.type)
                 ),
               }
         ),
@@ -8323,7 +8537,7 @@ export default function App() {
     });
   };
 
-  const saveMemberInputSession = () => {
+  const saveMemberInputSession = (focusNextBlock = false, sourceBlockId?: string) => {
     if (!memberInputDraft || !selectedProgram || !selectedRoutine || !selectedMember) return;
 
     const trimmedDate = memberInputDraft.date.trim();
@@ -8346,6 +8560,18 @@ export default function App() {
 
     setEditingMemberInputSessionId(savedSession.id);
     setMemberInputDraft(createMemberInputDraft(savedSession));
+
+    if (focusNextBlock) {
+      const currentIndex = selectedRoutine.blocks.findIndex((block) => block.id === sourceBlockId);
+      const nextBlock = selectedRoutine.blocks[currentIndex + 1] || selectedRoutine.blocks[0] || null;
+      const nextBlockId = nextBlock?.id || null;
+      setPremiumInputFocusedBlockId(nextBlockId);
+      if (nextBlockId && typeof window !== "undefined") {
+        window.setTimeout(() => {
+          document.getElementById(`premium-input-block-${nextBlockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 120);
+      }
+    }
   };
 
   const importProgramData = () => {
@@ -8959,7 +9185,7 @@ export default function App() {
                                 </div>
                               </div>
 
-                              <div className="mb-4 grid gap-3 md:grid-cols-3">
+                              <div className="mb-4 grid gap-3 md:grid-cols-4">
                                 <div>
                                   <Label>Block Title</Label>
                                   <TextInput value={block.title} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { title: e.target.value })} />
@@ -8971,6 +9197,17 @@ export default function App() {
                                 <div>
                                   <Label>Duration</Label>
                                   <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 minutes" />
+                                </div>
+                                <div>
+                                  <Label>Block Flow</Label>
+                                  <select
+                                    value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
+                                    onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
+                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                  >
+                                    <option value="na">N/A</option>
+                                    <option value="alternating">Alternating</option>
+                                  </select>
                                 </div>
                               </div>
 
@@ -8987,14 +9224,45 @@ export default function App() {
                                         <Label>Exercise Name</Label>
                                         <TextInput value={exercise.name} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { name: e.target.value })} />
                                       </div>
-                                      <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                          <Label>Target</Label>
-                                          <TextInput value={exercise.target} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { target: e.target.value })} />
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <Label>Premium Metric Setup</Label>
+                                          <SmallButton onClick={() => addExercisePremiumField(selectedRoutine.id, block.id, exercise.id)}>+ Field</SmallButton>
                                         </div>
-                                        <div>
-                                          <Label>Metric</Label>
-                                          <TextInput value={exercise.metric} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { metric: e.target.value })} />
+                                        <div className="space-y-2">
+                                          {getExercisePremiumFields(exercise, block.type).map((field) => (
+                                            <div key={field.id} className="grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                                              <TextInput
+                                                value={field.metric}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
+                                                placeholder="Metric"
+                                              />
+                                              <TextInput
+                                                value={field.value}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
+                                                placeholder="Target value"
+                                              />
+                                              <select
+                                                value={field.mode}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: e.target.value as ExerciseMetricMode })}
+                                                className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                              >
+                                                <option value="target">Target / Read Only</option>
+                                                <option value="memberInput">Member Input</option>
+                                              </select>
+                                              <SmallButton onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}>Remove</SmallButton>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                          <div>
+                                            <Label>Legacy Target</Label>
+                                            <TextInput value={exercise.target} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { target: e.target.value })} />
+                                          </div>
+                                          <div>
+                                            <Label>Legacy Metric</Label>
+                                            <TextInput value={exercise.metric} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { metric: e.target.value })} />
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
@@ -10181,18 +10449,20 @@ export default function App() {
                               <div>
                                 <div className="flex flex-wrap items-center gap-2">
                                   <div className="text-lg font-semibold">{block.title}</div>
+                                  {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                                  {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
                                   {isNextBlock ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                 </div>
                                 <div className="mt-2 space-y-1 text-sm text-zinc-600">
                                   {block.exercises.map((exercise, index) => (
-                                    <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                    <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {getExerciseTargetFields(exercise, block.type).map(formatPremiumFieldLabel).join(" • ") || `${exercise.target || "—"} ${exercise.metric || ""}`.trim()}</div>
                                   ))}
                                 </div>
                                 {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
                               </div>
                             </div>
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                              <SmallButton onClick={() => openMemberInputScreen()}>Enter Results</SmallButton>
+                              <SmallButton onClick={() => openMemberInputScreen(latestSelectedRoutineSession, block.id)}>Input Data</SmallButton>
                               <SmallButton onClick={() => openGraph(selectedRoutine.id, block.id)}>View Graph</SmallButton>
                             </div>
                           </div>
@@ -10255,41 +10525,67 @@ export default function App() {
                       {selectedRoutine.blocks.map((block) => {
                         const draftBlock = memberInputDraft.blocks.find((item) => item.blockId === block.id);
                         return (
-                          <div key={block.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
-                            <div className="mb-3">
-                              <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
-                              {!!block.notes && <div className="mt-1 text-sm text-zinc-500">{block.notes}</div>}
+                          <div
+                            key={block.id}
+                            id={`premium-input-block-${block.id}`}
+                            className={`rounded-2xl border p-4 ${premiumInputFocusedBlockId === block.id ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
+                          >
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
+                                {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                                {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
+                                {premiumInputFocusedBlockId === block.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Input</span> : null}
+                              </div>
+                              <SmallButton onClick={() => setPremiumInputFocusedBlockId(block.id)}>Input Data</SmallButton>
+                              {!!block.notes && <div className="basis-full text-sm text-zinc-500">{block.notes}</div>}
                             </div>
 
                             <div className="space-y-3">
                               {block.exercises.map((exercise, index) => {
                                 const draftEntry = draftBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
-                                const outcomeValue = block.type === "single" ? draftEntry?.performance || "" : draftEntry?.setsCompleted || "";
                                 return (
                                   <div key={exercise.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                                     <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                                       {block.type === "paired" ? `Exercise ${index + 1}` : "Single Exercise"}
                                     </div>
                                     <div className="mt-1 text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                    <div className="mt-1 text-sm text-zinc-600">Target: {exercise.target || "—"} {exercise.metric || ""}</div>
-                                    <div className="mt-3">
-                                      <Label>Outcome</Label>
-                                      <TextInput
-                                        value={outcomeValue}
-                                        onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value)}
-                                        placeholder={block.type === "single" ? "Performance/output" : "Sets completed"}
-                                      />
+                                    <div className="mt-2 space-y-1 text-sm text-zinc-600">
+                                      {getExerciseTargetFields(exercise, block.type).length ? (
+                                        getExerciseTargetFields(exercise, block.type).map((field) => (
+                                          <div key={field.id}>Target: {formatPremiumFieldLabel(field)}</div>
+                                        ))
+                                      ) : (
+                                        <div>Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                      )}
+                                    </div>
+                                    <div className="mt-3 space-y-3">
+                                      {getExerciseInputFields(exercise, block.type).map((field) => (
+                                        <div key={field.id}>
+                                          <Label>{field.metric || "Outcome"}</Label>
+                                          <TextInput
+                                            value={getSessionEntryValueForMetric(draftEntry, field.metric, block.type)}
+                                            onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value, field.metric)}
+                                            placeholder={`${field.metric || "Outcome"} input`}
+                                          />
+                                        </div>
+                                      ))}
                                     </div>
                                   </div>
                                 );
                               })}
+                            </div>
+                            <div className="mt-4">
+                              <SmallButton onClick={() => saveMemberInputSession(true, block.id)} className="w-full">
+                                Save Block / Next Block
+                              </SmallButton>
                             </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    <PrimaryButton onClick={saveMemberInputSession} className="w-full">Save Results</PrimaryButton>
+                    <PrimaryButton onClick={() => saveMemberInputSession(false)} className="w-full">Save Results</PrimaryButton>
                   </div>
                 </SectionCard>
               )}
