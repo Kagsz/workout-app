@@ -20,11 +20,21 @@ type ProgramInputMode = "trainerInput" | "memberInput";
 type BlockType = "paired" | "single";
 type GraphAxis = "date" | "session";
 
+type ExerciseMetricMode = "target" | "memberInput";
+
+type ExerciseMetricField = {
+  id: string;
+  metric: string;
+  value: string;
+  mode: ExerciseMetricMode;
+};
+
 type Exercise = {
   id: string;
   name: string;
   target: string;
   metric: string;
+  premiumFields?: ExerciseMetricField[];
 };
 
 type Block = {
@@ -33,6 +43,7 @@ type Block = {
   title: string;
   duration: string;
   notes: string;
+  interactionMode?: "alternating" | "na";
   exercises: Exercise[];
 };
 
@@ -168,6 +179,12 @@ type TrackerExerciseSortMode =
   | "muscleHeadToe"
   | "muscleToeHead";
 
+type TrackerWorkoutSortMode =
+  | "alphaAsc"
+  | "alphaDesc"
+  | "newest"
+  | "oldest";
+
 type SessionExerciseInput = {
   exerciseId: string;
   exerciseName: string;
@@ -284,6 +301,92 @@ const formatTargetLabel = (target: string, metric: string) => {
   const metricPattern = new RegExp(`\\b${escapeRegExp(trimmedMetric)}\\b`, "i");
   return metricPattern.test(trimmedTarget) ? trimmedTarget : `${trimmedTarget} ${trimmedMetric}`.trim();
 };
+
+const formatDurationShort = (duration: string) => {
+  const raw = String(duration || "").trim();
+  if (!raw) return "";
+  const number = extractFirstNumber(raw);
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("hour") || lower.includes("hr")) {
+    return number ? `${number} hr${number === "1" ? "" : "s"}` : raw;
+  }
+
+  if (lower.includes("minute") || lower.includes("min")) {
+    return number ? `${number} min${number === "1" ? "" : "s"}` : raw;
+  }
+
+  return number ? `${number} min${number === "1" ? "" : "s"}` : raw;
+};
+
+const getBlockInteractionLabel = (block: Block) =>
+  block.interactionMode === "alternating" || (block.type === "paired" && /alternate/i.test(block.notes || ""))
+    ? "Alternating"
+    : "";
+
+const createPremiumField = (metric = "Sets", value = "", mode: ExerciseMetricMode = "memberInput"): ExerciseMetricField => ({
+  id: uid(),
+  metric,
+  value,
+  mode,
+});
+
+const getExercisePremiumFields = (exercise: Exercise, blockType?: BlockType): ExerciseMetricField[] => {
+  if (exercise.premiumFields?.length) return exercise.premiumFields;
+
+  const fallbackFields: ExerciseMetricField[] = [];
+  const targetText = String(exercise.target || "").trim();
+  const metricText = String(exercise.metric || "").trim();
+
+  if (targetText || metricText) {
+    fallbackFields.push({
+      id: `${exercise.id}-legacy-target`,
+      metric: metricText || (blockType === "single" ? "Performance" : "Sets"),
+      value: targetText,
+      mode: "target",
+    });
+  }
+
+  fallbackFields.push({
+    id: `${exercise.id}-legacy-input`,
+    metric: blockType === "single" ? "Performance" : "Sets",
+    value: "",
+    mode: "memberInput",
+  });
+
+  return fallbackFields;
+};
+
+const getExerciseTargetFields = (exercise: Exercise, blockType?: BlockType) =>
+  getExercisePremiumFields(exercise, blockType).filter((field) => field.mode === "target");
+
+const getExerciseInputFields = (exercise: Exercise, blockType?: BlockType) =>
+  getExercisePremiumFields(exercise, blockType).filter((field) => field.mode === "memberInput");
+
+const formatPremiumFieldLabel = (field: ExerciseMetricField) =>
+  [field.value, field.metric].filter(Boolean).join(" ").trim() || field.metric || "Target";
+
+const normalizePremiumMetricKey = (metric: string) => String(metric || "").trim().toLowerCase();
+
+const getSessionEntryValueForMetric = (entry: SessionExerciseInput | undefined, metric: string, blockType?: BlockType) => {
+  if (!entry) return "";
+  const key = normalizePremiumMetricKey(metric);
+  if (key.includes("weight") || key === "lbs" || key === "load") return entry.weight || "";
+  if (key.includes("set")) return entry.setsCompleted || "";
+  if (key.includes("performance") || key.includes("output")) return entry.performance || "";
+  return blockType === "single" ? entry.performance || "" : entry.setsCompleted || "";
+};
+
+const applySessionEntryValueForMetric = (entry: SessionExerciseInput, metric: string, value: string, blockType?: BlockType): SessionExerciseInput => {
+  const key = normalizePremiumMetricKey(metric);
+  if (key.includes("weight") || key === "lbs" || key === "load") return { ...entry, weight: normalizeWeightInput(value) };
+  if (key.includes("set")) return { ...entry, setsCompleted: value };
+  if (key.includes("performance") || key.includes("output")) return { ...entry, performance: value };
+  return blockType === "single" ? { ...entry, performance: value } : { ...entry, setsCompleted: value };
+};
+
+const getPrimaryProgramOutcomeMetric = (exercise: Exercise, blockType?: BlockType) =>
+  getExerciseInputFields(exercise, blockType)[0]?.metric || (blockType === "single" ? "Performance" : "Sets");
 
 
 function ExerciseDot({
@@ -832,7 +935,15 @@ const getMuscleGroupSortIndex = (group: MuscleGroup) => {
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds", "Completion"];
 const WORKOUT_QUICK_FILL_OPTIONS = ["Leg Workout", "Upper Body Workout", "Core Workout", "Cardio Workout", "Full Body Workout"];
 
-const getTodayInputDate = () => new Date().toISOString().slice(0, 10);
+const getTodayInputDate = () => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(new Date());
+};
 
 const normalizeTrackerExercise = (exercise: TrackerExercise): TrackerExercise => ({
   ...exercise,
@@ -1277,6 +1388,7 @@ const createExercise = (): Exercise => ({
   name: "Exercise",
   target: "",
   metric: "reps",
+  premiumFields: [createPremiumField("Reps", "", "target"), createPremiumField("Sets", "", "memberInput")],
 });
 
 const createBlock = (type: BlockType): Block => ({
@@ -1285,6 +1397,7 @@ const createBlock = (type: BlockType): Block => ({
   title: type === "paired" ? "Paired Block" : "Single Block",
   duration: type === "paired" ? "10" : "3",
   notes: "",
+  interactionMode: type === "paired" ? "alternating" : "na",
   exercises: type === "paired" ? [createExercise(), createExercise()] : [createExercise()],
 });
 
@@ -1309,8 +1422,8 @@ const createSessionDraft = (programId: string, routine: Routine, memberId: strin
       weight: "",
       performance: "",
       setsCompleted: "",
-      target: exercise.target,
-      metric: exercise.metric,
+      target: getExerciseTargetFields(exercise, block.type).map(formatPremiumFieldLabel).join(" • ") || exercise.target,
+      metric: getPrimaryProgramOutcomeMetric(exercise, block.type),
     })),
   })),
 });
@@ -5978,6 +6091,11 @@ export default function App() {
   const [trackerWorkoutReturnCycleId, setTrackerWorkoutReturnCycleId] = useState<string | null>(null);
   const [trackerTab, setTrackerTab] = useState<"exercises" | "workouts" | "cycles">("exercises");
   const [trackerExerciseSortMode, setTrackerExerciseSortMode] = useState<TrackerExerciseSortMode>("newest");
+  const [trackerWorkoutSortMode, setTrackerWorkoutSortMode] = useState<TrackerWorkoutSortMode>("newest");
+  const [bulkExerciseWorkoutId, setBulkExerciseWorkoutId] = useState<string | null>(null);
+  const [selectedBulkExerciseIds, setSelectedBulkExerciseIds] = useState<string[]>([]);
+  const [bulkWorkoutCycleId, setBulkWorkoutCycleId] = useState<string | null>(null);
+  const [selectedBulkWorkoutIds, setSelectedBulkWorkoutIds] = useState<string[]>([]);
   const [expandedTrackerExerciseIds, setExpandedTrackerExerciseIds] = useState<string[]>([]);
   const [expandedWorkoutSlotIds, setExpandedWorkoutSlotIds] = useState<string[]>([]);
   const [expandedTrackerCycleIds, setExpandedTrackerCycleIds] = useState<string[]>([]);
@@ -5991,12 +6109,15 @@ export default function App() {
   const [pendingMetricRemoval, setPendingMetricRemoval] = useState<{ exerciseId: string; metric: TrackerMetric } | null>(null);
   const [dataViewerExerciseId, setDataViewerExerciseId] = useState<string | null>(null);
   const [dataViewerWorkoutSlotId, setDataViewerWorkoutSlotId] = useState<string | null>(null);
+  const [editingTrackerDataEntry, setEditingTrackerDataEntry] = useState<{ source: "exercise" | "workout"; sourceId: string; entryId: string } | null>(null);
+  const [trackerDataEditValues, setTrackerDataEditValues] = useState<Record<string, string>>({});
   const [graphViewerExerciseId, setGraphViewerExerciseId] = useState<string | null>(null);
   const [graphViewerWorkoutSlotId, setGraphViewerWorkoutSlotId] = useState<string | null>(null);
   const [draggedTrackerExerciseId, setDraggedTrackerExerciseId] = useState<string | null>(null);
   const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
+  const [premiumInputFocusedBlockId, setPremiumInputFocusedBlockId] = useState<string | null>(null);
   const [showTrackerTutorial, setShowTrackerTutorial] = useState(false);
   const [trackerTutorialStepIndex, setTrackerTutorialStepIndex] = useState(0);
   const [trackerTutorialDismissed, setTrackerTutorialDismissed] = useState(() => {
@@ -6077,6 +6198,19 @@ export default function App() {
         .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
     [trackerWorkouts, selectedMember?.id]
   );
+
+  const sortedTrackerWorkoutOptions = useMemo(() => {
+    const sortedWorkouts = [...activeTrackerWorkouts];
+
+    sortedWorkouts.sort((a, b) => {
+      if (trackerWorkoutSortMode === "alphaAsc") return a.name.localeCompare(b.name);
+      if (trackerWorkoutSortMode === "alphaDesc") return b.name.localeCompare(a.name);
+      if (trackerWorkoutSortMode === "oldest") return getSafeDateTime(a.createdAt) - getSafeDateTime(b.createdAt);
+      return getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt);
+    });
+
+    return sortedWorkouts;
+  }, [activeTrackerWorkouts, trackerWorkoutSortMode]);
 
   const activeTrackerCycles = useMemo(
     () =>
@@ -6285,6 +6419,189 @@ export default function App() {
     const nextIndex = direction === "previous" ? graphViewerWorkoutSlotIndex - 1 : graphViewerWorkoutSlotIndex + 1;
     const nextSlot = graphViewerWorkoutSlots[nextIndex];
     if (nextSlot) setGraphViewerWorkoutSlotId(nextSlot.id);
+  };
+
+  const clearTrackerDataEditing = () => {
+    setEditingTrackerDataEntry(null);
+    setTrackerDataEditValues({});
+  };
+
+  const closeTrackerExerciseDataViewer = () => {
+    setDataViewerExerciseId(null);
+    clearTrackerDataEditing();
+  };
+
+  const closeTrackerWorkoutDataViewer = () => {
+    setDataViewerWorkoutSlotId(null);
+    clearTrackerDataEditing();
+  };
+
+  const isEditingTrackerDataEntry = (source: "exercise" | "workout", sourceId: string, entryId: string) =>
+    editingTrackerDataEntry?.source === source && editingTrackerDataEntry.sourceId === sourceId && editingTrackerDataEntry.entryId === entryId;
+
+  const startEditingTrackerDataEntry = (
+    source: "exercise" | "workout",
+    sourceId: string,
+    entry: TrackerEntry,
+    metrics: TrackerMetric[] | undefined
+  ) => {
+    const metricList = getTrackerMetricList(metrics, [entry]);
+    setEditingTrackerDataEntry({ source, sourceId, entryId: entry.id });
+    setTrackerDataEditValues({
+      entryDate: entry.entryDate || getTodayInputDate(),
+      ...Object.fromEntries(metricList.map((metric) => [metric, entry.values?.[metric] || ""])),
+    });
+  };
+
+  const saveTrackerDataEntryEdit = (
+    source: "exercise" | "workout",
+    sourceId: string,
+    entry: TrackerEntry,
+    metrics: TrackerMetric[] | undefined
+  ) => {
+    const metricList = getTrackerMetricList(metrics, [entry]);
+    const updatedEntry: TrackerEntry = {
+      ...entry,
+      entryDate: trackerDataEditValues.entryDate || entry.entryDate,
+      values: Object.fromEntries(
+        metricList.map((metric) => [
+          metric,
+          isCompletionMetric(metric) && isTruthyCompletionValue(trackerDataEditValues[metric] || "")
+            ? "Completed"
+            : String(trackerDataEditValues[metric] || "").trim(),
+        ])
+      ) as Record<string, string>,
+    };
+
+    if (source === "exercise") {
+      updateTrackerExercise(sourceId, (exercise) => ({
+        ...exercise,
+        entries: (exercise.entries || []).map((item) => (item.id === entry.id ? updatedEntry : item)),
+      }));
+    } else {
+      setTrackerWorkouts((current) =>
+        current.map((workout) => {
+          const normalized = normalizeTrackerWorkout(workout);
+          const nextSlots = (normalized.exerciseSlots || []).map((slot) =>
+            slot.id === sourceId
+              ? {
+                  ...slot,
+                  entries: (slot.entries || []).map((item) => (item.id === entry.id ? updatedEntry : item)),
+                }
+              : slot
+          );
+          return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
+        })
+      );
+    }
+
+    clearTrackerDataEditing();
+  };
+
+  const deleteTrackerDataEntry = (source: "exercise" | "workout", sourceId: string, entry: TrackerEntry) => {
+    const confirmed = window.confirm(`Delete entry from ${entry.entryDate || "this date"}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    if (source === "exercise") {
+      updateTrackerExercise(sourceId, (exercise) => ({
+        ...exercise,
+        entries: (exercise.entries || []).filter((item) => item.id !== entry.id),
+      }));
+    } else {
+      setTrackerWorkouts((current) =>
+        current.map((workout) => {
+          const normalized = normalizeTrackerWorkout(workout);
+          const nextSlots = (normalized.exerciseSlots || []).map((slot) =>
+            slot.id === sourceId
+              ? {
+                  ...slot,
+                  entries: (slot.entries || []).filter((item) => item.id !== entry.id),
+                }
+              : slot
+          );
+          const allSlotsComplete = Boolean(normalized.startedAt) && nextSlots.length > 0 && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, { ...normalized, exerciseSlots: nextSlots }));
+          return {
+            ...normalized,
+            completedAt: allSlotsComplete ? normalized.completedAt : undefined,
+            exerciseSlots: nextSlots,
+            exerciseIds: nextSlots.map((slot) => slot.exerciseId),
+          };
+        })
+      );
+    }
+
+    clearTrackerDataEditing();
+  };
+
+  const renderTrackerDataEntry = (
+    source: "exercise" | "workout",
+    sourceId: string,
+    entry: TrackerEntry,
+    metrics: TrackerMetric[] | undefined
+  ) => {
+    const metricList = getTrackerMetricList(metrics, [entry]);
+    const isEditing = isEditingTrackerDataEntry(source, sourceId, entry.id);
+
+    return (
+      <details key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-zinc-900">{entry.entryDate}</summary>
+        <div className="mt-3 space-y-3 text-sm text-zinc-700">
+          {isEditing ? (
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Date
+                <input
+                  type="date"
+                  value={trackerDataEditValues.entryDate || entry.entryDate || getTodayInputDate()}
+                  onChange={(event) => setTrackerDataEditValues((current) => ({ ...current, entryDate: event.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                />
+              </label>
+              {metricList.map((metric) => (
+                <label key={metric} className="block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  {metric}
+                  {isCompletionMetric(metric) ? (
+                    <label className="mt-1 flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-zinc-900">
+                      <input
+                        type="checkbox"
+                        checked={isTruthyCompletionValue(trackerDataEditValues[metric] || "")}
+                        onChange={(event) => setTrackerDataEditValues((current) => ({ ...current, [metric]: event.target.checked ? "Completed" : "" }))}
+                      />
+                      Completed
+                    </label>
+                  ) : (
+                    <input
+                      value={trackerDataEditValues[metric] || ""}
+                      onChange={(event) => setTrackerDataEditValues((current) => ({ ...current, [metric]: event.target.value }))}
+                      className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                    />
+                  )}
+                </label>
+              ))}
+              <div className="flex flex-wrap justify-end gap-2">
+                <SmallButton onClick={clearTrackerDataEditing}>Cancel</SmallButton>
+                <PrimaryButton onClick={() => saveTrackerDataEntryEdit(source, sourceId, entry, metrics)}>Save Changes</PrimaryButton>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1">
+                {metricList.map((metric) => (
+                  <div key={metric} className="flex justify-between gap-3">
+                    <span>{metric}</span>
+                    <span className="font-semibold">{isCompletionMetric(metric) && isTruthyCompletionValue(entry.values?.[metric] || "") ? "✓ Completed" : (entry.values?.[metric] || "—")}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-200 pt-3">
+                <SmallButton onClick={() => startEditingTrackerDataEntry(source, sourceId, entry, metrics)}>Edit</SmallButton>
+                <SmallButton onClick={() => deleteTrackerDataEntry(source, sourceId, entry)}>Delete Entry</SmallButton>
+              </div>
+            </>
+          )}
+        </div>
+      </details>
+    );
   };
 
   const pendingTrackerWorkoutSlot = useMemo(() => {
@@ -6976,6 +7293,106 @@ export default function App() {
     );
   };
 
+
+  const updateExercisePremiumField = (
+    routineId: string,
+    blockId: string,
+    exerciseId: string,
+    fieldId: string,
+    data: Partial<ExerciseMetricField>
+  ) => {
+    if (!selectedProgram) return;
+    updatePrograms((prev) =>
+      prev.map((program) => {
+        if (program.id !== selectedProgram.id) return program;
+        return {
+          ...program,
+          routines: program.routines.map((routine) => {
+            if (routine.id !== routineId) return routine;
+            return {
+              ...routine,
+              blocks: routine.blocks.map((block) => {
+                if (block.id !== blockId) return block;
+                return {
+                  ...block,
+                  exercises: block.exercises.map((exercise) => {
+                    if (exercise.id !== exerciseId) return exercise;
+                    const currentFields = getExercisePremiumFields(exercise, block.type);
+                    return {
+                      ...exercise,
+                      premiumFields: currentFields.map((field) => (field.id === fieldId ? { ...field, ...data } : field)),
+                    };
+                  }),
+                };
+              }),
+            };
+          }),
+        };
+      })
+    );
+  };
+
+  const addExercisePremiumField = (routineId: string, blockId: string, exerciseId: string) => {
+    if (!selectedProgram) return;
+    updatePrograms((prev) =>
+      prev.map((program) => {
+        if (program.id !== selectedProgram.id) return program;
+        return {
+          ...program,
+          routines: program.routines.map((routine) => {
+            if (routine.id !== routineId) return routine;
+            return {
+              ...routine,
+              blocks: routine.blocks.map((block) => {
+                if (block.id !== blockId) return block;
+                return {
+                  ...block,
+                  exercises: block.exercises.map((exercise) =>
+                    exercise.id === exerciseId
+                      ? {
+                          ...exercise,
+                          premiumFields: [...getExercisePremiumFields(exercise, block.type), createPremiumField()],
+                        }
+                      : exercise
+                  ),
+                };
+              }),
+            };
+          }),
+        };
+      })
+    );
+  };
+
+  const removeExercisePremiumField = (routineId: string, blockId: string, exerciseId: string, fieldId: string) => {
+    if (!selectedProgram) return;
+    updatePrograms((prev) =>
+      prev.map((program) => {
+        if (program.id !== selectedProgram.id) return program;
+        return {
+          ...program,
+          routines: program.routines.map((routine) => {
+            if (routine.id !== routineId) return routine;
+            return {
+              ...routine,
+              blocks: routine.blocks.map((block) => {
+                if (block.id !== blockId) return block;
+                return {
+                  ...block,
+                  exercises: block.exercises.map((exercise) => {
+                    if (exercise.id !== exerciseId) return exercise;
+                    const nextFields = getExercisePremiumFields(exercise, block.type).filter((field) => field.id !== fieldId);
+                    return { ...exercise, premiumFields: nextFields.length ? nextFields : [createPremiumField()] };
+                  }),
+                };
+              }),
+            };
+          }),
+        };
+      })
+    );
+  };
+
   const toggleExpandedTrackerExercise = (exerciseId: string) => {
     setExpandedTrackerExerciseIds((current) =>
       current.includes(exerciseId) ? current.filter((id) => id !== exerciseId) : [...current, exerciseId]
@@ -7599,6 +8016,34 @@ export default function App() {
     setSelectedCycleWorkoutId("");
   };
 
+  const openBulkWorkoutSelector = (cycleId: string) => {
+    setBulkWorkoutCycleId(cycleId);
+    setSelectedBulkWorkoutIds([]);
+  };
+
+  const toggleBulkWorkoutSelection = (workoutId: string) => {
+    setSelectedBulkWorkoutIds((current) =>
+      current.includes(workoutId) ? current.filter((id) => id !== workoutId) : [...current, workoutId]
+    );
+  };
+
+  const addSelectedWorkoutsToCycle = () => {
+    if (!bulkWorkoutCycleId || !selectedBulkWorkoutIds.length) return;
+
+    setTrackerCycles((current) =>
+      current.map((cycle) => {
+        if (cycle.id !== bulkWorkoutCycleId) return cycle;
+        const existingWorkoutIds = new Set(cycle.workoutIds);
+        const selectedNewWorkoutIds = selectedBulkWorkoutIds.filter((workoutId) => !existingWorkoutIds.has(workoutId));
+        const nextWorkoutIds = [...cycle.workoutIds, ...selectedNewWorkoutIds];
+        return { ...cycle, workoutIds: nextWorkoutIds, nextWorkoutId: cycle.nextWorkoutId || nextWorkoutIds[0] };
+      })
+    );
+
+    setBulkWorkoutCycleId(null);
+    setSelectedBulkWorkoutIds([]);
+  };
+
   const removeWorkoutFromCycle = (cycleId: string, workoutId: string) => {
     setTrackerCycles((current) => current.map((cycle) => {
       if (cycle.id !== cycleId) return cycle;
@@ -7636,6 +8081,38 @@ export default function App() {
       })
     );
     setSelectedWorkoutExerciseId("");
+  };
+
+  const openBulkExerciseSelector = (workoutId: string) => {
+    setBulkExerciseWorkoutId(workoutId);
+    setSelectedBulkExerciseIds([]);
+  };
+
+  const toggleBulkExerciseSelection = (exerciseId: string) => {
+    setSelectedBulkExerciseIds((current) =>
+      current.includes(exerciseId) ? current.filter((id) => id !== exerciseId) : [...current, exerciseId]
+    );
+  };
+
+  const addSelectedExercisesToWorkout = () => {
+    if (!bulkExerciseWorkoutId || !selectedBulkExerciseIds.length) return;
+
+    setTrackerWorkouts((current) =>
+      current.map((workout) => {
+        if (workout.id !== bulkExerciseWorkoutId) return workout;
+        const normalized = normalizeTrackerWorkout(workout);
+        const existingExerciseIds = new Set((normalized.exerciseSlots || []).map((slot) => slot.exerciseId));
+        const selectedNewExerciseIds = selectedBulkExerciseIds.filter((exerciseId) => !existingExerciseIds.has(exerciseId));
+        const nextSlots = [
+          ...(normalized.exerciseSlots || []),
+          ...selectedNewExerciseIds.map((exerciseId) => ({ id: uid(), exerciseId, createdAt: new Date().toISOString(), entries: [] })),
+        ];
+        return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
+      })
+    );
+
+    setBulkExerciseWorkoutId(null);
+    setSelectedBulkExerciseIds([]);
   };
 
   const removeExerciseFromWorkout = (workoutId: string, workoutSlotId: string) => {
@@ -7685,12 +8162,15 @@ export default function App() {
     const workoutSlots = normalized.exerciseSlots || [];
     const hasGap = cycleContext ? Boolean(getWorkoutFirstGapSlotId(normalized, cycleContext)) : Boolean(getWorkoutFirstGapSlotId(normalized));
     const isNextUp = !hasGap && cycleNextWorkoutId === normalized.id;
+    const isActiveWorkout = Boolean(normalized.startedAt && !normalized.completedAt);
     const isComplete = cycleContext ? Boolean(cycleContext.completedAt && cycleContext.nextWorkoutId !== normalized.id) : isTrackerWorkoutComplete(normalized);
     const cardClass = hasGap
       ? "border-amber-300 bg-amber-50"
       : isNextUp
         ? "border-emerald-300 bg-emerald-50"
-        : "border-zinc-200 bg-zinc-50";
+        : isActiveWorkout
+          ? "border-sky-300 bg-sky-50"
+          : "border-zinc-200 bg-zinc-50";
 
     return (
       <div key={normalized.id} className={`rounded-2xl border p-3 ${cardClass}`}>
@@ -7702,6 +8182,7 @@ export default function App() {
                 <div className="text-sm font-semibold text-zinc-900">{normalized.name}</div>
                 {hasGap ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Incomplete</span> : null}
                 {isNextUp ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
+                {isActiveWorkout && !isComplete ? <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700">Active Workout</span> : null}
                 {isComplete ? <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Complete</span> : null}
               </div>
               <div className="text-xs text-zinc-500">{workoutSlots.length} exercises</div>
@@ -8013,20 +8494,28 @@ export default function App() {
     ) || null;
   };
 
-  const openMemberInputScreen = (existingSession?: SavedSession | null) => {
+  const openMemberInputScreen = (existingSession?: SavedSession | null, focusBlockId?: string | null) => {
     const draft = createMemberInputDraft(existingSession || null);
     if (!draft) return;
 
+    const nextFocusBlockId = focusBlockId || premiumNextBlockId || selectedRoutine?.blocks[0]?.id || null;
     setMemberInputDraft(draft);
     setEditingMemberInputSessionId(existingSession?.id || null);
+    setPremiumInputFocusedBlockId(nextFocusBlockId);
     setScreen("memberInput");
+
+    if (nextFocusBlockId && typeof window !== "undefined") {
+      window.setTimeout(() => {
+        document.getElementById(`premium-input-block-${nextFocusBlockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 120);
+    }
   };
 
   const updateMemberInputDraftField = (field: "date" | "sessionNumber", value: string) => {
     setMemberInputDraft((current) => (current ? { ...current, [field]: value } : current));
   };
 
-  const updateMemberInputOutcome = (blockId: string, exerciseId: string, value: string) => {
+  const updateMemberInputOutcome = (blockId: string, exerciseId: string, value: string, metricName?: string) => {
     setMemberInputDraft((current) => {
       if (!current || !selectedRoutine) return current;
       const block = selectedRoutine.blocks.find((item) => item.id === blockId);
@@ -8040,9 +8529,7 @@ export default function App() {
                 entries: draftBlock.entries.map((entry) =>
                   entry.exerciseId !== exerciseId
                     ? entry
-                    : block?.type === "single"
-                      ? { ...entry, performance: value }
-                      : { ...entry, setsCompleted: value }
+                    : applySessionEntryValueForMetric(entry, metricName || getPrimaryProgramOutcomeMetric(block?.exercises.find((exercise) => exercise.id === exerciseId) || ({ id: exerciseId, name: "", target: "", metric: "" } as Exercise), block?.type), value, block?.type)
                 ),
               }
         ),
@@ -8050,7 +8537,7 @@ export default function App() {
     });
   };
 
-  const saveMemberInputSession = () => {
+  const saveMemberInputSession = (focusNextBlock = false, sourceBlockId?: string) => {
     if (!memberInputDraft || !selectedProgram || !selectedRoutine || !selectedMember) return;
 
     const trimmedDate = memberInputDraft.date.trim();
@@ -8073,6 +8560,18 @@ export default function App() {
 
     setEditingMemberInputSessionId(savedSession.id);
     setMemberInputDraft(createMemberInputDraft(savedSession));
+
+    if (focusNextBlock) {
+      const currentIndex = selectedRoutine.blocks.findIndex((block) => block.id === sourceBlockId);
+      const nextBlock = selectedRoutine.blocks[currentIndex + 1] || selectedRoutine.blocks[0] || null;
+      const nextBlockId = nextBlock?.id || null;
+      setPremiumInputFocusedBlockId(nextBlockId);
+      if (nextBlockId && typeof window !== "undefined") {
+        window.setTimeout(() => {
+          document.getElementById(`premium-input-block-${nextBlockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 120);
+      }
+    }
   };
 
   const importProgramData = () => {
@@ -8686,7 +9185,7 @@ export default function App() {
                                 </div>
                               </div>
 
-                              <div className="mb-4 grid gap-3 md:grid-cols-3">
+                              <div className="mb-4 grid gap-3 md:grid-cols-4">
                                 <div>
                                   <Label>Block Title</Label>
                                   <TextInput value={block.title} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { title: e.target.value })} />
@@ -8698,6 +9197,17 @@ export default function App() {
                                 <div>
                                   <Label>Duration</Label>
                                   <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 minutes" />
+                                </div>
+                                <div>
+                                  <Label>Block Flow</Label>
+                                  <select
+                                    value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
+                                    onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
+                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                  >
+                                    <option value="na">N/A</option>
+                                    <option value="alternating">Alternating</option>
+                                  </select>
                                 </div>
                               </div>
 
@@ -8714,14 +9224,45 @@ export default function App() {
                                         <Label>Exercise Name</Label>
                                         <TextInput value={exercise.name} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { name: e.target.value })} />
                                       </div>
-                                      <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                          <Label>Target</Label>
-                                          <TextInput value={exercise.target} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { target: e.target.value })} />
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <Label>Premium Metric Setup</Label>
+                                          <SmallButton onClick={() => addExercisePremiumField(selectedRoutine.id, block.id, exercise.id)}>+ Field</SmallButton>
                                         </div>
-                                        <div>
-                                          <Label>Metric</Label>
-                                          <TextInput value={exercise.metric} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { metric: e.target.value })} />
+                                        <div className="space-y-2">
+                                          {getExercisePremiumFields(exercise, block.type).map((field) => (
+                                            <div key={field.id} className="grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                                              <TextInput
+                                                value={field.metric}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
+                                                placeholder="Metric"
+                                              />
+                                              <TextInput
+                                                value={field.value}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
+                                                placeholder="Target value"
+                                              />
+                                              <select
+                                                value={field.mode}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: e.target.value as ExerciseMetricMode })}
+                                                className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                              >
+                                                <option value="target">Target / Read Only</option>
+                                                <option value="memberInput">Member Input</option>
+                                              </select>
+                                              <SmallButton onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}>Remove</SmallButton>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                          <div>
+                                            <Label>Legacy Target</Label>
+                                            <TextInput value={exercise.target} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { target: e.target.value })} />
+                                          </div>
+                                          <div>
+                                            <Label>Legacy Metric</Label>
+                                            <TextInput value={exercise.metric} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { metric: e.target.value })} />
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
@@ -9252,18 +9793,21 @@ export default function App() {
                                     </button>
                                     {isExpanded ? (
                                       <div className="mt-3 space-y-3">
-                                        <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                                          <select
-                                            value={selectedCycleWorkoutId}
-                                            onChange={(event) => setSelectedCycleWorkoutId(event.target.value)}
-                                            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                          >
-                                            <option value="">Select workout from library</option>
-                                            {activeTrackerWorkouts.map((workout) => (
-                                              <option key={workout.id} value={workout.id}>{workout.name}</option>
-                                            ))}
-                                          </select>
-                                          <SmallButton onClick={() => addWorkoutToCycle(cycle.id)} disabled={!selectedCycleWorkoutId}>Add</SmallButton>
+                                        <div className="space-y-2">
+                                          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                                            <select
+                                              value={selectedCycleWorkoutId}
+                                              onChange={(event) => setSelectedCycleWorkoutId(event.target.value)}
+                                              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                            >
+                                              <option value="">Select workout from library</option>
+                                              {activeTrackerWorkouts.map((workout) => (
+                                                <option key={workout.id} value={workout.id}>{workout.name}</option>
+                                              ))}
+                                            </select>
+                                            <SmallButton onClick={() => addWorkoutToCycle(cycle.id)} disabled={!selectedCycleWorkoutId}>Add</SmallButton>
+                                          </div>
+                                          <SmallButton onClick={() => openBulkWorkoutSelector(cycle.id)} disabled={!activeTrackerWorkouts.length}>Select Multiple Workouts</SmallButton>
                                         </div>
                                         <div className="space-y-2">
                                           {cycle.workoutIds.length ? cycle.workoutIds.map((workoutId, index) => {
@@ -9404,7 +9948,7 @@ export default function App() {
                   <div className="space-y-5">
                     <details open={(selectedTrackerWorkout.exerciseSlots || []).length === 0} className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <summary className="cursor-pointer text-sm font-semibold text-zinc-900">Add Exercise From Library</summary>
-                      <div className="mt-3">
+                      <div className="mt-3 space-y-3">
                       <div className="grid gap-2 md:grid-cols-[1fr_auto]">
                         <select
                           value={selectedWorkoutExerciseId}
@@ -9418,6 +9962,7 @@ export default function App() {
                         </select>
                         <SmallButton onClick={() => addExistingExerciseToWorkout(selectedTrackerWorkout.id)} disabled={!selectedWorkoutExerciseId}>Add</SmallButton>
                       </div>
+                      <SmallButton onClick={() => openBulkExerciseSelector(selectedTrackerWorkout.id)} disabled={!activeTrackerExercises.length}>Select Multiple Exercises</SmallButton>
                       </div>
                     </details>
 
@@ -9471,6 +10016,7 @@ export default function App() {
                           <div className="flex flex-wrap items-center gap-2">
                             <div className="text-sm font-semibold text-zinc-900">{selectedTrackerWorkout.name}</div>
                             {selectedWorkoutGuidance.tone === "amber" ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Incomplete</span> : null}
+                            {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700">Active Workout</span> : null}
                           </div>
                           <div className="text-xs text-zinc-500">Drag cards to reorder.</div>
                         </div>
@@ -9566,6 +10112,116 @@ export default function App() {
                 onClose={closeTrackerTutorial}
                 onNeverShowAgain={closeTrackerTutorial}
               />
+
+              {bulkExerciseWorkoutId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">Add Exercises</div>
+                        <div className="mt-1 text-sm text-zinc-500">Select multiple exercises from your library.</div>
+                      </div>
+                      <SmallButton onClick={() => { setBulkExerciseWorkoutId(null); setSelectedBulkExerciseIds([]); }}>Close</SmallButton>
+                    </div>
+                    <label className="mt-4 block space-y-1">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sort Exercises</div>
+                      <select
+                        value={trackerExerciseSortMode}
+                        onChange={(event) => setTrackerExerciseSortMode(event.target.value as TrackerExerciseSortMode)}
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                      >
+                        <option value="alphaAsc">A → Z</option>
+                        <option value="alphaDesc">Z → A</option>
+                        <option value="newest">Newest Added</option>
+                        <option value="oldest">Oldest Added</option>
+                        <option value="muscleHeadToe">Muscle Group: Head → Toe</option>
+                        <option value="muscleToeHead">Muscle Group: Toe → Head</option>
+                      </select>
+                    </label>
+                    <div className="mt-4 max-h-[58vh] space-y-2 overflow-y-auto pr-1">
+                      {activeTrackerExercises.length ? activeTrackerExercises.map((exercise) => {
+                        const targetWorkout = activeTrackerWorkouts.find((workout) => workout.id === bulkExerciseWorkoutId);
+                        const alreadyAdded = Boolean(targetWorkout?.exerciseSlots?.some((slot) => slot.exerciseId === exercise.id));
+                        return (
+                          <label key={exercise.id} className={`flex items-center gap-3 rounded-xl border p-3 ${alreadyAdded ? "border-zinc-200 bg-zinc-50 text-zinc-400" : "border-zinc-200 bg-white text-zinc-800"}`}>
+                            <input
+                              type="checkbox"
+                              disabled={alreadyAdded}
+                              checked={selectedBulkExerciseIds.includes(exercise.id)}
+                              onChange={() => toggleBulkExerciseSelection(exercise.id)}
+                              className="h-4 w-4 rounded border-zinc-300"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold">{exercise.name}</span>
+                              <span className="block text-xs text-zinc-500">{exercise.muscleGroup}{alreadyAdded ? " • Already added" : ""}</span>
+                            </span>
+                          </label>
+                        );
+                      }) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No exercises available.</div>
+                      )}
+                    </div>
+                    <div className="mt-5 grid grid-cols-2 gap-3">
+                      <SmallButton onClick={() => { setBulkExerciseWorkoutId(null); setSelectedBulkExerciseIds([]); }}>Cancel</SmallButton>
+                      <PrimaryButton onClick={addSelectedExercisesToWorkout} disabled={!selectedBulkExerciseIds.length}>Add Selected</PrimaryButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {bulkWorkoutCycleId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">Add Workouts</div>
+                        <div className="mt-1 text-sm text-zinc-500">Select multiple workouts for this cycle.</div>
+                      </div>
+                      <SmallButton onClick={() => { setBulkWorkoutCycleId(null); setSelectedBulkWorkoutIds([]); }}>Close</SmallButton>
+                    </div>
+                    <label className="mt-4 block space-y-1">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sort Workouts</div>
+                      <select
+                        value={trackerWorkoutSortMode}
+                        onChange={(event) => setTrackerWorkoutSortMode(event.target.value as TrackerWorkoutSortMode)}
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                      >
+                        <option value="alphaAsc">A → Z</option>
+                        <option value="alphaDesc">Z → A</option>
+                        <option value="newest">Newest Added</option>
+                        <option value="oldest">Oldest Added</option>
+                      </select>
+                    </label>
+                    <div className="mt-4 max-h-[58vh] space-y-2 overflow-y-auto pr-1">
+                      {sortedTrackerWorkoutOptions.length ? sortedTrackerWorkoutOptions.map((workout) => {
+                        const targetCycle = activeTrackerCycles.find((cycle) => cycle.id === bulkWorkoutCycleId);
+                        const alreadyAdded = Boolean(targetCycle?.workoutIds.includes(workout.id));
+                        return (
+                          <label key={workout.id} className={`flex items-center gap-3 rounded-xl border p-3 ${alreadyAdded ? "border-zinc-200 bg-zinc-50 text-zinc-400" : "border-zinc-200 bg-white text-zinc-800"}`}>
+                            <input
+                              type="checkbox"
+                              disabled={alreadyAdded}
+                              checked={selectedBulkWorkoutIds.includes(workout.id)}
+                              onChange={() => toggleBulkWorkoutSelection(workout.id)}
+                              className="h-4 w-4 rounded border-zinc-300"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-semibold">{workout.name}</span>
+                              <span className="block text-xs text-zinc-500">{(workout.exerciseSlots || []).length} exercises{alreadyAdded ? " • Already added" : ""}</span>
+                            </span>
+                          </label>
+                        );
+                      }) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No workouts available.</div>
+                      )}
+                    </div>
+                    <div className="mt-5 grid grid-cols-2 gap-3">
+                      <SmallButton onClick={() => { setBulkWorkoutCycleId(null); setSelectedBulkWorkoutIds([]); }}>Cancel</SmallButton>
+                      <PrimaryButton onClick={addSelectedWorkoutsToCycle} disabled={!selectedBulkWorkoutIds.length}>Add Selected</PrimaryButton>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {pendingTrackerEntryExercise && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
@@ -9675,27 +10331,15 @@ export default function App() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-lg font-bold text-zinc-900">{dataViewerExercise.name} Data</div>
-                        <div className="mt-1 text-sm text-zinc-500">Read-only entry history • {(dataViewerExercise.entries || []).length} total entries.</div>
+                        <div className="mt-1 text-sm text-zinc-500">Editable entry history • {(dataViewerExercise.entries || []).length} total entries.</div>
                       </div>
-                      <SmallButton onClick={() => setDataViewerExerciseId(null)}>Close</SmallButton>
+                      <SmallButton onClick={closeTrackerExerciseDataViewer}>Close</SmallButton>
                     </div>
                     <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto pr-1">
                       {(dataViewerExercise.entries || []).length ? (
                         [...(dataViewerExercise.entries || [])]
                           .sort((a, b) => getSafeDateTime(b.entryDate || b.createdAt) - getSafeDateTime(a.entryDate || a.createdAt))
-                          .map((entry) => (
-                            <details key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                              <summary className="cursor-pointer text-sm font-semibold text-zinc-900">{entry.entryDate}</summary>
-                              <div className="mt-3 space-y-1 text-sm text-zinc-700">
-                                {(dataViewerExercise.metrics || Object.keys(entry.values || {})).map((metric) => (
-                                  <div key={metric} className="flex justify-between gap-3">
-                                    <span>{metric}</span>
-                                    <span className="font-semibold">{isCompletionMetric(metric) && isTruthyCompletionValue(entry.values?.[metric] || "") ? "✓ Completed" : (entry.values?.[metric] || "—")}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </details>
-                          ))
+                          .map((entry) => renderTrackerDataEntry("exercise", dataViewerExercise.id, entry, dataViewerExercise.metrics))
                       ) : (
                         <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No saved entries yet.</div>
                       )}
@@ -9712,25 +10356,13 @@ export default function App() {
                         <div className="text-lg font-bold text-zinc-900">{dataViewerWorkoutSlot.exercise?.name || "Workout Exercise"} Data</div>
                         <div className="mt-1 text-sm text-zinc-500">{dataViewerWorkoutSlot.workout.name} • workout-specific history • {(dataViewerWorkoutSlot.slot.entries || []).length} total entries.</div>
                       </div>
-                      <SmallButton onClick={() => setDataViewerWorkoutSlotId(null)}>Close</SmallButton>
+                      <SmallButton onClick={closeTrackerWorkoutDataViewer}>Close</SmallButton>
                     </div>
                     <div className="mt-4 max-h-[68vh] space-y-3 overflow-y-auto pr-1">
                       {(dataViewerWorkoutSlot.slot.entries || []).length ? (
                         [...(dataViewerWorkoutSlot.slot.entries || [])]
                           .sort((a, b) => getSafeDateTime(b.entryDate || b.createdAt) - getSafeDateTime(a.entryDate || a.createdAt))
-                          .map((entry) => (
-                            <details key={entry.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                              <summary className="cursor-pointer text-sm font-semibold text-zinc-900">{entry.entryDate}</summary>
-                              <div className="mt-3 space-y-1 text-sm text-zinc-700">
-                                {((dataViewerWorkoutSlot.exercise?.metrics || Object.keys(entry.values || {}))).map((metric) => (
-                                  <div key={metric} className="flex justify-between gap-3">
-                                    <span>{metric}</span>
-                                    <span className="font-semibold">{isCompletionMetric(metric) && isTruthyCompletionValue(entry.values?.[metric] || "") ? "✓ Completed" : (entry.values?.[metric] || "—")}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </details>
-                          ))
+                          .map((entry) => renderTrackerDataEntry("workout", dataViewerWorkoutSlot.slot.id, entry, dataViewerWorkoutSlot.exercise?.metrics))
                       ) : (
                         <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No saved entries yet.</div>
                       )}
@@ -9817,18 +10449,20 @@ export default function App() {
                               <div>
                                 <div className="flex flex-wrap items-center gap-2">
                                   <div className="text-lg font-semibold">{block.title}</div>
+                                  {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                                  {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
                                   {isNextBlock ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                 </div>
                                 <div className="mt-2 space-y-1 text-sm text-zinc-600">
                                   {block.exercises.map((exercise, index) => (
-                                    <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                    <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {getExerciseTargetFields(exercise, block.type).map(formatPremiumFieldLabel).join(" • ") || `${exercise.target || "—"} ${exercise.metric || ""}`.trim()}</div>
                                   ))}
                                 </div>
                                 {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
                               </div>
                             </div>
                             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                              <SmallButton onClick={() => openMemberInputScreen()}>Enter Results</SmallButton>
+                              <SmallButton onClick={() => openMemberInputScreen(latestSelectedRoutineSession, block.id)}>Input Data</SmallButton>
                               <SmallButton onClick={() => openGraph(selectedRoutine.id, block.id)}>View Graph</SmallButton>
                             </div>
                           </div>
@@ -9891,41 +10525,67 @@ export default function App() {
                       {selectedRoutine.blocks.map((block) => {
                         const draftBlock = memberInputDraft.blocks.find((item) => item.blockId === block.id);
                         return (
-                          <div key={block.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
-                            <div className="mb-3">
-                              <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
-                              {!!block.notes && <div className="mt-1 text-sm text-zinc-500">{block.notes}</div>}
+                          <div
+                            key={block.id}
+                            id={`premium-input-block-${block.id}`}
+                            className={`rounded-2xl border p-4 ${premiumInputFocusedBlockId === block.id ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
+                          >
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
+                                {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                                {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
+                                {premiumInputFocusedBlockId === block.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Input</span> : null}
+                              </div>
+                              <SmallButton onClick={() => setPremiumInputFocusedBlockId(block.id)}>Input Data</SmallButton>
+                              {!!block.notes && <div className="basis-full text-sm text-zinc-500">{block.notes}</div>}
                             </div>
 
                             <div className="space-y-3">
                               {block.exercises.map((exercise, index) => {
                                 const draftEntry = draftBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
-                                const outcomeValue = block.type === "single" ? draftEntry?.performance || "" : draftEntry?.setsCompleted || "";
                                 return (
                                   <div key={exercise.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                                     <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                                       {block.type === "paired" ? `Exercise ${index + 1}` : "Single Exercise"}
                                     </div>
                                     <div className="mt-1 text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                    <div className="mt-1 text-sm text-zinc-600">Target: {exercise.target || "—"} {exercise.metric || ""}</div>
-                                    <div className="mt-3">
-                                      <Label>Outcome</Label>
-                                      <TextInput
-                                        value={outcomeValue}
-                                        onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value)}
-                                        placeholder={block.type === "single" ? "Performance/output" : "Sets completed"}
-                                      />
+                                    <div className="mt-2 space-y-1 text-sm text-zinc-600">
+                                      {getExerciseTargetFields(exercise, block.type).length ? (
+                                        getExerciseTargetFields(exercise, block.type).map((field) => (
+                                          <div key={field.id}>Target: {formatPremiumFieldLabel(field)}</div>
+                                        ))
+                                      ) : (
+                                        <div>Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                      )}
+                                    </div>
+                                    <div className="mt-3 space-y-3">
+                                      {getExerciseInputFields(exercise, block.type).map((field) => (
+                                        <div key={field.id}>
+                                          <Label>{field.metric || "Outcome"}</Label>
+                                          <TextInput
+                                            value={getSessionEntryValueForMetric(draftEntry, field.metric, block.type)}
+                                            onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value, field.metric)}
+                                            placeholder={`${field.metric || "Outcome"} input`}
+                                          />
+                                        </div>
+                                      ))}
                                     </div>
                                   </div>
                                 );
                               })}
+                            </div>
+                            <div className="mt-4">
+                              <SmallButton onClick={() => saveMemberInputSession(true, block.id)} className="w-full">
+                                Save Block / Next Block
+                              </SmallButton>
                             </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    <PrimaryButton onClick={saveMemberInputSession} className="w-full">Save Results</PrimaryButton>
+                    <PrimaryButton onClick={() => saveMemberInputSession(false)} className="w-full">Save Results</PrimaryButton>
                   </div>
                 </SectionCard>
               )}

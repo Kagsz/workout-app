@@ -9148,18 +9148,14 @@ export default function App() {
                   <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible defaultOpen={false}>
                     {selectedRoutine ? (
                       <div className="space-y-5">
-                        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
+                        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                           <div>
                             <Label>Routine Label</Label>
                             <TextInput value={selectedRoutine.label} onChange={(e) => updateRoutine(selectedRoutine.id, { label: e.target.value })} />
                           </div>
-                          <div className="self-end">
-                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "paired")}>+ Paired Block</SmallButton>
-                          </div>
-                          <div className="self-end">
-                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "single")}>+ Single Block</SmallButton>
-                          </div>
-                          <div className="self-end">
+                          <div className="flex flex-wrap items-end gap-2 self-end">
+                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "paired")}>+ Paired</SmallButton>
+                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "single")}>+ Single</SmallButton>
                             <SmallButton
                               onClick={() => {
                                 const confirmReset = window.confirm("Delete all blocks in this routine and start fresh?");
@@ -9168,7 +9164,7 @@ export default function App() {
                               }}
                               className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                             >
-                              Clear Blocks
+                              Clear
                             </SmallButton>
                           </div>
                         </div>
@@ -9179,27 +9175,23 @@ export default function App() {
                               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                                 <div className="text-sm font-semibold text-zinc-500">Block {index + 1}</div>
                                 <div className="flex flex-wrap gap-2">
-                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "up")} disabled={index === 0}>Move Up</SmallButton>
-                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "down")} disabled={index === selectedRoutine.blocks.length - 1}>Move Down</SmallButton>
-                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete Block</SmallButton>
+                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "up")} disabled={index === 0} title="Move block up">↑</SmallButton>
+                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "down")} disabled={index === selectedRoutine.blocks.length - 1} title="Move block down">↓</SmallButton>
+                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton>
                                 </div>
                               </div>
 
-                              <div className="mb-4 grid gap-3 md:grid-cols-4">
+                              <div className="mb-4 grid gap-3 md:grid-cols-[1fr_140px_160px]">
                                 <div>
                                   <Label>Block Title</Label>
                                   <TextInput value={block.title} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { title: e.target.value })} />
                                 </div>
                                 <div>
-                                  <Label>Block Type</Label>
-                                  <div className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700">{block.type === "paired" ? "Paired Block" : "Single Block"}</div>
-                                </div>
-                                <div>
                                   <Label>Duration</Label>
-                                  <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 minutes" />
+                                  <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 mins" />
                                 </div>
                                 <div>
-                                  <Label>Block Flow</Label>
+                                  <Label>Flow</Label>
                                   <select
                                     value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
                                     onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
@@ -9231,7 +9223,7 @@ export default function App() {
                                         </div>
                                         <div className="space-y-2">
                                           {getExercisePremiumFields(exercise, block.type).map((field) => (
-                                            <div key={field.id} className="grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                                            <div key={field.id} className="grid grid-cols-[1fr_1fr_auto_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                                               <TextInput
                                                 value={field.metric}
                                                 onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
@@ -9240,30 +9232,30 @@ export default function App() {
                                               <TextInput
                                                 value={field.value}
                                                 onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
-                                                placeholder="Target value"
+                                                placeholder="Value"
                                               />
                                               <select
                                                 value={field.mode}
                                                 onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: e.target.value as ExerciseMetricMode })}
-                                                className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                                className="h-10 rounded-xl border border-zinc-300 bg-white px-2 text-xs sm:px-3 sm:text-sm"
+                                                title={field.mode === "target" ? "Target / Read Only" : "Member Input"}
                                               >
-                                                <option value="target">Target / Read Only</option>
-                                                <option value="memberInput">Member Input</option>
+                                                <option value="target">Target</option>
+                                                <option value="memberInput">Input</option>
                                               </select>
-                                              <SmallButton onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}>Remove</SmallButton>
+                                              <button
+                                                type="button"
+                                                onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}
+                                                className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-sm font-semibold text-zinc-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                                                aria-label="Remove metric field"
+                                                title="Remove field"
+                                              >
+                                                ×
+                                              </button>
                                             </div>
                                           ))}
                                         </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                          <div>
-                                            <Label>Legacy Target</Label>
-                                            <TextInput value={exercise.target} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { target: e.target.value })} />
-                                          </div>
-                                          <div>
-                                            <Label>Legacy Metric</Label>
-                                            <TextInput value={exercise.metric} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { metric: e.target.value })} />
-                                          </div>
-                                        </div>
+
                                       </div>
                                     </div>
                                   </div>
