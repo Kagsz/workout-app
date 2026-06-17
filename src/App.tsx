@@ -9237,7 +9237,7 @@ export default function App() {
                                             <div key={field.id} className="grid grid-cols-[3.25rem_minmax(0,1fr)_3.75rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                                               <button
                                                 type="button"
-                                                onClick={() => setPremiumMetricPicker({ routineId: selectedRoutine.id, blockId: block.id, exerciseId: exercise.id, fieldId: field.id, query: field.metric })}
+                                                onClick={() => setPremiumMetricPicker({ routineId: selectedRoutine.id, blockId: block.id, exerciseId: exercise.id, fieldId: field.id, query: "" })}
                                                 className="h-10 min-w-0 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2 text-center text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50"
                                                 title={field.metric || "Metric"}
                                               >

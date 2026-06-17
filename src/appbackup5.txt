@@ -933,6 +933,7 @@ const getMuscleGroupSortIndex = (group: MuscleGroup) => {
 };
 
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds", "Completion"];
+const PREMIUM_METRIC_OPTIONS: TrackerMetric[] = [...TRACKER_METRIC_OPTIONS, "Duration", "Minutes", "Seconds", "Speed", "Pace"];
 const formatPremiumMetricDisplayName = (metric: string) => {
   const trimmed = String(metric || "").trim();
   if (!trimmed) return "";
@@ -6124,7 +6125,8 @@ export default function App() {
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
   const [premiumInputFocusedBlockId, setPremiumInputFocusedBlockId] = useState<string | null>(null);
-  const [focusedPremiumMetricFieldId, setFocusedPremiumMetricFieldId] = useState<string | null>(null);
+  const [premiumMetricPicker, setPremiumMetricPicker] = useState<{ routineId: string; blockId: string; exerciseId: string; fieldId: string; query: string } | null>(null);
+  const [premiumModePicker, setPremiumModePicker] = useState<{ routineId: string; blockId: string; exerciseId: string; fieldId: string } | null>(null);
   const [showTrackerTutorial, setShowTrackerTutorial] = useState(false);
   const [trackerTutorialStepIndex, setTrackerTutorialStepIndex] = useState(0);
   const [trackerTutorialDismissed, setTrackerTutorialDismissed] = useState(() => {
@@ -9217,7 +9219,7 @@ export default function App() {
                                 <TextArea value={block.notes} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { notes: e.target.value })} rows={3} placeholder="Add notes or screen tips here" />
                               </div>
 
-                              <div className={`grid gap-3 ${block.type === "paired" ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
+                              <div className="grid gap-3">
                                 {block.exercises.map((exercise) => (
                                   <div key={exercise.id} className="rounded-2xl border border-zinc-200 bg-white p-3">
                                     <div className="space-y-3">
@@ -9231,69 +9233,41 @@ export default function App() {
                                           <SmallButton onClick={() => addExercisePremiumField(selectedRoutine.id, block.id, exercise.id)}>+ Field</SmallButton>
                                         </div>
                                         <div className="space-y-2">
-                                          {getExercisePremiumFields(exercise, block.type).map((field) => {
-                                            const metricInputId = `premium-metric-options-${field.id}`;
-                                            const isMetricFocused = focusedPremiumMetricFieldId === field.id;
-                                            return (
-                                              <div key={field.id} className="grid grid-cols-[4.25rem_minmax(0,1fr)_4.5rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
-                                                <TextInput
-                                                  value={isMetricFocused ? field.metric : formatPremiumMetricDisplayName(field.metric)}
-                                                  onFocus={() => setFocusedPremiumMetricFieldId(field.id)}
-                                                  onBlur={() => window.setTimeout(() => setFocusedPremiumMetricFieldId((current) => current === field.id ? null : current), 120)}
-                                                  onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
-                                                  placeholder="Metric"
-                                                  list={metricInputId}
-                                                  title={field.metric}
-                                                  className="px-2 text-center text-xs font-semibold sm:text-sm"
-                                                />
-                                                <datalist id={metricInputId}>
-                                                  {[...TRACKER_METRIC_OPTIONS, 'Duration', 'Minutes', 'Seconds', 'Speed', 'Pace'].map((metricOption) => (
-                                                    <option key={metricOption} value={metricOption} />
-                                                  ))}
-                                                </datalist>
-                                                <TextInput
-                                                  value={field.value}
-                                                  onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
-                                                  placeholder="Value"
-                                                  className="px-2 text-sm"
-                                                />
-                                                <button
-                                                  type="button"
-                                                  onClick={() => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: field.mode === "target" ? "memberInput" : "target" })}
-                                                  className="h-10 rounded-xl border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 sm:text-sm"
-                                                  title={field.mode === "target" ? "Read Only" : "Input"}
-                                                >
-                                                  {field.mode === "target" ? "Read" : "Input"}
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}
-                                                  className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-sm font-semibold text-zinc-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-                                                  aria-label="Remove metric field"
-                                                  title="Remove field"
-                                                >
-                                                  ×
-                                                </button>
-                                                {isMetricFocused ? (
-                                                  <div className="col-span-full flex flex-wrap gap-1 pt-1">
-                                                    {[...TRACKER_METRIC_OPTIONS, 'Duration', 'Minutes', 'Seconds', 'Speed', 'Pace']
-                                                      .filter((metricOption) => !field.metric.trim() || metricOption.toLowerCase().includes(field.metric.trim().toLowerCase()))
-                                                      .map((metricOption) => (
-                                                        <button
-                                                          key={metricOption}
-                                                          type="button"
-                                                          onMouseDown={(event) => event.preventDefault()}
-                                                          onClick={() => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: metricOption })}
-                                                          className="rounded-full border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600 hover:border-zinc-400 hover:text-zinc-900"
-                                                        >
-                                                          {metricOption}
-                                                        </button>
-                                                      ))}
-                                                  </div>
-                                                ) : null}
-                                              </div>
-                                            );
-                                          })}
+                                          {getExercisePremiumFields(exercise, block.type).map((field) => (
+                                            <div key={field.id} className="grid grid-cols-[3.25rem_minmax(0,1fr)_3.75rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => setPremiumMetricPicker({ routineId: selectedRoutine.id, blockId: block.id, exerciseId: exercise.id, fieldId: field.id, query: field.metric })}
+                                                className="h-10 min-w-0 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2 text-center text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50"
+                                                title={field.metric || "Metric"}
+                                              >
+                                                <span className="block truncate">{formatPremiumMetricDisplayName(field.metric) || "Metr"}</span>
+                                              </button>
+                                              <TextInput
+                                                value={field.value}
+                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
+                                                placeholder="Value"
+                                                className="min-w-0 px-2 text-sm"
+                                              />
+                                              <button
+                                                type="button"
+                                                onClick={() => setPremiumModePicker({ routineId: selectedRoutine.id, blockId: block.id, exerciseId: exercise.id, fieldId: field.id })}
+                                                className="h-10 min-w-0 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50"
+                                                title={field.mode === "target" ? "Read Only" : "Input"}
+                                              >
+                                                {field.mode === "target" ? "Read" : "Input"}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}
+                                                className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-sm font-semibold text-zinc-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                                                aria-label="Remove metric field"
+                                                title="Remove field"
+                                              >
+                                                ×
+                                              </button>
+                                            </div>
+                                          ))}
                                         </div>
 
                                       </div>
@@ -10144,6 +10118,97 @@ export default function App() {
                 onClose={closeTrackerTutorial}
                 onNeverShowAgain={closeTrackerTutorial}
               />
+
+              {premiumMetricPicker && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">Choose Metric</div>
+                        <div className="mt-1 text-sm text-zinc-500">Select a preset metric or type a custom metric name.</div>
+                      </div>
+                      <SmallButton onClick={() => setPremiumMetricPicker(null)}>Close</SmallButton>
+                    </div>
+                    <div className="mt-4">
+                      <Label>Metric Search / Custom Name</Label>
+                      <TextInput
+                        value={premiumMetricPicker.query}
+                        onChange={(event) => setPremiumMetricPicker({ ...premiumMetricPicker, query: event.target.value })}
+                        placeholder="Type metric name"
+                      />
+                    </div>
+                    <div className="mt-4 max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+                      {PREMIUM_METRIC_OPTIONS
+                        .filter((metricOption) => !premiumMetricPicker.query.trim() || metricOption.toLowerCase().includes(premiumMetricPicker.query.trim().toLowerCase()))
+                        .map((metricOption) => (
+                          <button
+                            key={metricOption}
+                            type="button"
+                            onClick={() => {
+                              updateExercisePremiumField(premiumMetricPicker.routineId, premiumMetricPicker.blockId, premiumMetricPicker.exerciseId, premiumMetricPicker.fieldId, { metric: metricOption });
+                              setPremiumMetricPicker(null);
+                            }}
+                            className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-3 text-left text-sm font-semibold text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50"
+                          >
+                            <span>{metricOption}</span>
+                            <span className="text-xs text-zinc-400">Select</span>
+                          </button>
+                        ))}
+                      {!PREMIUM_METRIC_OPTIONS.some((metricOption) => metricOption.toLowerCase() === premiumMetricPicker.query.trim().toLowerCase()) && premiumMetricPicker.query.trim() ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateExercisePremiumField(premiumMetricPicker.routineId, premiumMetricPicker.blockId, premiumMetricPicker.exerciseId, premiumMetricPicker.fieldId, { metric: premiumMetricPicker.query.trim() });
+                            setPremiumMetricPicker(null);
+                          }}
+                          className="flex w-full items-center justify-between rounded-xl border border-zinc-300 bg-zinc-900 px-3 py-3 text-left text-sm font-semibold text-white hover:bg-zinc-800"
+                        >
+                          <span>Use “{premiumMetricPicker.query.trim()}”</span>
+                          <span className="text-xs text-zinc-300">Custom</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {premiumModePicker && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                  <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-bold text-zinc-900">Field Mode</div>
+                        <div className="mt-1 text-sm text-zinc-500">Choose whether this field is trainer-provided or member-entered.</div>
+                      </div>
+                      <SmallButton onClick={() => setPremiumModePicker(null)}>Close</SmallButton>
+                    </div>
+                    <div className="mt-5 grid gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateExercisePremiumField(premiumModePicker.routineId, premiumModePicker.blockId, premiumModePicker.exerciseId, premiumModePicker.fieldId, { mode: "target" });
+                          setPremiumModePicker(null);
+                        }}
+                        className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-left text-sm font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50"
+                      >
+                        Read Only
+                        <span className="mt-1 block text-xs font-normal text-zinc-500">Trainer sets this value. Member sees it but does not edit it.</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateExercisePremiumField(premiumModePicker.routineId, premiumModePicker.blockId, premiumModePicker.exerciseId, premiumModePicker.fieldId, { mode: "memberInput" });
+                          setPremiumModePicker(null);
+                        }}
+                        className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-left text-sm font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50"
+                      >
+                        Input
+                        <span className="mt-1 block text-xs font-normal text-zinc-500">Member records this value when entering results.</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {bulkExerciseWorkoutId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
