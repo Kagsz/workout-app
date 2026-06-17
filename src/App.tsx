@@ -933,35 +933,9 @@ const getMuscleGroupSortIndex = (group: MuscleGroup) => {
 };
 
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds", "Completion"];
-const PREMIUM_METRIC_DISPLAY_LABELS: Record<string, string> = {
-  weight: "Wgt",
-  reps: "Reps",
-  repetitions: "Reps",
-  sets: "Sets",
-  time: "Time",
-  duration: "Dur",
-  distance: "Dist",
-  calories: "Cal",
-  rpe: "RPE",
-  "heart rate": "HR",
-  steps: "Step",
-  laps: "Laps",
-  yards: "Yds",
-  rounds: "Rds",
-  completion: "Done",
-  minutes: "Min",
-  minute: "Min",
-  seconds: "Sec",
-  second: "Sec",
-  speed: "Spd",
-  pace: "Pace",
-};
-
 const formatPremiumMetricDisplayName = (metric: string) => {
   const trimmed = String(metric || "").trim();
   if (!trimmed) return "";
-  const normalized = trimmed.toLowerCase();
-  if (PREMIUM_METRIC_DISPLAY_LABELS[normalized]) return PREMIUM_METRIC_DISPLAY_LABELS[normalized];
   return trimmed.length <= 4 ? trimmed : trimmed.slice(0, 4);
 };
 
@@ -9214,25 +9188,27 @@ export default function App() {
                                 </div>
                               </div>
 
-                              <div className="mb-4 grid gap-3 md:grid-cols-[1fr_140px_160px]">
+                              <div className="mb-4 space-y-3">
                                 <div>
                                   <Label>Block Title</Label>
                                   <TextInput value={block.title} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { title: e.target.value })} />
                                 </div>
-                                <div>
-                                  <Label>Duration</Label>
-                                  <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 mins" />
-                                </div>
-                                <div>
-                                  <Label>Flow</Label>
-                                  <select
-                                    value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
-                                    onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
-                                  >
-                                    <option value="na">N/A</option>
-                                    <option value="alternating">Alternating</option>
-                                  </select>
+                                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
+                                  <div>
+                                    <Label>Duration</Label>
+                                    <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 mins" />
+                                  </div>
+                                  <div>
+                                    <Label>Flow</Label>
+                                    <select
+                                      value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
+                                      onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
+                                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                    >
+                                      <option value="na">N/A</option>
+                                      <option value="alternating">Alternating</option>
+                                    </select>
+                                  </div>
                                 </div>
                               </div>
 
@@ -9259,11 +9235,11 @@ export default function App() {
                                             const metricInputId = `premium-metric-options-${field.id}`;
                                             const isMetricFocused = focusedPremiumMetricFieldId === field.id;
                                             return (
-                                              <div key={field.id} className="grid grid-cols-[4.75rem_minmax(0,1fr)_5.25rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                                              <div key={field.id} className="grid grid-cols-[4.25rem_minmax(0,1fr)_4.5rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                                                 <TextInput
                                                   value={isMetricFocused ? field.metric : formatPremiumMetricDisplayName(field.metric)}
                                                   onFocus={() => setFocusedPremiumMetricFieldId(field.id)}
-                                                  onBlur={() => setFocusedPremiumMetricFieldId((current) => current === field.id ? null : current)}
+                                                  onBlur={() => window.setTimeout(() => setFocusedPremiumMetricFieldId((current) => current === field.id ? null : current), 120)}
                                                   onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
                                                   placeholder="Metric"
                                                   list={metricInputId}
@@ -9271,10 +9247,7 @@ export default function App() {
                                                   className="px-2 text-center text-xs font-semibold sm:text-sm"
                                                 />
                                                 <datalist id={metricInputId}>
-                                                  {TRACKER_METRIC_OPTIONS.map((metricOption) => (
-                                                    <option key={metricOption} value={metricOption} />
-                                                  ))}
-                                                  {['Duration', 'Minutes', 'Seconds', 'Speed', 'Pace'].map((metricOption) => (
+                                                  {[...TRACKER_METRIC_OPTIONS, 'Duration', 'Minutes', 'Seconds', 'Speed', 'Pace'].map((metricOption) => (
                                                     <option key={metricOption} value={metricOption} />
                                                   ))}
                                                 </datalist>
@@ -9284,15 +9257,14 @@ export default function App() {
                                                   placeholder="Value"
                                                   className="px-2 text-sm"
                                                 />
-                                                <select
-                                                  value={field.mode}
-                                                  onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: e.target.value as ExerciseMetricMode })}
-                                                  className="h-10 rounded-xl border border-zinc-300 bg-white px-2 text-xs font-semibold sm:text-sm"
+                                                <button
+                                                  type="button"
+                                                  onClick={() => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: field.mode === "target" ? "memberInput" : "target" })}
+                                                  className="h-10 rounded-xl border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 sm:text-sm"
                                                   title={field.mode === "target" ? "Read Only" : "Input"}
                                                 >
-                                                  <option value="target">Read</option>
-                                                  <option value="memberInput">Input</option>
-                                                </select>
+                                                  {field.mode === "target" ? "Read" : "Input"}
+                                                </button>
                                                 <button
                                                   type="button"
                                                   onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}
@@ -9302,6 +9274,23 @@ export default function App() {
                                                 >
                                                   ×
                                                 </button>
+                                                {isMetricFocused ? (
+                                                  <div className="col-span-full flex flex-wrap gap-1 pt-1">
+                                                    {[...TRACKER_METRIC_OPTIONS, 'Duration', 'Minutes', 'Seconds', 'Speed', 'Pace']
+                                                      .filter((metricOption) => !field.metric.trim() || metricOption.toLowerCase().includes(field.metric.trim().toLowerCase()))
+                                                      .map((metricOption) => (
+                                                        <button
+                                                          key={metricOption}
+                                                          type="button"
+                                                          onMouseDown={(event) => event.preventDefault()}
+                                                          onClick={() => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: metricOption })}
+                                                          className="rounded-full border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600 hover:border-zinc-400 hover:text-zinc-900"
+                                                        >
+                                                          {metricOption}
+                                                        </button>
+                                                      ))}
+                                                  </div>
+                                                ) : null}
                                               </div>
                                             );
                                           })}
@@ -10569,13 +10558,11 @@ export default function App() {
                             id={`premium-input-block-${block.id}`}
                             className={`rounded-2xl border p-4 ${premiumInputFocusedBlockId === block.id ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
                           >
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
-                                {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
-                                {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
-                              </div>
-                              <SmallButton onClick={() => setPremiumInputFocusedBlockId(block.id)}>Input Data</SmallButton>
+                            <div className="mb-3 flex flex-wrap items-center gap-2">
+                              <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
+                              {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                              {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
+                              {premiumInputFocusedBlockId === block.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                               {!!block.notes && <div className="basis-full text-sm text-zinc-500">{block.notes}</div>}
                             </div>
 
@@ -10597,11 +10584,11 @@ export default function App() {
                                     <div className="mt-3 grid grid-cols-2 gap-3">
                                       {getExerciseInputFields(exercise, block.type).map((field) => (
                                         <div key={field.id}>
-                                          <Label>{formatPremiumMetricDisplayName(field.metric || "Outcome")}</Label>
+                                          <Label>{field.metric || "Outcome"}</Label>
                                           <TextInput
                                             value={getSessionEntryValueForMetric(draftEntry, field.metric, block.type)}
                                             onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value, field.metric)}
-                                            placeholder={`${formatPremiumMetricDisplayName(field.metric || "Outcome")} input`}
+                                            placeholder={`${field.metric || "Outcome"} input`}
                                           />
                                         </div>
                                       ))}
