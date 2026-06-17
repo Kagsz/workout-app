@@ -933,6 +933,12 @@ const getMuscleGroupSortIndex = (group: MuscleGroup) => {
 };
 
 const TRACKER_METRIC_OPTIONS: TrackerMetric[] = ["Weight", "Reps", "Sets", "Time", "Distance", "Calories", "RPE", "Heart Rate", "Steps", "Laps", "Yards", "Rounds", "Completion"];
+const formatPremiumMetricDisplayName = (metric: string) => {
+  const trimmed = String(metric || "").trim();
+  if (!trimmed) return "";
+  return trimmed.length <= 4 ? trimmed : trimmed.slice(0, 4);
+};
+
 const WORKOUT_QUICK_FILL_OPTIONS = ["Leg Workout", "Upper Body Workout", "Core Workout", "Cardio Workout", "Full Body Workout"];
 
 const getTodayInputDate = () => {
@@ -6118,6 +6124,7 @@ export default function App() {
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
   const [premiumInputFocusedBlockId, setPremiumInputFocusedBlockId] = useState<string | null>(null);
+  const [focusedPremiumMetricFieldId, setFocusedPremiumMetricFieldId] = useState<string | null>(null);
   const [showTrackerTutorial, setShowTrackerTutorial] = useState(false);
   const [trackerTutorialStepIndex, setTrackerTutorialStepIndex] = useState(0);
   const [trackerTutorialDismissed, setTrackerTutorialDismissed] = useState(() => {
@@ -9148,18 +9155,14 @@ export default function App() {
                   <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible defaultOpen={false}>
                     {selectedRoutine ? (
                       <div className="space-y-5">
-                        <div className="grid gap-3 md:grid-cols-[1fr_auto_auto_auto]">
+                        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                           <div>
                             <Label>Routine Label</Label>
                             <TextInput value={selectedRoutine.label} onChange={(e) => updateRoutine(selectedRoutine.id, { label: e.target.value })} />
                           </div>
-                          <div className="self-end">
-                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "paired")}>+ Paired Block</SmallButton>
-                          </div>
-                          <div className="self-end">
-                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "single")}>+ Single Block</SmallButton>
-                          </div>
-                          <div className="self-end">
+                          <div className="flex flex-wrap items-end gap-2 self-end">
+                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "paired")}>+ Paired</SmallButton>
+                            <SmallButton onClick={() => addBlock(selectedRoutine.id, "single")}>+ Single</SmallButton>
                             <SmallButton
                               onClick={() => {
                                 const confirmReset = window.confirm("Delete all blocks in this routine and start fresh?");
@@ -9168,7 +9171,7 @@ export default function App() {
                               }}
                               className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                             >
-                              Clear Blocks
+                              Clear
                             </SmallButton>
                           </div>
                         </div>
@@ -9179,35 +9182,33 @@ export default function App() {
                               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                                 <div className="text-sm font-semibold text-zinc-500">Block {index + 1}</div>
                                 <div className="flex flex-wrap gap-2">
-                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "up")} disabled={index === 0}>Move Up</SmallButton>
-                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "down")} disabled={index === selectedRoutine.blocks.length - 1}>Move Down</SmallButton>
-                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete Block</SmallButton>
+                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "up")} disabled={index === 0} title="Move block up">↑</SmallButton>
+                                  <SmallButton onClick={() => moveBlock(selectedRoutine.id, block.id, "down")} disabled={index === selectedRoutine.blocks.length - 1} title="Move block down">↓</SmallButton>
+                                  <SmallButton onClick={() => deleteBlock(selectedRoutine.id, block.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton>
                                 </div>
                               </div>
 
-                              <div className="mb-4 grid gap-3 md:grid-cols-4">
+                              <div className="mb-4 space-y-3">
                                 <div>
                                   <Label>Block Title</Label>
                                   <TextInput value={block.title} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { title: e.target.value })} />
                                 </div>
-                                <div>
-                                  <Label>Block Type</Label>
-                                  <div className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700">{block.type === "paired" ? "Paired Block" : "Single Block"}</div>
-                                </div>
-                                <div>
-                                  <Label>Duration</Label>
-                                  <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 minutes" />
-                                </div>
-                                <div>
-                                  <Label>Block Flow</Label>
-                                  <select
-                                    value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
-                                    onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
-                                  >
-                                    <option value="na">N/A</option>
-                                    <option value="alternating">Alternating</option>
-                                  </select>
+                                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
+                                  <div>
+                                    <Label>Duration</Label>
+                                    <TextInput value={block.duration} onChange={(e) => updateBlock(selectedRoutine.id, block.id, { duration: e.target.value })} placeholder="10 mins" />
+                                  </div>
+                                  <div>
+                                    <Label>Flow</Label>
+                                    <select
+                                      value={block.interactionMode || (block.type === "paired" ? "alternating" : "na")}
+                                      onChange={(e) => updateBlock(selectedRoutine.id, block.id, { interactionMode: e.target.value as "alternating" | "na" })}
+                                      className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
+                                    >
+                                      <option value="na">N/A</option>
+                                      <option value="alternating">Alternating</option>
+                                    </select>
+                                  </div>
                                 </div>
                               </div>
 
@@ -9230,40 +9231,71 @@ export default function App() {
                                           <SmallButton onClick={() => addExercisePremiumField(selectedRoutine.id, block.id, exercise.id)}>+ Field</SmallButton>
                                         </div>
                                         <div className="space-y-2">
-                                          {getExercisePremiumFields(exercise, block.type).map((field) => (
-                                            <div key={field.id} className="grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                                              <TextInput
-                                                value={field.metric}
-                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
-                                                placeholder="Metric"
-                                              />
-                                              <TextInput
-                                                value={field.value}
-                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
-                                                placeholder="Target value"
-                                              />
-                                              <select
-                                                value={field.mode}
-                                                onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: e.target.value as ExerciseMetricMode })}
-                                                className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm"
-                                              >
-                                                <option value="target">Target / Read Only</option>
-                                                <option value="memberInput">Member Input</option>
-                                              </select>
-                                              <SmallButton onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}>Remove</SmallButton>
-                                            </div>
-                                          ))}
+                                          {getExercisePremiumFields(exercise, block.type).map((field) => {
+                                            const metricInputId = `premium-metric-options-${field.id}`;
+                                            const isMetricFocused = focusedPremiumMetricFieldId === field.id;
+                                            return (
+                                              <div key={field.id} className="grid grid-cols-[4.25rem_minmax(0,1fr)_4.5rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
+                                                <TextInput
+                                                  value={isMetricFocused ? field.metric : formatPremiumMetricDisplayName(field.metric)}
+                                                  onFocus={() => setFocusedPremiumMetricFieldId(field.id)}
+                                                  onBlur={() => window.setTimeout(() => setFocusedPremiumMetricFieldId((current) => current === field.id ? null : current), 120)}
+                                                  onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: e.target.value })}
+                                                  placeholder="Metric"
+                                                  list={metricInputId}
+                                                  title={field.metric}
+                                                  className="px-2 text-center text-xs font-semibold sm:text-sm"
+                                                />
+                                                <datalist id={metricInputId}>
+                                                  {[...TRACKER_METRIC_OPTIONS, 'Duration', 'Minutes', 'Seconds', 'Speed', 'Pace'].map((metricOption) => (
+                                                    <option key={metricOption} value={metricOption} />
+                                                  ))}
+                                                </datalist>
+                                                <TextInput
+                                                  value={field.value}
+                                                  onChange={(e) => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { value: e.target.value })}
+                                                  placeholder="Value"
+                                                  className="px-2 text-sm"
+                                                />
+                                                <button
+                                                  type="button"
+                                                  onClick={() => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { mode: field.mode === "target" ? "memberInput" : "target" })}
+                                                  className="h-10 rounded-xl border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50 sm:text-sm"
+                                                  title={field.mode === "target" ? "Read Only" : "Input"}
+                                                >
+                                                  {field.mode === "target" ? "Read" : "Input"}
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => removeExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id)}
+                                                  className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-white text-sm font-semibold text-zinc-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                                                  aria-label="Remove metric field"
+                                                  title="Remove field"
+                                                >
+                                                  ×
+                                                </button>
+                                                {isMetricFocused ? (
+                                                  <div className="col-span-full flex flex-wrap gap-1 pt-1">
+                                                    {[...TRACKER_METRIC_OPTIONS, 'Duration', 'Minutes', 'Seconds', 'Speed', 'Pace']
+                                                      .filter((metricOption) => !field.metric.trim() || metricOption.toLowerCase().includes(field.metric.trim().toLowerCase()))
+                                                      .map((metricOption) => (
+                                                        <button
+                                                          key={metricOption}
+                                                          type="button"
+                                                          onMouseDown={(event) => event.preventDefault()}
+                                                          onClick={() => updateExercisePremiumField(selectedRoutine.id, block.id, exercise.id, field.id, { metric: metricOption })}
+                                                          className="rounded-full border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600 hover:border-zinc-400 hover:text-zinc-900"
+                                                        >
+                                                          {metricOption}
+                                                        </button>
+                                                      ))}
+                                                  </div>
+                                                ) : null}
+                                              </div>
+                                            );
+                                          })}
                                         </div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                          <div>
-                                            <Label>Legacy Target</Label>
-                                            <TextInput value={exercise.target} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { target: e.target.value })} />
-                                          </div>
-                                          <div>
-                                            <Label>Legacy Metric</Label>
-                                            <TextInput value={exercise.metric} onChange={(e) => updateExercise(selectedRoutine.id, block.id, exercise.id, { metric: e.target.value })} />
-                                          </div>
-                                        </div>
+
                                       </div>
                                     </div>
                                   </div>
@@ -10461,7 +10493,7 @@ export default function App() {
                                 {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
                               </div>
                             </div>
-                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            <div className="mt-3 grid grid-cols-2 gap-2">
                               <SmallButton onClick={() => openMemberInputScreen(latestSelectedRoutineSession, block.id)}>Input Data</SmallButton>
                               <SmallButton onClick={() => openGraph(selectedRoutine.id, block.id)}>View Graph</SmallButton>
                             </div>
@@ -10492,11 +10524,7 @@ export default function App() {
               {role === "member" && screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
                 <SectionCard title={`${selectedRoutine.label} Results`}>
                   <div className="space-y-4">
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                      Premium member input is outcome-only. Exercise names, targets, metrics, and notes come from the trainer-built program.
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid grid-cols-[minmax(0,2fr)_minmax(80px,1fr)] gap-3">
                       <div>
                         <Label>Date</Label>
                         <TextInput
@@ -10530,26 +10558,20 @@ export default function App() {
                             id={`premium-input-block-${block.id}`}
                             className={`rounded-2xl border p-4 ${premiumInputFocusedBlockId === block.id ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
                           >
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
-                                {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
-                                {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
-                                {premiumInputFocusedBlockId === block.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Input</span> : null}
-                              </div>
-                              <SmallButton onClick={() => setPremiumInputFocusedBlockId(block.id)}>Input Data</SmallButton>
+                            <div className="mb-3 flex flex-wrap items-center gap-2">
+                              <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
+                              {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                              {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
+                              {premiumInputFocusedBlockId === block.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                               {!!block.notes && <div className="basis-full text-sm text-zinc-500">{block.notes}</div>}
                             </div>
 
                             <div className="space-y-3">
-                              {block.exercises.map((exercise, index) => {
+                              {block.exercises.map((exercise) => {
                                 const draftEntry = draftBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
                                 return (
                                   <div key={exercise.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                                      {block.type === "paired" ? `Exercise ${index + 1}` : "Single Exercise"}
-                                    </div>
-                                    <div className="mt-1 text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                    <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
                                     <div className="mt-2 space-y-1 text-sm text-zinc-600">
                                       {getExerciseTargetFields(exercise, block.type).length ? (
                                         getExerciseTargetFields(exercise, block.type).map((field) => (
@@ -10559,7 +10581,7 @@ export default function App() {
                                         <div>Target: {exercise.target || "—"} {exercise.metric || ""}</div>
                                       )}
                                     </div>
-                                    <div className="mt-3 space-y-3">
+                                    <div className="mt-3 grid grid-cols-2 gap-3">
                                       {getExerciseInputFields(exercise, block.type).map((field) => (
                                         <div key={field.id}>
                                           <Label>{field.metric || "Outcome"}</Label>
