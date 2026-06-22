@@ -6688,20 +6688,6 @@ export default function App() {
     [selectedRoutine, selectedBlockId]
   );
 
-  const matchingSavedSessions = useMemo(() => {
-    if (!selectedProgram || !selectedRoutine || !selectedMember) return [];
-
-    return [...savedSessions]
-      .filter(
-        (session) =>
-          session.programId === selectedProgram.id &&
-          session.routineId === selectedRoutine.id &&
-          session.memberId === selectedMember.id
-      )
-      .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt));
-  }, [savedSessions, selectedMember, selectedProgram, selectedRoutine]);
-
-  const latestSavedSession = matchingSavedSessions[0] || null;
 
 
   const premiumProgramInputActive = canMemberEnterProgramResults(selectedProgram, selectedMember);
@@ -8427,26 +8413,6 @@ export default function App() {
         ),
       };
     });
-  };
-
-  const saveSession = () => {
-    if (!sessionDraft || !selectedProgram || !selectedRoutine || !selectedMember) return;
-
-    const trimmedDate = sessionDraft.date.trim();
-    const trimmedSessionNumber = sessionDraft.sessionNumber.trim();
-
-    if (!trimmedDate || !trimmedSessionNumber) return;
-
-    const savedSession: SavedSession = {
-      ...sessionDraft,
-      date: trimmedDate,
-      sessionNumber: trimmedSessionNumber,
-      id: uid(),
-      createdAt: new Date().toISOString(),
-    };
-
-    setSavedSessions((prev) => [...prev, savedSession]);
-    setSessionDraft(createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id));
   };
 
   const createMemberInputDraft = (existingSession?: SavedSession | null): SessionDraft | null => {
