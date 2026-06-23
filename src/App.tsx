@@ -82,6 +82,7 @@ type TrackerEntry = {
   entryDate: string;
   createdAt: string;
   values: Record<string, string>;
+  circuitIndex?: number;
 };
 
 type TrackerExercise = {
@@ -110,6 +111,8 @@ type TrackerWorkout = {
   exerciseSlots?: TrackerWorkoutExerciseSlot[];
   startedAt?: string;
   completedAt?: string;
+  circuitTarget?: number;
+  currentCircuit?: number;
   archived?: boolean;
   createdAt: string;
 };
@@ -973,8 +976,22 @@ const normalizeTrackerWorkout = (workout: TrackerWorkout): TrackerWorkout => {
     ...workout,
     exerciseIds: exerciseSlots.map((slot) => slot.exerciseId),
     exerciseSlots,
+    circuitTarget: Math.max(1, Number(workout.circuitTarget || 1) || 1),
+    currentCircuit: Math.max(1, Number(workout.currentCircuit || 1) || 1),
   };
 };
+
+const getTrackerWorkoutCircuitTarget = (workout: TrackerWorkout | null | undefined) =>
+  Math.max(1, Number(workout?.circuitTarget || 1) || 1);
+
+const getTrackerWorkoutCurrentCircuit = (workout: TrackerWorkout | null | undefined) => {
+  const target = getTrackerWorkoutCircuitTarget(workout);
+  const current = Math.max(1, Number(workout?.currentCircuit || 1) || 1);
+  return Math.min(current, target);
+};
+
+const isTrackerEntryForCircuit = (entry: TrackerEntry, circuitIndex: number) =>
+  Math.max(1, Number(entry.circuitIndex || 1) || 1) === circuitIndex;
 
 const getTrackerContextKey = (exerciseId: string, workoutSlotId?: string | null) => workoutSlotId ? `workout-slot:${workoutSlotId}` : exerciseId;
 
@@ -6261,17 +6278,18 @@ export default function App() {
     [activeTrackerCycles, selectedTrackerCycleId]
   );
 
-  const hasWorkoutSlotEntrySinceStart = (slot: TrackerWorkoutExerciseSlot, workout: TrackerWorkout) => {
+  const hasWorkoutSlotEntrySinceStart = (slot: TrackerWorkoutExerciseSlot, workout: TrackerWorkout, circuitIndex = getTrackerWorkoutCurrentCircuit(workout)) => {
     if (!workout.startedAt) return false;
     const startedTime = getSafeDateTime(workout.startedAt);
     const startedDate = workout.startedAt.slice(0, 10);
-    return Boolean((slot.entries || []).find((entry) => getSafeDateTime(entry.createdAt || entry.entryDate) >= startedTime || String(entry.entryDate || "") >= startedDate));
+    return Boolean((slot.entries || []).find((entry) => isTrackerEntryForCircuit(entry, circuitIndex) && (getSafeDateTime(entry.createdAt || entry.entryDate) >= startedTime || String(entry.entryDate || "") >= startedDate)));
   };
 
   const getWorkoutFirstIncompleteSlotId = (workout: TrackerWorkout | null | undefined) => {
     if (!workout?.startedAt || workout.completedAt) return null;
     const normalized = normalizeTrackerWorkout(workout);
-    const firstOpenSlot = (normalized.exerciseSlots || []).find((slot) => !hasWorkoutSlotEntrySinceStart(slot, normalized));
+    const currentCircuit = getTrackerWorkoutCurrentCircuit(normalized);
+    const firstOpenSlot = (normalized.exerciseSlots || []).find((slot) => !hasWorkoutSlotEntrySinceStart(slot, normalized, currentCircuit));
     return firstOpenSlot?.id || null;
   };
 
@@ -6631,7 +6649,8 @@ export default function App() {
     const contextKey = getTrackerContextKey(pendingTrackerEntryExercise.id, pendingTrackerWorkoutSlotId);
     const entryDate = trackerEntryDateByExercise[contextKey] || getTodayInputDate();
     if (pendingTrackerWorkoutSlot?.slot) {
-      return (pendingTrackerWorkoutSlot.slot.entries || []).find((entry) => entry.entryDate === entryDate) || null;
+      const circuitIndex = getTrackerWorkoutCurrentCircuit(normalizeTrackerWorkout(pendingTrackerWorkoutSlot.workout));
+      return (pendingTrackerWorkoutSlot.slot.entries || []).find((entry) => entry.entryDate === entryDate && isTrackerEntryForCircuit(entry, circuitIndex)) || null;
     }
     return (pendingTrackerEntryExercise.entries || []).find((entry) => entry.entryDate === entryDate) || null;
   }, [pendingTrackerEntryExercise, pendingTrackerWorkoutSlot, pendingTrackerWorkoutSlotId, trackerEntryDateByExercise]);
@@ -7826,11 +7845,14 @@ export default function App() {
     const exercise = trackerExercises.find((item) => item.id === exerciseId);
     const metrics = exercise?.metrics || [];
     const values = Object.fromEntries(metrics.map((metric) => [metric, isCompletionMetric(metric) && isTruthyCompletionValue(draftValues[metric] || "") ? "Completed" : String(draftValues[metric] || "").trim()])) as Record<string, string>;
+    const activeWorkoutForEntry = pendingTrackerWorkoutSlot?.workout ? normalizeTrackerWorkout(pendingTrackerWorkoutSlot.workout) : null;
+    const activeCircuitIndex = activeWorkoutForEntry ? getTrackerWorkoutCurrentCircuit(activeWorkoutForEntry) : undefined;
     const entry: TrackerEntry = {
       id: pendingTrackerExistingEntry?.id || uid(),
       entryDate,
       createdAt: new Date().toISOString(),
       values,
+      circuitIndex: activeCircuitIndex,
     };
 
     if (pendingTrackerWorkoutSlotId) {
@@ -7839,7 +7861,7 @@ export default function App() {
           const normalized = normalizeTrackerWorkout(workout);
           const nextSlots = (normalized.exerciseSlots || []).map((slot) => {
             if (slot.id !== pendingTrackerWorkoutSlotId) return slot;
-            const existingEntry = (slot.entries || []).find((item) => item.entryDate === entryDate);
+            const existingEntry = (slot.entries || []).find((item) => item.entryDate === entryDate && isTrackerEntryForCircuit(item, activeCircuitIndex || 1));
             return {
               ...slot,
               entries: existingEntry
@@ -7850,8 +7872,13 @@ export default function App() {
           if (normalized.id !== pendingTrackerWorkoutSlot?.workout.id) return workout;
           const startedAt = normalized.startedAt || new Date().toISOString();
           const updatedWorkout = { ...normalized, startedAt, completedAt: undefined, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
-          const allSlotsComplete = Boolean(updatedWorkout.startedAt) && (nextSlots.length > 0) && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout));
-          return allSlotsComplete ? { ...updatedWorkout, completedAt: new Date().toISOString() } : updatedWorkout;
+          const currentCircuit = getTrackerWorkoutCurrentCircuit(updatedWorkout);
+          const targetCircuit = getTrackerWorkoutCircuitTarget(updatedWorkout);
+          const allSlotsComplete = Boolean(updatedWorkout.startedAt) && (nextSlots.length > 0) && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout, currentCircuit));
+
+          if (!allSlotsComplete) return updatedWorkout;
+          if (currentCircuit < targetCircuit) return { ...updatedWorkout, currentCircuit: currentCircuit + 1, completedAt: undefined };
+          return { ...updatedWorkout, completedAt: new Date().toISOString(), currentCircuit: targetCircuit };
         })
       );
     } else {
@@ -7954,7 +7981,7 @@ export default function App() {
   const startTrackerWorkout = (workoutId: string) => {
     const now = new Date().toISOString();
     setTrackerWorkouts((current) =>
-      current.map((workout) => workout.id === workoutId ? { ...normalizeTrackerWorkout(workout), startedAt: now, completedAt: undefined } : workout)
+      current.map((workout) => workout.id === workoutId ? { ...normalizeTrackerWorkout(workout), startedAt: now, completedAt: undefined, currentCircuit: getTrackerWorkoutCurrentCircuit(workout), circuitTarget: getTrackerWorkoutCircuitTarget(workout) } : workout)
     );
     openTrackerWorkout(workoutId);
   };
@@ -7962,6 +7989,18 @@ export default function App() {
   const markTrackerWorkoutComplete = (workoutId: string) => {
     setTrackerWorkouts((current) =>
       current.map((workout) => workout.id === workoutId ? { ...normalizeTrackerWorkout(workout), completedAt: new Date().toISOString(), startedAt: workout.startedAt || new Date().toISOString() } : workout)
+    );
+  };
+
+  const updateTrackerWorkoutCircuitTarget = (workoutId: string, delta: number) => {
+    setTrackerWorkouts((current) =>
+      current.map((workout) => {
+        if (workout.id !== workoutId) return workout;
+        const normalized = normalizeTrackerWorkout(workout);
+        const nextTarget = Math.max(1, getTrackerWorkoutCircuitTarget(normalized) + delta);
+        const nextCurrent = Math.min(getTrackerWorkoutCurrentCircuit(normalized), nextTarget);
+        return { ...normalized, circuitTarget: nextTarget, currentCircuit: nextCurrent, completedAt: undefined };
+      })
     );
   };
 
@@ -8595,44 +8634,51 @@ export default function App() {
     return inputMetric || (block.type === "single" ? "Performance" : "Sets");
   };
 
-  const getProgramBlockHeaderLabel = (block: Block, index: number) => {
-    const letter = String.fromCharCode(65 + index);
-    const typeLabel = block.type === "paired" ? `Paired ${letter}` : `Single ${letter}`;
-    const details = [
-      formatDurationShort(block.duration),
-      getBlockInteractionLabel(block) ? "Alt." : "",
-      getProgramBlockMetricLabel(block),
-    ].filter(Boolean);
-    return `${typeLabel}${details.length ? ` - ${details.join(" / ")}` : ""}`;
+  const getProgramDesignBlockRows = (routine: Routine) => {
+    let pairedIndex = 0;
+    let singleIndex = 0;
+
+    return routine.blocks.map((block) => {
+      const letterIndex = block.type === "paired" ? pairedIndex++ : singleIndex++;
+      const letter = String.fromCharCode(65 + letterIndex);
+      const typeLabel = block.type === "paired" ? `Paired ${letter}` : `Single ${letter}`;
+      const details = [
+        formatDurationShort(block.duration),
+        getBlockInteractionLabel(block) ? "Alt." : "",
+        getProgramBlockMetricLabel(block),
+      ].filter(Boolean);
+
+      return {
+        block,
+        prefix: block.type === "paired" ? "•" : "-",
+        label: `${typeLabel}${details.length ? ` • ${details.join(" • ")}` : ""}`,
+      };
+    });
   };
 
   const renderReadOnlyProgramDesign = (program: Program) => (
     <div className="space-y-4">
       {program.routines.map((routine) => (
         <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
-          <div className="mb-3 text-sm font-semibold text-zinc-900">{routine.label}</div>
-          <div className="space-y-3">
-            {routine.blocks.map((block, blockIndex) => (
-              <div key={block.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                <div className="text-sm font-semibold text-zinc-900">{getProgramBlockHeaderLabel(block, blockIndex)}</div>
-                {block.notes ? <div className="mt-1 text-xs text-zinc-500">{block.notes}</div> : null}
-                <div className="mt-2 space-y-2">
-                  {block.exercises.map((exercise, exerciseIndex) => {
-                    const targetFields = getExerciseTargetFields(exercise, block.type);
-                    const inputFields = getExerciseInputFields(exercise, block.type);
-                    const fieldSummary = [
-                      ...targetFields.map((field) => formatPremiumFieldLabel(field)),
-                      ...inputFields.map((field) => `${field.metric || "Input"} input`),
-                    ].filter(Boolean).join(" • ");
-
-                    return (
-                      <div key={exercise.id} className="text-sm text-zinc-700">
-                        <span className="font-medium text-zinc-900">{block.type === "paired" ? `Ex${exerciseIndex + 1}: ` : "Ex: "}</span>
-                        {exercise.name || "Exercise"}
-                        {fieldSummary ? <span className="text-zinc-500"> — {fieldSummary}</span> : null}
-                      </div>
-                    );
-                  })}
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-zinc-900">{routine.label}</div>
+            <div className="text-xs text-zinc-500">{routine.blocks.length} blocks</div>
+          </div>
+          <div className="space-y-4">
+            {getProgramDesignBlockRows(routine).map(({ block, prefix, label }) => (
+              <div key={block.id} className="space-y-1">
+                <div className="text-sm font-semibold text-zinc-900">
+                  <span className="mr-2 text-zinc-500">{prefix}</span>
+                  {label}
+                </div>
+                {block.notes ? <div className="ml-5 text-xs text-zinc-500">{block.notes}</div> : null}
+                <div className="ml-5 space-y-1">
+                  {block.exercises.map((exercise, exerciseIndex) => (
+                    <div key={exercise.id} className="text-sm text-zinc-700">
+                      <span className="font-medium text-zinc-900">{block.type === "paired" ? `Ex${exerciseIndex + 1}: ` : "Ex: "}</span>
+                      {exercise.name || "Exercise"}
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
@@ -8642,14 +8688,35 @@ export default function App() {
     </div>
   );
 
-  const adminDashSessionOptions = useMemo(() => {
-    if (!selectedProgram) return [];
-    const planned = getProgramLength(selectedProgram);
+  const getRoutinePlannedSessionNumbers = (program: Program, routine: Routine | null | undefined) => {
+    if (!routine) return [];
+    const routineIndex = program.routines.findIndex((item) => item.id === routine.id);
+    if (routineIndex < 0) return [];
+    const routineCount = Math.max(1, program.routines.length);
+    return Array.from({ length: getProgramLength(program) }, (_, index) => String(index * routineCount + routineIndex + 1));
+  };
+
+  const getAdminDashSessionNumbersForRoutine = (program: Program, routine: Routine | null | undefined) => {
+    if (!routine) return [];
+    const planned = getRoutinePlannedSessionNumbers(program, routine);
     const saved = savedSessions
-      .filter((session) => session.programId === selectedProgram.id && (adminDashRoutineFilter === "all" || session.routineId === adminDashRoutineFilter) && (!selectedMember || session.memberId === selectedMember.id))
+      .filter((session) => session.programId === program.id && session.routineId === routine.id && (!selectedMember || session.memberId === selectedMember.id))
       .map((session) => String(session.sessionNumber || "").trim())
       .filter(Boolean);
-    return Array.from(new Set([...Array.from({ length: planned }, (_, index) => String(index + 1)), ...saved])).sort((a, b) => Number(a) - Number(b));
+    return Array.from(new Set([...planned, ...saved])).sort((a, b) => Number(a) - Number(b));
+  };
+
+  const formatExerciseTargetForAdminDash = (exercise: Exercise, blockType?: BlockType) => {
+    const targetFields = getExerciseTargetFields(exercise, blockType);
+    const firstTarget = targetFields.map((field) => formatPremiumFieldLabel(field)).find((value) => String(value || "").trim());
+    if (firstTarget) return firstTarget;
+    return formatTargetLabel(exercise.target, exercise.metric);
+  };
+
+  const adminDashSessionOptions = useMemo(() => {
+    if (!selectedProgram || adminDashRoutineFilter === "all") return [];
+    const routine = selectedProgram.routines.find((item) => item.id === adminDashRoutineFilter) || null;
+    return getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
   }, [adminDashRoutineFilter, savedSessions, selectedMember, selectedProgram]);
 
   const loadAdminDashSession = (routine: Routine, sessionNumber: string) => {
@@ -8663,18 +8730,30 @@ export default function App() {
     );
 
     const baseDraft = createSessionDraft(selectedProgram.id, routine, selectedMember.id);
+    const hydratedBlocks = baseDraft.blocks.map((baseBlock) => {
+      const savedBlock = existingSession?.blocks.find((block) => block.blockId === baseBlock.blockId);
+      if (!savedBlock) return baseBlock;
+
+      return {
+        ...baseBlock,
+        blockTitle: savedBlock.blockTitle || baseBlock.blockTitle,
+        entries: baseBlock.entries.map((baseEntry) => {
+          const savedEntry = savedBlock.entries.find((entry) => entry.exerciseId === baseEntry.exerciseId);
+          return savedEntry ? { ...baseEntry, ...savedEntry, target: baseEntry.target, metric: baseEntry.metric } : baseEntry;
+        }),
+      };
+    });
+
     setAdminDashRoutineFilter(routine.id);
     setSelectedRoutineId(routine.id);
     setAdminDashSessionNumber(sessionNumber);
     setSessionDraft(
       existingSession
         ? {
-            programId: existingSession.programId,
-            routineId: existingSession.routineId,
-            memberId: existingSession.memberId,
+            ...baseDraft,
             date: existingSession.date,
             sessionNumber: existingSession.sessionNumber,
-            blocks: existingSession.blocks,
+            blocks: hydratedBlocks,
           }
         : {
             ...baseDraft,
@@ -9519,7 +9598,7 @@ export default function App() {
                         <div className="space-y-4">
                           <div className="text-sm font-semibold text-zinc-900">Program Catalog</div>
                           {selectedProgram.routines.map((routine) => {
-                            const routineSessions = Array.from({ length: getProgramLength(selectedProgram) }, (_, index) => String(index + 1));
+                            const routineSessions = getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
                             return (
                               <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
                                 <div className="mb-3 flex items-center justify-between gap-3">
@@ -9563,7 +9642,7 @@ export default function App() {
                           {(() => {
                             const routine = selectedProgram.routines.find((item) => item.id === adminDashRoutineFilter);
                             if (!routine) return <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">Select a routine.</div>;
-                            const routineSessions = Array.from({ length: getProgramLength(selectedProgram) }, (_, index) => String(index + 1));
+                            const routineSessions = getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
                             return (
                               <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                                 <div className="mb-3">
@@ -9625,7 +9704,7 @@ export default function App() {
                                             <div key={exercise.id} className="grid gap-3 md:grid-cols-4">
                                               <TextInput value={exercise.name} readOnly />
                                               <TextInput type="text" inputMode="text" placeholder='Weight ("BW" or number)' value={draftExercise?.weight || ""} onChange={(e) => updateSessionExercise(block.id, exercise.id, "weight", e.target.value)} />
-                                              <TextInput placeholder="Reps Per Set" value={draftExercise?.performance || ""} onChange={(e) => updateSessionExercise(block.id, exercise.id, "performance", e.target.value)} />
+                                              <TextInput value={formatExerciseTargetForAdminDash(exercise, block.type)} readOnly />
                                               <TextInput placeholder="Sets Completed" value={draftExercise?.setsCompleted || ""} onChange={(e) => updateSessionExercise(block.id, exercise.id, "setsCompleted", e.target.value)} />
                                             </div>
                                           );
@@ -9635,8 +9714,8 @@ export default function App() {
                                       <div className="grid gap-3 md:grid-cols-4">
                                         <TextInput value={block.exercises[0]?.name || "Exercise"} readOnly />
                                         <TextInput type="text" inputMode="text" placeholder='Weight ("BW" or number)' value={draftBlock?.entries[0]?.weight || ""} onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "weight", e.target.value)} />
-                                        <TextInput placeholder={`Metric / Target (${block.exercises[0]?.metric || "metric"})`} value={draftBlock?.entries[0]?.performance || ""} onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "performance", e.target.value)} />
-                                        <TextInput placeholder="Sets Completed" value={draftBlock?.entries[0]?.setsCompleted || ""} onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "setsCompleted", e.target.value)} />
+                                        <TextInput value={formatExerciseTargetForAdminDash(block.exercises[0] || ({ id: "", name: "", target: "", metric: "" } as Exercise), block.type)} readOnly />
+                                        <TextInput placeholder="Performance" value={draftBlock?.entries[0]?.performance || ""} onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "performance", e.target.value)} />
                                       </div>
                                     )}
                                   </div>
@@ -10224,7 +10303,14 @@ export default function App() {
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <div className="text-xs text-zinc-500">{(selectedTrackerWorkout.exerciseSlots || []).length}</div>
-                          {!trackerWorkoutReturnCycleId ? <PrimaryButton onClick={() => startTrackerWorkout(selectedTrackerWorkout.id)}>{selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? "Resume Workout" : "Start Workout"}</PrimaryButton> : null}
+                          {!trackerWorkoutReturnCycleId && !(selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt) ? <PrimaryButton onClick={() => startTrackerWorkout(selectedTrackerWorkout.id)}>Start Workout</PrimaryButton> : null}
+                          {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? (
+                            <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-2 py-1">
+                              <span className="text-xs font-semibold text-zinc-700">Circuit {getTrackerWorkoutCurrentCircuit(selectedTrackerWorkout)} / {getTrackerWorkoutCircuitTarget(selectedTrackerWorkout)}</span>
+                              <button type="button" onClick={() => updateTrackerWorkoutCircuitTarget(selectedTrackerWorkout.id, -1)} className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold">−</button>
+                              <button type="button" onClick={() => updateTrackerWorkoutCircuitTarget(selectedTrackerWorkout.id, 1)} className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold">+</button>
+                            </div>
+                          ) : null}
                           {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? <SmallButton onClick={() => markTrackerWorkoutComplete(selectedTrackerWorkout.id)}>Mark Complete</SmallButton> : null}
                         </div>
                       </div>
