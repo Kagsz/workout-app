@@ -7981,7 +7981,11 @@ export default function App() {
   const startTrackerWorkout = (workoutId: string) => {
     const now = new Date().toISOString();
     setTrackerWorkouts((current) =>
-      current.map((workout) => workout.id === workoutId ? { ...normalizeTrackerWorkout(workout), startedAt: now, completedAt: undefined, currentCircuit: getTrackerWorkoutCurrentCircuit(workout), circuitTarget: getTrackerWorkoutCircuitTarget(workout) } : workout)
+      current.map((workout) =>
+        workout.id === workoutId
+          ? { ...normalizeTrackerWorkout(workout), startedAt: now, completedAt: undefined, currentCircuit: 1, circuitTarget: getTrackerWorkoutCircuitTarget(workout) }
+          : workout
+      )
     );
     openTrackerWorkout(workoutId);
   };
@@ -8001,6 +8005,43 @@ export default function App() {
         const nextCurrent = Math.min(getTrackerWorkoutCurrentCircuit(normalized), nextTarget);
         return { ...normalized, circuitTarget: nextTarget, currentCircuit: nextCurrent, completedAt: undefined };
       })
+    );
+  };
+
+  const renderTrackerCircuitControl = (workout: TrackerWorkout, compact = false) => {
+    const normalized = normalizeTrackerWorkout(workout);
+    const target = getTrackerWorkoutCircuitTarget(normalized);
+    const current = getTrackerWorkoutCurrentCircuit(normalized);
+    const isActive = Boolean(normalized.startedAt && !normalized.completedAt);
+    const label = isActive && !compact ? `Circuit ${current} / ${target}` : `${target}x`;
+
+    return (
+      <div className={`flex items-center gap-1 rounded-xl border border-zinc-200 bg-white ${compact ? "px-1.5 py-1" : "px-2 py-1"}`}>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            updateTrackerWorkoutCircuitTarget(normalized.id, -1);
+          }}
+          className="rounded-lg border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 disabled:opacity-40"
+          disabled={target <= 1}
+          aria-label="Decrease circuit count"
+        >
+          −
+        </button>
+        <span className={`${compact ? "min-w-7" : "min-w-20"} text-center text-xs font-semibold text-zinc-800`}>{label}</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            updateTrackerWorkoutCircuitTarget(normalized.id, 1);
+          }}
+          className="rounded-lg border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700"
+          aria-label="Increase circuit count"
+        >
+          +
+        </button>
+      </div>
     );
   };
 
@@ -8224,9 +8265,10 @@ export default function App() {
               <div className="text-xs text-zinc-500">{workoutSlots.length} exercises</div>
             </div>
           </button>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {cycleContext ? <SmallButton onClick={(event) => { event.stopPropagation(); setCycleNextWorkout(cycleContext.id, normalized.id); }}>Set Next Up</SmallButton> : null}
-            {!cycleContext ? <SmallButton onClick={() => startTrackerWorkout(normalized.id)}>{hasGap ? "Resume" : "Start"}</SmallButton> : null}
+            {!cycleContext ? renderTrackerCircuitControl(normalized, true) : null}
+            {!cycleContext ? <SmallButton onClick={(event) => { event.stopPropagation(); startTrackerWorkout(normalized.id); }}>{"Start"}</SmallButton> : null}
           </div>
         </div>
       </div>
@@ -10303,14 +10345,8 @@ export default function App() {
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <div className="text-xs text-zinc-500">{(selectedTrackerWorkout.exerciseSlots || []).length}</div>
+                          {!trackerWorkoutReturnCycleId ? renderTrackerCircuitControl(selectedTrackerWorkout) : null}
                           {!trackerWorkoutReturnCycleId && !(selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt) ? <PrimaryButton onClick={() => startTrackerWorkout(selectedTrackerWorkout.id)}>Start Workout</PrimaryButton> : null}
-                          {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? (
-                            <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-2 py-1">
-                              <span className="text-xs font-semibold text-zinc-700">Circuit {getTrackerWorkoutCurrentCircuit(selectedTrackerWorkout)} / {getTrackerWorkoutCircuitTarget(selectedTrackerWorkout)}</span>
-                              <button type="button" onClick={() => updateTrackerWorkoutCircuitTarget(selectedTrackerWorkout.id, -1)} className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold">−</button>
-                              <button type="button" onClick={() => updateTrackerWorkoutCircuitTarget(selectedTrackerWorkout.id, 1)} className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold">+</button>
-                            </div>
-                          ) : null}
                           {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? <SmallButton onClick={() => markTrackerWorkoutComplete(selectedTrackerWorkout.id)}>Mark Complete</SmallButton> : null}
                         </div>
                       </div>
