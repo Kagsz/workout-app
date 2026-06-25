@@ -1639,9 +1639,16 @@ const extractFirstNumber = (value: string) => {
   return match ? match[0] : "";
 };
 
+const isProgramCompletionMetricValue = (value: string) =>
+  /^check$/i.test(String(value || "").trim());
+
 const parseProgramGraphMetricValue = (value: string) => {
   const raw = String(value || "").trim();
-  if (!raw || /^check$/i.test(raw)) return null;
+  if (!raw) return null;
+
+  // Completion-only blocks still contain meaningful data.
+  // Plot them on a stable consistency line while preserving the raw value in the tooltip.
+  if (isProgramCompletionMetricValue(raw)) return 1;
 
   const timeMatch = raw.match(/^(\d+):(\d{1,2})$/);
   if (timeMatch) {
@@ -8116,6 +8123,7 @@ type AISummarySeriesProfile = {
   hasExplosiveJump: boolean;
   endsAtPeak: boolean;
   isFlatOrControlled: boolean;
+  scoringDirection: SessionScoringDirection;
 };
 
 type AISummaryScorecard = {
@@ -8137,6 +8145,7 @@ type AISummaryScorecard = {
   hasExplosiveJump: boolean;
   hasLateDip: boolean;
   hasRebound: boolean;
+  hasLowerIsBetter: boolean;
   markers: AISummaryMarker[];
 };
 
@@ -8203,8 +8212,16 @@ const getAISummarySeriesProfile = (series: GraphSeries): AISummarySeriesProfile 
   const points = [...series.points].sort((a, b) => getAISummaryPointTime(a) - getAISummaryPointTime(b));
   if (points.length < 2) return null;
 
-  const outputValues = points.map((point) => point.y).filter((value) => Number.isFinite(value));
-  if (outputValues.length < 2) return null;
+  const rawOutputValues = points.map((point) => point.y).filter((value) => Number.isFinite(value));
+  if (rawOutputValues.length < 2) return null;
+
+  const scoringDirection: SessionScoringDirection =
+    points.some((point) => point.scoringDirection === "lowerIsBetter")
+      ? "lowerIsBetter"
+      : points.every((point) => point.scoringDirection === "completion")
+        ? "completion"
+        : "higherIsBetter";
+  const outputValues = scoringDirection === "lowerIsBetter" ? rawOutputValues.map((value) => -value) : rawOutputValues;
 
   const startOutput = outputValues[0];
   const endOutput = outputValues[outputValues.length - 1];
@@ -8280,6 +8297,7 @@ const getAISummarySeriesProfile = (series: GraphSeries): AISummarySeriesProfile 
     hasExplosiveJump,
     endsAtPeak,
     isFlatOrControlled,
+    scoringDirection,
   };
 };
 
@@ -8304,6 +8322,7 @@ const buildAISummaryScorecard = (graphData: GraphSeries[], blockType: BlockType)
   const hasExplosiveJump = seriesProfiles.some((profile) => profile.hasExplosiveJump);
   const hasLateDip = seriesProfiles.some((profile) => profile.hasLateDip);
   const hasRebound = seriesProfiles.some((profile) => profile.hasRebound);
+  const hasLowerIsBetter = seriesProfiles.some((profile) => profile.scoringDirection === "lowerIsBetter");
   const hasExerciseChange =
     seriesProfiles.some((profile) => profile.hasExerciseChange) ||
     graphData.some((series) => /\bchanged\b/i.test(series.exerciseName)) ||
@@ -8312,9 +8331,17 @@ const buildAISummaryScorecard = (graphData: GraphSeries[], blockType: BlockType)
   const markers: AISummaryMarker[] = [];
 
   if (outputDeltaAverage > 1) {
-    markers.push({ kind: "output_rise", text: "Output finished higher than it started.", strength: Math.min(1, Math.abs(outputDeltaAverage) / 8) });
+    markers.push({
+      kind: "output_rise",
+      text: hasLowerIsBetter ? "Lower-is-better performance finished better than it started." : "Output finished higher than it started.",
+      strength: Math.min(1, Math.abs(outputDeltaAverage) / 8),
+    });
   } else if (outputDeltaAverage < -1) {
-    markers.push({ kind: "output_decline", text: "Output finished lower than it started.", strength: Math.min(1, Math.abs(outputDeltaAverage) / 8) });
+    markers.push({
+      kind: "output_decline",
+      text: hasLowerIsBetter ? "Lower-is-better performance moved away from the target." : "Output finished lower than it started.",
+      strength: Math.min(1, Math.abs(outputDeltaAverage) / 8),
+    });
   } else {
     markers.push({ kind: "output_plateau", text: "Output stayed in a controlled range.", strength: 0.45 });
   }
@@ -8374,6 +8401,7 @@ const buildAISummaryScorecard = (graphData: GraphSeries[], blockType: BlockType)
     hasExplosiveJump,
     hasLateDip,
     hasRebound,
+    hasLowerIsBetter,
     markers,
   };
 };
@@ -8500,7 +8528,10 @@ const getAISummaryLegacyStats = (profile: AISummarySeriesProfile): AISummaryLega
     const timeB = Number.isFinite(getAISummaryLegacyPointTime(b)) ? getAISummaryLegacyPointTime(b) : b.sessionNumber;
     return timeA - timeB;
   });
-  const outputs = points.map((point) => Number(point.y)).filter((value) => Number.isFinite(value));
+  const outputs = points
+    .map((point) => Number(point.y))
+    .filter((value) => Number.isFinite(value))
+    .map((value) => (profile.scoringDirection === "lowerIsBetter" ? -value : value));
   const weights = points.map((point) => parseAISummaryLegacyWeight(point.weight));
   const firstOutput = outputs[0] || 0;
   const lastOutput = outputs[outputs.length - 1] || 0;
@@ -11943,7 +11974,7 @@ export default function App() {
           slot,
           supportMetrics: entry.supportMetrics || {},
           contextFlags: mergeContextFlags(session.contextFlags, matchingBlock.contextFlags, entry.contextFlags),
-          scoringDirection: entry.scoringDirection,
+          scoringDirection: entry.scoringDirection || (isProgramCompletionMetricValue(rawY) ? "completion" : undefined),
         });
       });
     });
