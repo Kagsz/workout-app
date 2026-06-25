@@ -188,6 +188,8 @@ type TrackerWorkoutSortMode =
   | "newest"
   | "oldest";
 
+type SessionScoringDirection = "higherIsBetter" | "lowerIsBetter" | "completion";
+
 type SessionExerciseInput = {
   exerciseId: string;
   exerciseName: string;
@@ -196,12 +198,16 @@ type SessionExerciseInput = {
   setsCompleted: string;
   target?: string;
   metric?: string;
+  supportMetrics?: Record<string, string>;
+  contextFlags?: string[];
+  scoringDirection?: SessionScoringDirection;
 };
 
 type SessionBlockInput = {
   blockId: string;
   blockTitle: string;
   entries: SessionExerciseInput[];
+  contextFlags?: string[];
 };
 
 type SessionDraft = {
@@ -211,6 +217,7 @@ type SessionDraft = {
   date: string;
   sessionNumber: string;
   blocks: SessionBlockInput[];
+  contextFlags?: string[];
 };
 
 type SavedSession = SessionDraft & {
@@ -226,12 +233,16 @@ type GraphPoint = {
   sessionNumber: number;
   date: string;
   performance: string;
+  rawPerformance?: string;
   duration: string;
   exerciseName: string;
   target: string;
   metric: string;
   blockType: BlockType;
   slot: 1 | 2;
+  supportMetrics?: Record<string, string>;
+  contextFlags?: string[];
+  scoringDirection?: SessionScoringDirection;
 };
 
 type GraphSeries = {
@@ -448,10 +459,28 @@ function GraphTooltip({
       ? `${durationLabel} for ${point.target || point.metric || "output"}`
       : `Target: ${formatTargetLabel(point.target, point.metric)}`;
 
+  const supportEntries = Object.entries(point.supportMetrics || {}).filter(
+    ([metric]) => !["weight"].includes(metric.trim().toLowerCase())
+  );
+  const flagLabels = (point.contextFlags || []).map(formatContextFlagLabel).filter(Boolean);
+
   return (
     <div className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs shadow-lg">
       <div className="font-semibold text-zinc-900">{point.exerciseName}</div>
+      {flagLabels.length ? (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {flagLabels.map((flag) => (
+            <span key={flag} className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">{flag}</span>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-1 text-zinc-700">{targetContext}</div>
+      {point.rawPerformance ? <div className="mt-1 text-zinc-700">Performance: <span className="font-semibold">{point.rawPerformance}</span></div> : null}
+      {point.weight ? <div className="mt-1 text-zinc-700">Weight: <span className="font-semibold">{point.weight}</span></div> : null}
+      {supportEntries.map(([metric, value]) => (
+        <div key={metric} className="mt-1 text-zinc-700">{metric}: <span className="font-semibold">{value}</span></div>
+      ))}
+      {point.scoringDirection === "lowerIsBetter" ? <div className="mt-1 text-zinc-500">Lower value is better.</div> : null}
     </div>
   );
 }
@@ -1464,6 +1493,7 @@ const STORAGE_KEYS = {
   seeded: "workout-app-seeded-program1-v1",
   seededProgram2: "workout-app-seeded-program2-v1",
   seededProgram3: "workout-app-seeded-program3-v1",
+  seededProgram4: "workout-app-seeded-program4-v1",
 };
 
 const ROUTINE_IDS = {
@@ -1608,6 +1638,43 @@ const extractFirstNumber = (value: string) => {
   const match = value.match(/\d+(?:\.\d+)?/);
   return match ? match[0] : "";
 };
+
+const parseProgramGraphMetricValue = (value: string) => {
+  const raw = String(value || "").trim();
+  if (!raw || /^check$/i.test(raw)) return null;
+
+  const timeMatch = raw.match(/^(\d+):(\d{1,2})$/);
+  if (timeMatch) {
+    const minutes = Number(timeMatch[1]);
+    const seconds = Number(timeMatch[2]);
+    if (Number.isFinite(minutes) && Number.isFinite(seconds)) return minutes * 60 + seconds;
+  }
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return numeric;
+
+  const extracted = extractFirstNumber(raw);
+  const extractedNumber = Number(extracted);
+  return Number.isFinite(extractedNumber) ? extractedNumber : null;
+};
+
+const mergeContextFlags = (...flagGroups: Array<string[] | undefined>) =>
+  Array.from(
+    new Set(
+      flagGroups
+        .flatMap((flags) => flags || [])
+        .map((flag) => String(flag || "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+
+const formatContextFlagLabel = (flag: string) => {
+  const normalized = String(flag || "").trim().toLowerCase();
+  if (normalized === "injury") return "Injury";
+  if (normalized === "fasting") return "Fasting";
+  return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : "";
+};
+
 
 const splitImportedSections = (chunk: string, heading: "paired" | "single") => {
   const regex =
@@ -2353,8 +2420,4978 @@ const createProgramThree = (): Program => ({
   ],
 });
 
+const createProgramFour = (): Program => ({
+  id: "program-4",
+  name: "Program 4",
+  startedAt: "2026-02-15",
+  status: "active",
+  memberId: "member-1",
+  programLength: 8,
+  inputMode: "trainerInput",
+  notes: "Imported Program 4 dataset with support metrics and context flags.",
+  routines: [
+    {
+      id: ROUTINE_IDS.day1,
+      label: "Day 1",
+      blocks: [
+        {
+          id: BLOCK_IDS.day1A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day1-a-1-goblet-alt-lateral-squat",
+              name: "Goblet Alt. Lateral Squat",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day1-a-1-goblet-alt-lateral-squat-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day1-a-1-goblet-alt-lateral-squat-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+              name: "PAUSE Leg Only MB Deadbug",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day1-a-2-pause-leg-only-mb-deadbug-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day1-a-2-pause-leg-only-mb-deadbug-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day1-single1-skillmill-1-arm-carry",
+              name: "Skillmill 1 Arm Carry",
+              target: "30/30 for Distance",
+              metric: "distance",
+              premiumFields: [
+                { id: "p4-day1-single1-skillmill-1-arm-carry-target", metric: "Distance", value: "30/30 for Distance", mode: "target" },
+                { id: "p4-day1-single1-skillmill-1-arm-carry-input", metric: "Distance", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day1-b-1-1-arm-cable-row",
+              name: "1 Arm Cable Row",
+              target: "10 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day1-b-1-1-arm-cable-row-target", metric: "Reps", value: "10 reps", mode: "target" },
+                { id: "p4-day1-b-1-1-arm-cable-row-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day1-b-2-cable-pot-stirs",
+              name: "Cable Pot Stirs",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day1-b-2-cable-pot-stirs-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day1-b-2-cable-pot-stirs-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day1-single2-skillmill-1-arm-carry",
+              name: "Skillmill 1 Arm Carry",
+              target: "30/30 for Distance",
+              metric: "distance",
+              premiumFields: [
+                { id: "p4-day1-single2-skillmill-1-arm-carry-target", metric: "Distance", value: "30/30 for Distance", mode: "target" },
+                { id: "p4-day1-single2-skillmill-1-arm-carry-input", metric: "Distance", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day1C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day1-c-1-ecc-roller-hamstring-curl",
+              name: "ECC. Roller Hamstring Curl",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day1-c-1-ecc-roller-hamstring-curl-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day1-c-1-ecc-roller-hamstring-curl-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day1-c-2-side-raise-front-raise-combo",
+              name: "Side Raise/Front Raise Combo",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day1-c-2-side-raise-front-raise-combo-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day1-c-2-side-raise-front-raise-combo-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day2,
+      label: "Day 2",
+      blocks: [
+        {
+          id: BLOCK_IDS.day2A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day2-a-1-ecc-lat-pulldown",
+              name: "ECC Lat Pulldown",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day2-a-1-ecc-lat-pulldown-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day2-a-1-ecc-lat-pulldown-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day2-a-2-goblet-squat",
+              name: "Goblet Squat",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day2-a-2-goblet-squat-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day2-a-2-goblet-squat-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day2-single1-mb-alt-rot-slams",
+              name: "MB Alt. Rot. Slams",
+              target: "40/20",
+              metric: "performance",
+              premiumFields: [
+                { id: "p4-day2-single1-mb-alt-rot-slams-target", metric: "Performance", value: "40/20", mode: "target" },
+                { id: "p4-day2-single1-mb-alt-rot-slams-input", metric: "Performance", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day2-b-1-cable-tricep-pushdown",
+              name: "Cable Tricep Pushdown",
+              target: "12 down by 1",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day2-b-1-cable-tricep-pushdown-target", metric: "Reps", value: "12 down by 1", mode: "target" },
+                { id: "p4-day2-b-1-cable-tricep-pushdown-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day2-b-2-cable-situps",
+              name: "Cable Situps",
+              target: "12 down by 1",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day2-b-2-cable-situps-target", metric: "Reps", value: "12 down by 1", mode: "target" },
+                { id: "p4-day2-b-2-cable-situps-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day2-single2-mb-alt-rot-slams",
+              name: "MB Alt. Rot. Slams",
+              target: "40/20",
+              metric: "performance",
+              premiumFields: [
+                { id: "p4-day2-single2-mb-alt-rot-slams-target", metric: "Performance", value: "40/20", mode: "target" },
+                { id: "p4-day2-single2-mb-alt-rot-slams-input", metric: "Performance", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day2C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day2-c-1-kbdl",
+              name: "KBDL",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day2-c-1-kbdl-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day2-c-1-kbdl-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day2-c-2-bicycle-crunch",
+              name: "Bicycle Crunch",
+              target: "10 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day2-c-2-bicycle-crunch-target", metric: "Reps", value: "10 reps", mode: "target" },
+                { id: "p4-day2-c-2-bicycle-crunch-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day3,
+      label: "Day 3",
+      blocks: [
+        {
+          id: BLOCK_IDS.day3A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day3-a-1-inc-db-bench-press",
+              name: "Inc. DB Bench Press",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day3-a-1-inc-db-bench-press-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day3-a-1-inc-db-bench-press-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day3-a-2-bench-1-leg-glute-bridge",
+              name: "Bench 1 Leg Glute Bridge",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day3-a-2-bench-1-leg-glute-bridge-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day3-a-2-bench-1-leg-glute-bridge-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "Rec.",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day3-single1-skiier",
+              name: "Skiier",
+              target: "40 Calories",
+              metric: "time",
+              premiumFields: [
+                { id: "p4-day3-single1-skiier-target", metric: "Time", value: "40 Calories", mode: "target" },
+                { id: "p4-day3-single1-skiier-input", metric: "Time", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day3-b-1-seated-row",
+              name: "Seated Row",
+              target: "10 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day3-b-1-seated-row-target", metric: "Reps", value: "10 reps", mode: "target" },
+                { id: "p4-day3-b-1-seated-row-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day3-b-2-bear-to-pushup",
+              name: "Bear to Pushup",
+              target: "10 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day3-b-2-bear-to-pushup-target", metric: "Reps", value: "10 reps", mode: "target" },
+                { id: "p4-day3-b-2-bear-to-pushup-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day3-single2-skiier",
+              name: "Skiier",
+              target: "Calories",
+              metric: "calories",
+              premiumFields: [
+                { id: "p4-day3-single2-skiier-target", metric: "Calories", value: "Calories", mode: "target" },
+                { id: "p4-day3-single2-skiier-input", metric: "Calories", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day3C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day3-c-1-contra-step-ups",
+              name: "Contra. Step-Ups",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day3-c-1-contra-step-ups-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day3-c-1-contra-step-ups-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day3-c-2-1-arm-sl-situp",
+              name: "1 Arm SL Situp",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day3-c-2-1-arm-sl-situp-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day3-c-2-1-arm-sl-situp-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: ROUTINE_IDS.day4,
+      label: "Day 4",
+      blocks: [
+        {
+          id: BLOCK_IDS.day4A,
+          type: "paired",
+          title: "Paired Block A",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day4-a-1-db-rdl",
+              name: "DB RDL",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-a-1-db-rdl-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day4-a-1-db-rdl-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day4-a-2-seated-1-arm-ohp",
+              name: "Seated 1 Arm OHP",
+              target: "10 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-a-2-seated-1-arm-ohp-target", metric: "Reps", value: "10 reps", mode: "target" },
+                { id: "p4-day4-a-2-seated-1-arm-ohp-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4Single1,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day4-single1-mb-slams",
+              name: "MB Slams",
+              target: "Reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-single1-mb-slams-target", metric: "Reps", value: "Reps", mode: "target" },
+                { id: "p4-day4-single1-mb-slams-input", metric: "Reps", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4B,
+          type: "paired",
+          title: "Paired Block B",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+              name: "1 Arm Cross Lat Pulldown",
+              target: "10 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-b-1-1-arm-cross-lat-pulldown-target", metric: "Reps", value: "10 reps", mode: "target" },
+                { id: "p4-day4-b-1-1-arm-cross-lat-pulldown-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day4-b-2-pause-shoulder-taps",
+              name: "PAUSE Shoulder Taps",
+              target: "5 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-b-2-pause-shoulder-taps-target", metric: "Reps", value: "5 reps", mode: "target" },
+                { id: "p4-day4-b-2-pause-shoulder-taps-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4Single2,
+          type: "single",
+          title: "Single Block",
+          duration: "3",
+          notes: "",
+          interactionMode: "na",
+          exercises: [
+            {
+              id: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+              name: "1 Leg MB Slam/MB Slam",
+              target: "5/10",
+              metric: "performance",
+              premiumFields: [
+                { id: "p4-day4-single2-1-leg-mb-slam-mb-slam-target", metric: "Performance", value: "5/10", mode: "target" },
+                { id: "p4-day4-single2-1-leg-mb-slam-mb-slam-input", metric: "Performance", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+        {
+          id: BLOCK_IDS.day4C,
+          type: "paired",
+          title: "Paired Block C",
+          duration: "10",
+          notes: "",
+          interactionMode: "alternating",
+          exercises: [
+            {
+              id: "p4-day4-c-1-quad-ext",
+              name: "Quad Ext.",
+              target: "12 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-c-1-quad-ext-target", metric: "Reps", value: "12 reps", mode: "target" },
+                { id: "p4-day4-c-1-quad-ext-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+            {
+              id: "p4-day4-c-2-crunch-iso-alt-ll",
+              name: "Crunch Iso Alt. LL",
+              target: "8 reps",
+              metric: "reps",
+              premiumFields: [
+                { id: "p4-day4-c-2-crunch-iso-alt-ll-target", metric: "Reps", value: "8 reps", mode: "target" },
+                { id: "p4-day4-c-2-crunch-iso-alt-ll-input", metric: "Sets", value: "", mode: "memberInput" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const buildProgramFourSeedSessions = (memberId: string): SavedSession[] => ([
+  {
+    id: "program-4-session-1",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "February 15, 2026",
+    sessionNumber: "1",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "8",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "25",
+            performance: ".18",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "25",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "25",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "15",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "25",
+            performance: ".21",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "25",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "10",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-02-15T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-2",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "February 18, 2026",
+    sessionNumber: "2",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "75",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "50",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "7",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "35",
+            performance: "",
+            setsCompleted: "7",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "80",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-02-18T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-3",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "February 22, 2026",
+    sessionNumber: "3",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "27",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "2:55",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "60",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "39",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "20",
+            performance: "",
+            setsCompleted: "3",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "5",
+            performance: "",
+            setsCompleted: "3",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-02-22T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-4",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "February 25, 2026",
+    sessionNumber: "4",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "45",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "20",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "72",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "25",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "3",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "3",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "60",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "3",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-02-25T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-5",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "March 1, 2026",
+    sessionNumber: "5",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "5",
+            performance: "",
+            setsCompleted: "7",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "8",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "27",
+            performance: ".22",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "27",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "25",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "27",
+            performance: ".24",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "27",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "10",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-01T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-6",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "March 4, 2026",
+    sessionNumber: "6",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "80",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "50",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "50",
+            performance: "",
+            setsCompleted: "6",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "88",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-04T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-7",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "March 8, 2026",
+    sessionNumber: "7",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "30",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "2:43",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "70",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "34",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "22",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "5",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-08T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-8",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "March 11, 2026",
+    sessionNumber: "8",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "45",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "20",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "83",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "27",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "3",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "70",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-11T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-9",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "March 15, 2026",
+    sessionNumber: "9",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "10",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "8",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".23",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "8",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "30",
+            performance: "",
+            setsCompleted: "7",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".22",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "12",
+            performance: "",
+            setsCompleted: "3",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-15T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-10",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "March 18, 2026",
+    sessionNumber: "10",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "80",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "50",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "6",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "55",
+            performance: "",
+            setsCompleted: "6",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "88",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-18T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-11",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "March 22, 2026",
+    sessionNumber: "11",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "35",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "2:45",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "80",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "35",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "25",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "7.5",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-22T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-12",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "March 25, 2026",
+    sessionNumber: "12",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "50",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "22",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "82",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "3",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "70",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-25T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-13",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "March 29, 2026",
+    sessionNumber: "13",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "15",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "8",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".24",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "30",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".21",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "12",
+            performance: "",
+            setsCompleted: "3",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-03-29T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-14",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "April 1, 2026",
+    sessionNumber: "14",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "80",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "50",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "55",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "88",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-01T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-15",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "April 4, 2026",
+    sessionNumber: "15",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "35",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "2:37",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "85",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "40",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "25",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "7.5",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-04T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-16",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "April 8, 2026",
+    sessionNumber: "16",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "50",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "22",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "85",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "35",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "3",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "70",
+            performance: "",
+            setsCompleted: "6",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-08T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-17",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "April 12, 2026",
+    sessionNumber: "17",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "20",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "10",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".24",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "8",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "30",
+            performance: "",
+            setsCompleted: "7",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".21",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "12",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-12T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-18",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "April 15, 2026",
+    sessionNumber: "18",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "85",
+            performance: "",
+            setsCompleted: "7",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "50",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "55",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "88",
+            performance: "",
+            setsCompleted: "7",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "7",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-15T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-19",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "April 19, 2026",
+    sessionNumber: "19",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "40",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "2:44",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "90",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "37",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "25",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "10",
+            performance: "",
+            setsCompleted: "3",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-19T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-20",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "April 22, 2026",
+    sessionNumber: "20",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "50",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "25",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "89",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "35",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "3",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "75",
+            performance: "",
+            setsCompleted: "6",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-22T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-21",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "April 26, 2026",
+    sessionNumber: "21",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "22",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "10",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".21",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "7",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "30",
+            performance: "",
+            setsCompleted: "7",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".21",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "12",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-26T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-22",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "April 29, 2026",
+    sessionNumber: "22",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "85",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "55",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "60",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "97",
+            performance: "",
+            setsCompleted: "7",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-04-29T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-23",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "May 6, 2026",
+    sessionNumber: "23",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "40",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [
+  "injury"
+],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "90",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [
+  "injury"
+],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "Check",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [
+  "injury"
+],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "25",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "10",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-06T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-24",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "May 10, 2026",
+    sessionNumber: "24",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "55",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "27",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "95",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "35",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "2.5",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [
+  "injury"
+],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "40",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-10T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-25",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "May 13, 2026",
+    sessionNumber: "25",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "22",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "10",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".22",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "30",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".21",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "12",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-13T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-26",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "May 17, 2026",
+    sessionNumber: "26",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "90",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "55",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "30",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "65",
+            performance: "",
+            setsCompleted: "4",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "97",
+            performance: "",
+            setsCompleted: "7",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-17T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-27",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "May 20, 2026",
+    sessionNumber: "27",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "40",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "2:48",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "90",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "39",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "25",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "10",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-20T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-28",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "May 24, 2026",
+    sessionNumber: "28",
+    contextFlags: [
+  "fasting"
+],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "55",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "27",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "50",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "37",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "3",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "2",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "75",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-24T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-29",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day1,
+    memberId,
+    date: "May 27, 2026",
+    sessionNumber: "29",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day1A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-a-1-goblet-alt-lateral-squat",
+            exerciseName: "Goblet Alt. Lateral Squat",
+            weight: "25",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-a-2-pause-leg-only-mb-deadbug",
+            exerciseName: "PAUSE Leg Only MB Deadbug",
+            weight: "10",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single1-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".23",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-b-1-1-arm-cable-row",
+            exerciseName: "1 Arm Cable Row",
+            weight: "30",
+            performance: "",
+            setsCompleted: "8",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-b-2-cable-pot-stirs",
+            exerciseName: "Cable Pot Stirs",
+            weight: "30",
+            performance: "",
+            setsCompleted: "7",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-single2-skillmill-1-arm-carry",
+            exerciseName: "Skillmill 1 Arm Carry",
+            weight: "30",
+            performance: ".23",
+            setsCompleted: "",
+            target: "30/30 for Distance",
+            metric: "distance",
+            supportMetrics: {
+  Weight: "30",
+  Time: "3 minutes",
+  Target: "30/30 for Distance",
+  Resistance: "3"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day1C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day1-c-1-ecc-roller-hamstring-curl",
+            exerciseName: "ECC. Roller Hamstring Curl",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day1-c-2-side-raise-front-raise-combo",
+            exerciseName: "Side Raise/Front Raise Combo",
+            weight: "12",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-27T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-30",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day2,
+    memberId,
+    date: "May 31, 2026",
+    sessionNumber: "30",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day2A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-a-1-ecc-lat-pulldown",
+            exerciseName: "ECC Lat Pulldown",
+            weight: "90",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-a-2-goblet-squat",
+            exerciseName: "Goblet Squat",
+            weight: "60",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single1-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-b-1-cable-tricep-pushdown",
+            exerciseName: "Cable Tricep Pushdown",
+            weight: "32",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-b-2-cable-situps",
+            exerciseName: "Cable Situps",
+            weight: "67",
+            performance: "",
+            setsCompleted: "6",
+            target: "12 down by 1",
+            metric: "sets",
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-single2-mb-alt-rot-slams",
+            exerciseName: "MB Alt. Rot. Slams",
+            weight: "12",
+            performance: "Check",
+            setsCompleted: "",
+            target: "40/20",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "40/20"
+},
+            scoringDirection: "completion",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day2C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day2-c-1-kbdl",
+            exerciseName: "KBDL",
+            weight: "97",
+            performance: "",
+            setsCompleted: "6",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day2-c-2-bicycle-crunch",
+            exerciseName: "Bicycle Crunch",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-05-31T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-31",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day3,
+    memberId,
+    date: "June 10, 2026",
+    sessionNumber: "31",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day3A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-a-1-inc-db-bench-press",
+            exerciseName: "Inc. DB Bench Press",
+            weight: "40",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-a-2-bench-1-leg-glute-bridge",
+            exerciseName: "Bench 1 Leg Glute Bridge",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single1-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "3:00",
+            setsCompleted: "",
+            target: "40 Calories",
+            metric: "time",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "Rec.",
+  Target: "40 Calories"
+},
+            scoringDirection: "lowerIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-b-1-seated-row",
+            exerciseName: "Seated Row",
+            weight: "90",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-b-2-bear-to-pushup",
+            exerciseName: "Bear to Pushup",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "6",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-single2-skiier",
+            exerciseName: "Skiier",
+            weight: "BW",
+            performance: "39",
+            setsCompleted: "",
+            target: "Calories",
+            metric: "calories",
+            supportMetrics: {
+  Weight: "BW",
+  Time: "3 minutes",
+  Target: "Calories"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day3C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day3-c-1-contra-step-ups",
+            exerciseName: "Contra. Step-Ups",
+            weight: "25",
+            performance: "",
+            setsCompleted: "6",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day3-c-2-1-arm-sl-situp",
+            exerciseName: "1 Arm SL Situp",
+            weight: "10",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-06-10T00:00:00.000Z",
+  },
+  {
+    id: "program-4-session-32",
+    programId: "program-4",
+    routineId: ROUTINE_IDS.day4,
+    memberId,
+    date: "June 14, 2026",
+    sessionNumber: "32",
+    contextFlags: [],
+    blocks: [
+      {
+        blockId: BLOCK_IDS.day4A,
+        blockTitle: "Paired Block A",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-a-1-db-rdl",
+            exerciseName: "DB RDL",
+            weight: "55",
+            performance: "",
+            setsCompleted: "5",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-a-2-seated-1-arm-ohp",
+            exerciseName: "Seated 1 Arm OHP",
+            weight: "27",
+            performance: "",
+            setsCompleted: "4",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single1,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single1-mb-slams",
+            exerciseName: "MB Slams",
+            weight: "12",
+            performance: "85",
+            setsCompleted: "",
+            target: "Reps",
+            metric: "reps",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "Reps"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4B,
+        blockTitle: "Paired Block B",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-b-1-1-arm-cross-lat-pulldown",
+            exerciseName: "1 Arm Cross Lat Pulldown",
+            weight: "37",
+            performance: "",
+            setsCompleted: "5",
+            target: "10 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-b-2-pause-shoulder-taps",
+            exerciseName: "PAUSE Shoulder Taps",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "4",
+            target: "5 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4Single2,
+        blockTitle: "Single Block",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-single2-1-leg-mb-slam-mb-slam",
+            exerciseName: "1 Leg MB Slam/MB Slam",
+            weight: "12",
+            performance: "3",
+            setsCompleted: "",
+            target: "5/10",
+            metric: "performance",
+            supportMetrics: {
+  Weight: "12",
+  Time: "3 minutes",
+  Target: "5/10"
+},
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+      {
+        blockId: BLOCK_IDS.day4C,
+        blockTitle: "Paired Block C",
+        contextFlags: [],
+        entries: [
+          {
+            exerciseId: "p4-day4-c-1-quad-ext",
+            exerciseName: "Quad Ext.",
+            weight: "75",
+            performance: "",
+            setsCompleted: "5",
+            target: "12 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+          {
+            exerciseId: "p4-day4-c-2-crunch-iso-alt-ll",
+            exerciseName: "Crunch Iso Alt. LL",
+            weight: "BW",
+            performance: "",
+            setsCompleted: "5",
+            target: "8 reps",
+            metric: "sets",
+            scoringDirection: "higherIsBetter",
+          },
+        ],
+      },
+    ],
+    createdAt: "2026-06-14T00:00:00.000Z",
+  },
+]);
+
 function buildInitialPrograms(): Program[] {
-  return [createProgramOne(), createProgramTwo(), createProgramThree()];
+  return [createProgramOne(), createProgramTwo(), createProgramThree(), createProgramFour()];
 }
 
 const mergeProgramsWithBase = (storedPrograms: Program[]) => {
@@ -2492,6 +7529,25 @@ const inferMetricFromTarget = (target: string, fallback = "reps") => {
   if (normalized.includes("rep")) return "reps";
   return fallback;
 };
+const inferProgramScoringDirection = ({
+  value,
+  target,
+  time,
+}: {
+  value?: string;
+  target?: string;
+  time?: string;
+}): SessionScoringDirection => {
+  const normalizedValue = String(value || "").trim().toLowerCase();
+  const normalizedTarget = String(target || "").trim().toLowerCase();
+  const normalizedTime = String(time || "").trim().toLowerCase();
+
+  if (normalizedValue === "check") return "completion";
+  if (normalizedTime.startsWith("rec")) return "lowerIsBetter";
+  if (normalizedTarget.includes("down by 1")) return "lowerIsBetter";
+  return "higherIsBetter";
+};
+
 
 
 type RelayParsedExercise = {
@@ -2499,11 +7555,14 @@ type RelayParsedExercise = {
   weight: string;
   target: string;
   value: string;
+  supportMetrics?: Record<string, string>;
+  scoringDirection?: SessionScoringDirection;
 };
 
 type RelayParsedBlock = {
   type: BlockType;
   label?: string;
+  flags?: string[];
   exercises: RelayParsedExercise[];
 };
 
@@ -2517,63 +7576,110 @@ const getRelayLineValue = (input: string, label: string) => {
   }
   return "";
 };
+const getRelaySupportMetrics = (input: string) => {
+  const supportMetrics: Record<string, string> = {};
+  String(input || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .forEach((line) => {
+      const match = line.match(/^([^:]+):\s*(.*)$/);
+      if (!match) return;
+      const key = match[1].trim();
+      const value = match[2].trim();
+      if (!key || ["Exercise", "Exercise 1", "Exercise 2", "Performance", "Sets", "Sets Complete"].includes(key)) return;
+      supportMetrics[key] = value;
+    });
+  return supportMetrics;
+};
+
+const getRelayBlockFlags = (heading: string) =>
+  String(heading || "")
+    .split("|")
+    .slice(1)
+    .map((part) => part.trim())
+    .filter((part) => part && !/\d+\s*min/i.test(part))
+    .map((part) => part.toLowerCase());
+
 
 const parseRelaySessionChunk = (chunk: string): RelayParsedBlock[] => {
   const blockMatches =
-    chunk.match(/(Paired Block [A-Z]|Single Block)[\s\S]*?(?=(Paired Block [A-Z]|Single Block|$))/g) || [];
+    chunk.match(/((?:Paired Block [A-Z]|PB-[A-Z]|Single Block|SB)\b[^\n]*[\s\S]*?)(?=\n\s*(?:Paired Block [A-Z]|PB-[A-Z]|Single Block|SB)\b|$)/g) || [];
 
   return blockMatches.map((block) => {
-    if (block.includes("Paired Block")) {
-      const label = block.match(/Paired Block\s+([A-Z])/i)?.[1]?.trim() || "";
+    const heading = String(block || "").split(/\r?\n/)[0] || "";
+    const flags = getRelayBlockFlags(heading);
+
+    if (/\b(?:Paired Block|PB-)/i.test(block)) {
+      const label = block.match(/(?:Paired Block\s+|PB-)([A-Z])/i)?.[1]?.trim() || "";
       const ex1Section = block.match(/Exercise 1:[\s\S]*?(?=Exercise 2:|$)/)?.[0] || "";
       const ex2Section = block.match(/Exercise 2:[\s\S]*?$/)?.[0] || "";
+
+      const exercise1Target = getRelayLineValue(ex1Section, "Target:");
+      const exercise2Target = getRelayLineValue(ex2Section, "Target:");
+      const exercise1Value = extractFirstNumber(getRelayLineValue(ex1Section, "Sets Complete:") || getRelayLineValue(ex1Section, "Sets:"));
+      const exercise2Value = extractFirstNumber(getRelayLineValue(ex2Section, "Sets Complete:") || getRelayLineValue(ex2Section, "Sets:"));
 
       return {
         type: "paired" as const,
         label,
+        flags,
         exercises: [
           {
             name: getRelayLineValue(ex1Section, "Exercise 1:"),
             weight: normalizeWeightInput(getRelayLineValue(ex1Section, "Weight:")),
-            target: getRelayLineValue(ex1Section, "Target:"),
-            value: extractFirstNumber(getRelayLineValue(ex1Section, "Sets Complete:")),
+            target: exercise1Target,
+            value: exercise1Value,
+            scoringDirection: inferProgramScoringDirection({ value: exercise1Value, target: exercise1Target }),
           },
           {
             name: getRelayLineValue(ex2Section, "Exercise 2:"),
             weight: normalizeWeightInput(getRelayLineValue(ex2Section, "Weight:")),
-            target: getRelayLineValue(ex2Section, "Target:"),
-            value: extractFirstNumber(getRelayLineValue(ex2Section, "Sets Complete:")),
+            target: exercise2Target,
+            value: exercise2Value,
+            scoringDirection: inferProgramScoringDirection({ value: exercise2Value, target: exercise2Target }),
           },
         ],
       };
     }
 
+    const supportMetrics = getRelaySupportMetrics(block);
+    const target = getRelayLineValue(block, "Target:");
+    const value = getRelayLineValue(block, "Performance:");
+
     return {
       type: "single" as const,
+      flags,
       exercises: [
         {
           name: getRelayLineValue(block, "Exercise:"),
           weight: normalizeWeightInput(getRelayLineValue(block, "Weight:")),
-          target: getRelayLineValue(block, "Target:"),
-          value: extractFirstNumber(getRelayLineValue(block, "Performance:")),
+          target,
+          value,
+          supportMetrics,
+          scoringDirection: inferProgramScoringDirection({ value, target, time: supportMetrics.Time }),
         },
       ],
     };
   });
 };
-
 const parseRelayImportedSessions = (raw: string, program: Program, memberId: string) => {
   const sections = String(raw || "")
     .replace(/^\s*Program:\s*\d+\s*$/gim, "")
-    .split(/(?=^\s*Session #:\s*\d+)/gm)
+    .split(/(?=^\s*(?:Session #|Session):\s*\d+)/gm)
     .map((section) => section.trim())
-    .filter((section) => section && /Session #:/i.test(section));
+    .filter((section) => section && /(?:Session #|Session):/i.test(section));
 
   const sessions: SavedSession[] = [];
 
   sections.forEach((section) => {
-    const sessionNumber = Number(getRelayLineValue(section, "Session #:"));
+    const sessionNumber = Number(extractFirstNumber(getRelayLineValue(section, "Session #:") || getRelayLineValue(section, "Session:")));
     const date = getRelayLineValue(section, "Date:");
+    const sessionHeader = (section.split(/\r?\n/).find((line) => /^\s*(?:Session #|Session):/i.test(line)) || "");
+    const sessionFlags = sessionHeader
+      .split(/[-|]/)
+      .slice(1)
+      .map((flag) => flag.trim().toLowerCase())
+      .filter(Boolean);
     const routineLabel = getRelayLineValue(section, "Routine:");
     const routine = getRoutineTemplateByLabel(program, routineLabel);
 
@@ -2588,6 +7694,7 @@ const parseRelayImportedSessions = (raw: string, program: Program, memberId: str
         return {
           blockId: templateBlock.id,
           blockTitle: templateBlock.title,
+          contextFlags: importedBlock?.flags || [],
           entries: templateBlock.exercises.map((exercise) => ({
             exerciseId: exercise.id,
             exerciseName: exercise.name,
@@ -2596,6 +7703,9 @@ const parseRelayImportedSessions = (raw: string, program: Program, memberId: str
             setsCompleted: "",
             target: exercise.target,
             metric: exercise.metric,
+            supportMetrics: {},
+            contextFlags: [],
+            scoringDirection: "higherIsBetter",
           })),
         };
       }
@@ -2603,6 +7713,7 @@ const parseRelayImportedSessions = (raw: string, program: Program, memberId: str
       return {
         blockId: templateBlock.id,
         blockTitle: templateBlock.title,
+        contextFlags: importedBlock.flags || [],
         entries: templateBlock.exercises.map((exercise, exerciseIndex) => {
           const importedEntry = importedBlock.exercises[exerciseIndex];
           const exerciseName = importedEntry?.name || exercise.name;
@@ -2620,6 +7731,13 @@ const parseRelayImportedSessions = (raw: string, program: Program, memberId: str
             setsCompleted: importedBlock.type === "paired" ? importedEntry?.value || "" : "",
             target,
             metric,
+            supportMetrics: importedEntry?.supportMetrics || {},
+            contextFlags: [],
+            scoringDirection: importedEntry?.scoringDirection || inferProgramScoringDirection({
+              value: importedEntry?.value,
+              target,
+              time: importedEntry?.supportMetrics?.Time,
+            }),
           };
         }),
       };
@@ -2633,6 +7751,7 @@ const parseRelayImportedSessions = (raw: string, program: Program, memberId: str
       date: normalizeImportedDate(date),
       sessionNumber: String(sessionNumber),
       blocks,
+      contextFlags: sessionFlags,
       createdAt: getSafeDateIsoString(date),
     });
   });
@@ -2641,7 +7760,7 @@ const parseRelayImportedSessions = (raw: string, program: Program, memberId: str
 };
 
 const parseAnyImportedSessions = (raw: string, program: Program, memberId: string) => {
-  return /Session #:/i.test(raw) && /Routine:\s*Day\s*\d+/i.test(raw)
+  return (/(Session #|Session):/i.test(raw) && /Routine:\s*Day\s*\d+/i.test(raw))
     ? parseRelayImportedSessions(raw, program, memberId)
     : parseImportedSessions(raw, program, memberId);
 };
@@ -6793,11 +11912,11 @@ export default function App() {
       matchingBlock.entries.forEach((entry, entryIndex) => {
         const exercise = exerciseLookup.get(entry.exerciseId);
         const rawY = selectedBlock.type === "single" ? entry.performance : entry.setsCompleted;
-        const y = Number(rawY);
+        const y = parseProgramGraphMetricValue(rawY);
         const sessionNumber = Number(session.sessionNumber);
         const slot: 1 | 2 = selectedBlock.type === "paired" ? (entryIndex === 0 ? 1 : 2) : 1;
 
-        if (!Number.isFinite(y) || !Number.isFinite(sessionNumber)) return;
+        if (y == null || !Number.isFinite(y) || !Number.isFinite(sessionNumber)) return;
 
         if (!seriesMap[entry.exerciseId]) {
           seriesMap[entry.exerciseId] = {
@@ -6815,12 +11934,16 @@ export default function App() {
           sessionNumber,
           date: session.date,
           performance: entry.performance,
+          rawPerformance: rawY,
           duration: selectedBlock.duration,
           exerciseName: entry.exerciseName,
           target: entry.target || exercise?.target || "",
           metric: entry.metric || exercise?.metric || "",
           blockType: selectedBlock.type,
           slot,
+          supportMetrics: entry.supportMetrics || {},
+          contextFlags: mergeContextFlags(session.contextFlags, matchingBlock.contextFlags, entry.contextFlags),
+          scoringDirection: entry.scoringDirection,
         });
       });
     });
@@ -7155,6 +12278,23 @@ export default function App() {
         return hasProgramThree ? prev : [...prev, ...seededSessions];
       });
       window.localStorage.setItem(STORAGE_KEYS.seededProgram3, "true");
+    }
+  }, [members, programs]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const alreadySeededProgram4 = window.localStorage.getItem(STORAGE_KEYS.seededProgram4);
+    if (!alreadySeededProgram4 && members[0] && programs.find((program) => program.id === "program-4")) {
+      const programFour = programs.find((program) => program.id === "program-4");
+      if (!programFour) return;
+
+      const seededSessions = buildProgramFourSeedSessions(members[0].id);
+      setSavedSessions((prev) => {
+        const hasProgramFour = prev.some((session) => session.programId === programFour.id && session.memberId === members[0].id);
+        return hasProgramFour ? prev : [...prev, ...seededSessions];
+      });
+      window.localStorage.setItem(STORAGE_KEYS.seededProgram4, "true");
     }
   }, [members, programs]);
 
@@ -8506,11 +13646,13 @@ export default function App() {
         memberId: existingSession.memberId,
         date: existingSession.date,
         sessionNumber: existingSession.sessionNumber,
+        contextFlags: existingSession.contextFlags || [],
         blocks: selectedRoutine.blocks.map((block) => {
           const savedBlock = existingSession.blocks.find((item) => item.blockId === block.id);
           return {
             blockId: block.id,
             blockTitle: block.title,
+            contextFlags: savedBlock?.contextFlags || [],
             entries: block.exercises.map((exercise) => {
               const savedEntry = savedBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
               return {
@@ -8521,6 +13663,9 @@ export default function App() {
                 setsCompleted: savedEntry?.setsCompleted || "",
                 target: exercise.target,
                 metric: exercise.metric,
+                supportMetrics: savedEntry?.supportMetrics || {},
+                contextFlags: savedEntry?.contextFlags || [],
+                scoringDirection: savedEntry?.scoringDirection,
               };
             }),
           };
@@ -8654,6 +13799,9 @@ export default function App() {
       if (selectedProgram.id === "program-3") {
         window.localStorage.setItem(STORAGE_KEYS.seededProgram3, "true");
       }
+      if (selectedProgram.id === "program-4") {
+        window.localStorage.setItem(STORAGE_KEYS.seededProgram4, "true");
+      }
     }
   };
 
@@ -8664,6 +13812,7 @@ export default function App() {
       window.localStorage.removeItem(STORAGE_KEYS.seeded);
       window.localStorage.removeItem(STORAGE_KEYS.seededProgram2);
       window.localStorage.removeItem(STORAGE_KEYS.seededProgram3);
+      window.localStorage.removeItem(STORAGE_KEYS.seededProgram4);
     }
   };
 

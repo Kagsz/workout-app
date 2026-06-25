@@ -13,7 +13,7 @@ import appBanner from "./assets/appbanner1.png";
 // ===== TYPES =====
 
 type Role = "admin" | "member";
-type Screen = "members" | "memberOverview" | "adminPrograms" | "builder" | "input" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
+type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
 type ProgramInputMode = "trainerInput" | "memberInput";
@@ -82,6 +82,7 @@ type TrackerEntry = {
   entryDate: string;
   createdAt: string;
   values: Record<string, string>;
+  circuitIndex?: number;
 };
 
 type TrackerExercise = {
@@ -110,6 +111,8 @@ type TrackerWorkout = {
   exerciseSlots?: TrackerWorkoutExerciseSlot[];
   startedAt?: string;
   completedAt?: string;
+  circuitTarget?: number;
+  currentCircuit?: number;
   archived?: boolean;
   createdAt: string;
 };
@@ -973,8 +976,22 @@ const normalizeTrackerWorkout = (workout: TrackerWorkout): TrackerWorkout => {
     ...workout,
     exerciseIds: exerciseSlots.map((slot) => slot.exerciseId),
     exerciseSlots,
+    circuitTarget: Math.max(1, Number(workout.circuitTarget || 1) || 1),
+    currentCircuit: Math.max(1, Number(workout.currentCircuit || 1) || 1),
   };
 };
+
+const getTrackerWorkoutCircuitTarget = (workout: TrackerWorkout | null | undefined) =>
+  Math.max(1, Number(workout?.circuitTarget || 1) || 1);
+
+const getTrackerWorkoutCurrentCircuit = (workout: TrackerWorkout | null | undefined) => {
+  const target = getTrackerWorkoutCircuitTarget(workout);
+  const current = Math.max(1, Number(workout?.currentCircuit || 1) || 1);
+  return Math.min(current, target);
+};
+
+const isTrackerEntryForCircuit = (entry: TrackerEntry, circuitIndex: number) =>
+  Math.max(1, Number(entry.circuitIndex || 1) || 1) === circuitIndex;
 
 const getTrackerContextKey = (exerciseId: string, workoutSlotId?: string | null) => workoutSlotId ? `workout-slot:${workoutSlotId}` : exerciseId;
 
@@ -6065,6 +6082,8 @@ export default function App() {
   const [activeExerciseName, setActiveExerciseName] = useState<string | null>(null);
   const [lastHoveredGraphPoint, setLastHoveredGraphPoint] = useState<ChartPoint | null>(null);
   const [sessionDraft, setSessionDraft] = useState<SessionDraft | null>(null);
+  const [adminDashRoutineFilter, setAdminDashRoutineFilter] = useState<string>("all");
+  const [adminDashSessionNumber, setAdminDashSessionNumber] = useState<string>("");
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
     if (typeof window === "undefined") return [];
     const stored = window.localStorage.getItem(STORAGE_KEYS.savedSessions);
@@ -6259,17 +6278,18 @@ export default function App() {
     [activeTrackerCycles, selectedTrackerCycleId]
   );
 
-  const hasWorkoutSlotEntrySinceStart = (slot: TrackerWorkoutExerciseSlot, workout: TrackerWorkout) => {
+  const hasWorkoutSlotEntrySinceStart = (slot: TrackerWorkoutExerciseSlot, workout: TrackerWorkout, circuitIndex = getTrackerWorkoutCurrentCircuit(workout)) => {
     if (!workout.startedAt) return false;
     const startedTime = getSafeDateTime(workout.startedAt);
     const startedDate = workout.startedAt.slice(0, 10);
-    return Boolean((slot.entries || []).find((entry) => getSafeDateTime(entry.createdAt || entry.entryDate) >= startedTime || String(entry.entryDate || "") >= startedDate));
+    return Boolean((slot.entries || []).find((entry) => isTrackerEntryForCircuit(entry, circuitIndex) && (getSafeDateTime(entry.createdAt || entry.entryDate) >= startedTime || String(entry.entryDate || "") >= startedDate)));
   };
 
   const getWorkoutFirstIncompleteSlotId = (workout: TrackerWorkout | null | undefined) => {
     if (!workout?.startedAt || workout.completedAt) return null;
     const normalized = normalizeTrackerWorkout(workout);
-    const firstOpenSlot = (normalized.exerciseSlots || []).find((slot) => !hasWorkoutSlotEntrySinceStart(slot, normalized));
+    const currentCircuit = getTrackerWorkoutCurrentCircuit(normalized);
+    const firstOpenSlot = (normalized.exerciseSlots || []).find((slot) => !hasWorkoutSlotEntrySinceStart(slot, normalized, currentCircuit));
     return firstOpenSlot?.id || null;
   };
 
@@ -6629,7 +6649,8 @@ export default function App() {
     const contextKey = getTrackerContextKey(pendingTrackerEntryExercise.id, pendingTrackerWorkoutSlotId);
     const entryDate = trackerEntryDateByExercise[contextKey] || getTodayInputDate();
     if (pendingTrackerWorkoutSlot?.slot) {
-      return (pendingTrackerWorkoutSlot.slot.entries || []).find((entry) => entry.entryDate === entryDate) || null;
+      const circuitIndex = getTrackerWorkoutCurrentCircuit(normalizeTrackerWorkout(pendingTrackerWorkoutSlot.workout));
+      return (pendingTrackerWorkoutSlot.slot.entries || []).find((entry) => entry.entryDate === entryDate && isTrackerEntryForCircuit(entry, circuitIndex)) || null;
     }
     return (pendingTrackerEntryExercise.entries || []).find((entry) => entry.entryDate === entryDate) || null;
   }, [pendingTrackerEntryExercise, pendingTrackerWorkoutSlot, pendingTrackerWorkoutSlotId, trackerEntryDateByExercise]);
@@ -6670,7 +6691,7 @@ export default function App() {
   const selectedProgram = useMemo(
     () =>
       programs.find((program) => program.id === selectedProgramId) ||
-      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")
+      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
         ? adminSortedPrograms[0] || null
         : sortedPrograms[0] || null),
     [programs, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
@@ -6686,20 +6707,6 @@ export default function App() {
     [selectedRoutine, selectedBlockId]
   );
 
-  const matchingSavedSessions = useMemo(() => {
-    if (!selectedProgram || !selectedRoutine || !selectedMember) return [];
-
-    return [...savedSessions]
-      .filter(
-        (session) =>
-          session.programId === selectedProgram.id &&
-          session.routineId === selectedRoutine.id &&
-          session.memberId === selectedMember.id
-      )
-      .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt));
-  }, [savedSessions, selectedMember, selectedProgram, selectedRoutine]);
-
-  const latestSavedSession = matchingSavedSessions[0] || null;
 
 
   const premiumProgramInputActive = canMemberEnterProgramResults(selectedProgram, selectedMember);
@@ -7838,11 +7845,14 @@ export default function App() {
     const exercise = trackerExercises.find((item) => item.id === exerciseId);
     const metrics = exercise?.metrics || [];
     const values = Object.fromEntries(metrics.map((metric) => [metric, isCompletionMetric(metric) && isTruthyCompletionValue(draftValues[metric] || "") ? "Completed" : String(draftValues[metric] || "").trim()])) as Record<string, string>;
+    const activeWorkoutForEntry = pendingTrackerWorkoutSlot?.workout ? normalizeTrackerWorkout(pendingTrackerWorkoutSlot.workout) : null;
+    const activeCircuitIndex = activeWorkoutForEntry ? getTrackerWorkoutCurrentCircuit(activeWorkoutForEntry) : undefined;
     const entry: TrackerEntry = {
       id: pendingTrackerExistingEntry?.id || uid(),
       entryDate,
       createdAt: new Date().toISOString(),
       values,
+      circuitIndex: activeCircuitIndex,
     };
 
     if (pendingTrackerWorkoutSlotId) {
@@ -7851,7 +7861,7 @@ export default function App() {
           const normalized = normalizeTrackerWorkout(workout);
           const nextSlots = (normalized.exerciseSlots || []).map((slot) => {
             if (slot.id !== pendingTrackerWorkoutSlotId) return slot;
-            const existingEntry = (slot.entries || []).find((item) => item.entryDate === entryDate);
+            const existingEntry = (slot.entries || []).find((item) => item.entryDate === entryDate && isTrackerEntryForCircuit(item, activeCircuitIndex || 1));
             return {
               ...slot,
               entries: existingEntry
@@ -7862,8 +7872,13 @@ export default function App() {
           if (normalized.id !== pendingTrackerWorkoutSlot?.workout.id) return workout;
           const startedAt = normalized.startedAt || new Date().toISOString();
           const updatedWorkout = { ...normalized, startedAt, completedAt: undefined, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
-          const allSlotsComplete = Boolean(updatedWorkout.startedAt) && (nextSlots.length > 0) && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout));
-          return allSlotsComplete ? { ...updatedWorkout, completedAt: new Date().toISOString() } : updatedWorkout;
+          const currentCircuit = getTrackerWorkoutCurrentCircuit(updatedWorkout);
+          const targetCircuit = getTrackerWorkoutCircuitTarget(updatedWorkout);
+          const allSlotsComplete = Boolean(updatedWorkout.startedAt) && (nextSlots.length > 0) && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout, currentCircuit));
+
+          if (!allSlotsComplete) return updatedWorkout;
+          if (currentCircuit < targetCircuit) return { ...updatedWorkout, currentCircuit: currentCircuit + 1, completedAt: undefined };
+          return { ...updatedWorkout, completedAt: new Date().toISOString(), currentCircuit: targetCircuit };
         })
       );
     } else {
@@ -7966,7 +7981,11 @@ export default function App() {
   const startTrackerWorkout = (workoutId: string) => {
     const now = new Date().toISOString();
     setTrackerWorkouts((current) =>
-      current.map((workout) => workout.id === workoutId ? { ...normalizeTrackerWorkout(workout), startedAt: now, completedAt: undefined } : workout)
+      current.map((workout) =>
+        workout.id === workoutId
+          ? { ...normalizeTrackerWorkout(workout), startedAt: now, completedAt: undefined, currentCircuit: 1, circuitTarget: getTrackerWorkoutCircuitTarget(workout) }
+          : workout
+      )
     );
     openTrackerWorkout(workoutId);
   };
@@ -7974,6 +7993,55 @@ export default function App() {
   const markTrackerWorkoutComplete = (workoutId: string) => {
     setTrackerWorkouts((current) =>
       current.map((workout) => workout.id === workoutId ? { ...normalizeTrackerWorkout(workout), completedAt: new Date().toISOString(), startedAt: workout.startedAt || new Date().toISOString() } : workout)
+    );
+  };
+
+  const updateTrackerWorkoutCircuitTarget = (workoutId: string, delta: number) => {
+    setTrackerWorkouts((current) =>
+      current.map((workout) => {
+        if (workout.id !== workoutId) return workout;
+        const normalized = normalizeTrackerWorkout(workout);
+        const nextTarget = Math.max(1, getTrackerWorkoutCircuitTarget(normalized) + delta);
+        const nextCurrent = Math.min(getTrackerWorkoutCurrentCircuit(normalized), nextTarget);
+        return { ...normalized, circuitTarget: nextTarget, currentCircuit: nextCurrent, completedAt: undefined };
+      })
+    );
+  };
+
+  const renderTrackerCircuitControl = (workout: TrackerWorkout, compact = false) => {
+    const normalized = normalizeTrackerWorkout(workout);
+    const target = getTrackerWorkoutCircuitTarget(normalized);
+    const current = getTrackerWorkoutCurrentCircuit(normalized);
+    const isActive = Boolean(normalized.startedAt && !normalized.completedAt);
+    const label = isActive && !compact ? `Circuit ${current} / ${target}` : `${target}x`;
+
+    return (
+      <div className={`flex items-center gap-1 rounded-xl border border-zinc-200 bg-white ${compact ? "px-1.5 py-1" : "px-2 py-1"}`}>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            updateTrackerWorkoutCircuitTarget(normalized.id, -1);
+          }}
+          className="rounded-lg border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 disabled:opacity-40"
+          disabled={target <= 1}
+          aria-label="Decrease circuit count"
+        >
+          −
+        </button>
+        <span className={`${compact ? "min-w-7" : "min-w-20"} text-center text-xs font-semibold text-zinc-800`}>{label}</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            updateTrackerWorkoutCircuitTarget(normalized.id, 1);
+          }}
+          className="rounded-lg border border-zinc-300 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700"
+          aria-label="Increase circuit count"
+        >
+          +
+        </button>
+      </div>
     );
   };
 
@@ -8197,9 +8265,10 @@ export default function App() {
               <div className="text-xs text-zinc-500">{workoutSlots.length} exercises</div>
             </div>
           </button>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {cycleContext ? <SmallButton onClick={(event) => { event.stopPropagation(); setCycleNextWorkout(cycleContext.id, normalized.id); }}>Set Next Up</SmallButton> : null}
-            {!cycleContext ? <SmallButton onClick={() => startTrackerWorkout(normalized.id)}>{hasGap ? "Resume" : "Start"}</SmallButton> : null}
+            {!cycleContext ? renderTrackerCircuitControl(normalized, true) : null}
+            {!cycleContext ? <SmallButton onClick={(event) => { event.stopPropagation(); startTrackerWorkout(normalized.id); }}>{"Start"}</SmallButton> : null}
           </div>
         </div>
       </div>
@@ -8232,16 +8301,18 @@ export default function App() {
         setScreen("memberOverview");
         return;
       }
-      if (screen === "builder") {
-        if (builderSource === "memberOverview") {
-          setScreen("memberOverview");
-        } else {
-          goAdminPrograms();
-        }
+      if (screen === "programView") {
+        goAdminPrograms();
         return;
       }
-      if (screen === "input") {
-        goAdminMembers();
+      if (screen === "builder") {
+        setScreen(selectedProgram ? "programView" : "adminPrograms");
+        return;
+      }
+      if (screen === "adminDash" || screen === "input") {
+        if (selectedProgram) setScreen("programView");
+        else if (selectedMember) setScreen("memberOverview");
+        else goAdminMembers();
       }
       return;
     }
@@ -8286,11 +8357,9 @@ export default function App() {
     if (role === "admin") {
       if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
-      if (screen === "builder") {
-        if (builderSource === "memberOverview") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
-        return "Back to All Programs";
-      }
-      if (screen === "input") return "Back to Client List";
+      if (screen === "programView") return "Back to All Programs";
+      if (screen === "builder") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to All Programs";
+      if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Client List";
       return "";
     }
     if (screen === "programs") return "Back to Member View";
@@ -8352,7 +8421,7 @@ export default function App() {
 
   const goAdminInput = () => {
     setRole("admin");
-    setScreen("input");
+    setScreen("adminDash");
   };
 
   const goMemberPrograms = () => {
@@ -8364,7 +8433,7 @@ export default function App() {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen(role === "admin" ? "builder" : "routines");
+    setScreen(role === "admin" ? "programView" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -8425,26 +8494,6 @@ export default function App() {
         ),
       };
     });
-  };
-
-  const saveSession = () => {
-    if (!sessionDraft || !selectedProgram || !selectedRoutine || !selectedMember) return;
-
-    const trimmedDate = sessionDraft.date.trim();
-    const trimmedSessionNumber = sessionDraft.sessionNumber.trim();
-
-    if (!trimmedDate || !trimmedSessionNumber) return;
-
-    const savedSession: SavedSession = {
-      ...sessionDraft,
-      date: trimmedDate,
-      sessionNumber: trimmedSessionNumber,
-      id: uid(),
-      createdAt: new Date().toISOString(),
-    };
-
-    setSavedSessions((prev) => [...prev, savedSession]);
-    setSessionDraft(createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id));
   };
 
   const createMemberInputDraft = (existingSession?: SavedSession | null): SessionDraft | null => {
@@ -8618,6 +8667,175 @@ export default function App() {
     }
   };
 
+
+  const getProgramBlockMetricLabel = (block: Block) => {
+    const inputMetric = block.exercises
+      .flatMap((exercise) => getExerciseInputFields(exercise, block.type))
+      .map((field) => field.metric)
+      .find((metric) => String(metric || "").trim());
+    return inputMetric || (block.type === "single" ? "Performance" : "Sets");
+  };
+
+  const getProgramDesignBlockRows = (routine: Routine) => {
+    let pairedIndex = 0;
+    let singleIndex = 0;
+
+    return routine.blocks.map((block) => {
+      const letterIndex = block.type === "paired" ? pairedIndex++ : singleIndex++;
+      const letter = String.fromCharCode(65 + letterIndex);
+      const typeLabel = block.type === "paired" ? `Paired ${letter}` : `Single ${letter}`;
+      const details = [
+        formatDurationShort(block.duration),
+        getBlockInteractionLabel(block) ? "Alt." : "",
+        getProgramBlockMetricLabel(block),
+      ].filter(Boolean);
+
+      return {
+        block,
+        prefix: block.type === "paired" ? "•" : "-",
+        label: `${typeLabel}${details.length ? ` • ${details.join(" • ")}` : ""}`,
+      };
+    });
+  };
+
+  const renderReadOnlyProgramDesign = (program: Program) => (
+    <div className="space-y-4">
+      {program.routines.map((routine) => (
+        <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-zinc-900">{routine.label}</div>
+            <div className="text-xs text-zinc-500">{routine.blocks.length} blocks</div>
+          </div>
+          <div className="space-y-4">
+            {getProgramDesignBlockRows(routine).map(({ block, prefix, label }) => (
+              <div key={block.id} className="space-y-1">
+                <div className="text-sm font-semibold text-zinc-900">
+                  <span className="mr-2 text-zinc-500">{prefix}</span>
+                  {label}
+                </div>
+                {block.notes ? <div className="ml-5 text-xs text-zinc-500">{block.notes}</div> : null}
+                <div className="ml-5 space-y-1">
+                  {block.exercises.map((exercise, exerciseIndex) => (
+                    <div key={exercise.id} className="text-sm text-zinc-700">
+                      <span className="font-medium text-zinc-900">{block.type === "paired" ? `Ex${exerciseIndex + 1}: ` : "Ex: "}</span>
+                      {exercise.name || "Exercise"}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const getRoutinePlannedSessionNumbers = (program: Program, routine: Routine | null | undefined) => {
+    if (!routine) return [];
+    const routineIndex = program.routines.findIndex((item) => item.id === routine.id);
+    if (routineIndex < 0) return [];
+    const routineCount = Math.max(1, program.routines.length);
+    return Array.from({ length: getProgramLength(program) }, (_, index) => String(index * routineCount + routineIndex + 1));
+  };
+
+  const getAdminDashSessionNumbersForRoutine = (program: Program, routine: Routine | null | undefined) => {
+    if (!routine) return [];
+    const planned = getRoutinePlannedSessionNumbers(program, routine);
+    const saved = savedSessions
+      .filter((session) => session.programId === program.id && session.routineId === routine.id && (!selectedMember || session.memberId === selectedMember.id))
+      .map((session) => String(session.sessionNumber || "").trim())
+      .filter(Boolean);
+    return Array.from(new Set([...planned, ...saved])).sort((a, b) => Number(a) - Number(b));
+  };
+
+  const formatExerciseTargetForAdminDash = (exercise: Exercise, blockType?: BlockType) => {
+    const targetFields = getExerciseTargetFields(exercise, blockType);
+    const firstTarget = targetFields.map((field) => formatPremiumFieldLabel(field)).find((value) => String(value || "").trim());
+    if (firstTarget) return firstTarget;
+    return formatTargetLabel(exercise.target, exercise.metric);
+  };
+
+  const adminDashSessionOptions = useMemo(() => {
+    if (!selectedProgram || adminDashRoutineFilter === "all") return [];
+    const routine = selectedProgram.routines.find((item) => item.id === adminDashRoutineFilter) || null;
+    return getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
+  }, [adminDashRoutineFilter, savedSessions, selectedMember, selectedProgram]);
+
+  const loadAdminDashSession = (routine: Routine, sessionNumber: string) => {
+    if (!selectedProgram || !selectedMember) return;
+    const existingSession = savedSessions.find(
+      (session) =>
+        session.programId === selectedProgram.id &&
+        session.routineId === routine.id &&
+        session.memberId === selectedMember.id &&
+        String(session.sessionNumber || "").trim() === String(sessionNumber || "").trim()
+    );
+
+    const baseDraft = createSessionDraft(selectedProgram.id, routine, selectedMember.id);
+    const hydratedBlocks = baseDraft.blocks.map((baseBlock) => {
+      const savedBlock = existingSession?.blocks.find((block) => block.blockId === baseBlock.blockId);
+      if (!savedBlock) return baseBlock;
+
+      return {
+        ...baseBlock,
+        blockTitle: savedBlock.blockTitle || baseBlock.blockTitle,
+        entries: baseBlock.entries.map((baseEntry) => {
+          const savedEntry = savedBlock.entries.find((entry) => entry.exerciseId === baseEntry.exerciseId);
+          return savedEntry ? { ...baseEntry, ...savedEntry, target: baseEntry.target, metric: baseEntry.metric } : baseEntry;
+        }),
+      };
+    });
+
+    setAdminDashRoutineFilter(routine.id);
+    setSelectedRoutineId(routine.id);
+    setAdminDashSessionNumber(sessionNumber);
+    setSessionDraft(
+      existingSession
+        ? {
+            ...baseDraft,
+            date: existingSession.date,
+            sessionNumber: existingSession.sessionNumber,
+            blocks: hydratedBlocks,
+          }
+        : {
+            ...baseDraft,
+            date: getTodayInputDate(),
+            sessionNumber,
+          }
+    );
+  };
+
+  const saveAdminDashSession = () => {
+    if (!sessionDraft || !selectedProgram || !selectedRoutine || !selectedMember) return;
+
+    const trimmedDate = sessionDraft.date.trim();
+    const trimmedSessionNumber = sessionDraft.sessionNumber.trim();
+    if (!trimmedDate || !trimmedSessionNumber) return;
+
+    const existingSession = savedSessions.find(
+      (session) =>
+        session.programId === selectedProgram.id &&
+        session.routineId === selectedRoutine.id &&
+        session.memberId === selectedMember.id &&
+        String(session.sessionNumber || "").trim() === trimmedSessionNumber
+    );
+
+    const savedSession: SavedSession = {
+      ...sessionDraft,
+      date: trimmedDate,
+      sessionNumber: trimmedSessionNumber,
+      id: existingSession?.id || uid(),
+      createdAt: new Date().toISOString(),
+    };
+
+    setSavedSessions((prev) => [...prev.filter((session) => session.id !== savedSession.id), savedSession]);
+    setSessionDraft({
+      ...savedSession,
+      blocks: savedSession.blocks,
+    });
+  };
+
+
   const pathItems = useMemo(() => {
     if (role === "admin" && screen === "members") {
       return [{ label: "Admin" }, { label: "Client List" }];
@@ -8628,11 +8846,14 @@ export default function App() {
     if (role === "admin" && screen === "adminPrograms") {
       return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
-    if (role === "admin" && screen === "builder") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: builderSource === "memberOverview" ? (() => setScreen("memberOverview")) : goAdminPrograms }] : [{ label: "Build a Program" }]), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "admin" && screen === "programView") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (role === "admin" && screen === "input") {
-      return [{ label: "Admin" }, { label: "Data Input" }, ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "admin" && screen === "builder") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    }
+    if (role === "admin" && (screen === "adminDash" || screen === "input")) {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Admin Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "member" && screen === "memberHome") {
       return [{ label: "Member" }, { label: "Member View" }];
@@ -8689,7 +8910,7 @@ export default function App() {
 
                   <div className="flex flex-nowrap gap-2">
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && screen === "input"} onClick={goAdminInput}>Admin Input</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
                 </div>
@@ -8883,7 +9104,7 @@ export default function App() {
                                   setSelectedProgramId(activeAdminProgram.id);
                                   setSelectedRoutineId(activeAdminProgram.routines[0]?.id || null);
                                   setBuilderSource("memberOverview");
-                                  setScreen("builder");
+                                  setScreen("programView");
                                 }}
                                 className="mt-3 w-full"
                               >
@@ -8947,7 +9168,7 @@ export default function App() {
                                 setSelectedRoutineId(program.routines[0]?.id || null);
                                 setSelectedBlockId(program.routines[0]?.blocks[0]?.id || null);
                                 setBuilderSource("adminPrograms");
-                                setScreen("builder");
+                                setScreen("programView");
                               }}
                               className="text-left"
                             >
@@ -9016,13 +9237,16 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && screen === "builder" && (
+
+              {role === "admin" && screen === "programView" && selectedProgram && (
                 <div className="space-y-6">
-                  {selectedProgram ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Summary</div>
-                      <div className="mt-2 text-lg font-semibold text-zinc-900">{selectedProgram.name}</div>
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-zinc-600">
+                  <SectionCard title="Program Summary" collapsible>
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Summary</div>
+                        <div className="mt-2 text-lg font-semibold text-zinc-900">{selectedProgram.name}</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm text-zinc-600">
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                           <div className="text-base font-semibold text-zinc-900">{selectedProgram.routines.length}</div>
                           <div>Routines</div>
@@ -9040,12 +9264,45 @@ export default function App() {
                           <div>Total Sessions</div>
                         </div>
                       </div>
-                      <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
+                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
                         <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Notes</div>
                         <div>{String(selectedProgram.notes || "").trim() || "No program notes yet."}</div>
                       </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <PrimaryButton
+                          onClick={() => {
+                            setBuilderSource("adminPrograms");
+                            setScreen("builder");
+                          }}
+                        >
+                          Edit Program
+                        </PrimaryButton>
+                        <SmallButton
+                          onClick={() => {
+                            setAdminDashSessionNumber("");
+                            setSessionDraft(null);
+                            setScreen("adminDash");
+                          }}
+                        >
+                          Open Admin Dash
+                        </SmallButton>
+                      </div>
                     </div>
-                  ) : null}
+                  </SectionCard>
+
+                  <SectionCard title="Program Design" collapsible>
+                    {renderReadOnlyProgramDesign(selectedProgram)}
+                  </SectionCard>
+                </div>
+              )}
+
+              {role === "admin" && screen === "builder" && (
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Builder Workspace</div>
+                    <div className="mt-2 text-lg font-semibold text-zinc-900">{selectedProgram?.name || "New Program"}</div>
+                    <div className="mt-1 text-sm text-zinc-500">Use these sections only when creating or editing program design.</div>
+                  </div>
 
                   <SectionCard title="Build a Program" collapsible>
                     <div className="space-y-3">
@@ -9237,7 +9494,7 @@ export default function App() {
                                             <div key={field.id} className="grid grid-cols-[3.25rem_minmax(0,1fr)_3.75rem_34px] items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2">
                                               <button
                                                 type="button"
-                                                onClick={() => setPremiumMetricPicker({ routineId: selectedRoutine.id, blockId: block.id, exerciseId: exercise.id, fieldId: field.id, query: field.metric })}
+                                                onClick={() => setPremiumMetricPicker({ routineId: selectedRoutine.id, blockId: block.id, exerciseId: exercise.id, fieldId: field.id, query: "" })}
                                                 className="h-10 min-w-0 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2 text-center text-xs font-semibold text-zinc-900 hover:border-zinc-400 hover:bg-zinc-50"
                                                 title={field.metric || "Metric"}
                                               >
@@ -9286,14 +9543,246 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && screen === "input" && (
-                <SectionCard title="Admin Data Input" collapsible>
+              {role === "admin" && (screen === "adminDash" || screen === "input") && (
+                <SectionCard title="Admin Dash" collapsible>
                   <div className="space-y-4">
-                    <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">Builder sets the routine template: exercise names, targets, metrics, block duration, and screen tips. This input tab is where admin logs the actual session performance for a specific program, routine, and session number.</div>
+                    <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
+                      Choose a client, program, routine, and session. Leave Routine or Session on All to review the broader scope; choose a session to open the fast data-entry form.
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div>
+                        <Label>Client</Label>
+                        <select
+                          value={selectedMember?.id || ""}
+                          onChange={(event) => {
+                            const nextMemberId = event.target.value;
+                            setSelectedMemberId(nextMemberId);
+                            const nextProgram = programs.find((program) => (program.memberId || members[0]?.id || null) === nextMemberId);
+                            setSelectedProgramId(nextProgram?.id || null);
+                            setAdminDashRoutineFilter("all");
+                            setSelectedRoutineId(null);
+                            setAdminDashSessionNumber("");
+                            setSessionDraft(null);
+                          }}
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                        >
+                          {members.filter((member) => !member.archived).map((member) => (
+                            <option key={member.id} value={member.id}>{member.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <Label>Program</Label>
+                        <select
+                          value={selectedProgram?.id || ""}
+                          onChange={(event) => {
+                            const nextProgram = programs.find((program) => program.id === event.target.value) || null;
+                            setSelectedProgramId(nextProgram?.id || null);
+                            setAdminDashRoutineFilter("all");
+                            setSelectedRoutineId(null);
+                            setAdminDashSessionNumber("");
+                            setSessionDraft(null);
+                          }}
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                        >
+                          {adminSortedPrograms.map((program) => (
+                            <option key={program.id} value={program.id}>{program.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <Label>Routine</Label>
+                        <select
+                          value={adminDashRoutineFilter}
+                          onChange={(event) => {
+                            const nextRoutineId = event.target.value;
+                            setAdminDashRoutineFilter(nextRoutineId);
+                            setSelectedRoutineId(nextRoutineId === "all" ? null : nextRoutineId);
+                            setAdminDashSessionNumber("");
+                            setSessionDraft(null);
+                          }}
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                        >
+                          <option value="all">All Routines</option>
+                          {selectedProgram?.routines.map((routine) => (
+                            <option key={routine.id} value={routine.id}>{routine.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <Label>Session</Label>
+                        <select
+                          value={adminDashSessionNumber}
+                          disabled={adminDashRoutineFilter === "all"}
+                          onChange={(event) => {
+                            const nextSession = event.target.value;
+                            setAdminDashSessionNumber(nextSession);
+                            const routine = selectedProgram?.routines.find((item) => item.id === adminDashRoutineFilter) || null;
+                            if (routine && nextSession) loadAdminDashSession(routine, nextSession);
+                            else setSessionDraft(null);
+                          }}
+                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        >
+                          <option value="">All Sessions</option>
+                          {adminDashSessionOptions.map((sessionNumber) => (
+                            <option key={sessionNumber} value={sessionNumber}>Session {sessionNumber}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {selectedProgram ? (
+                      adminDashRoutineFilter === "all" ? (
+                        <div className="space-y-4">
+                          <div className="text-sm font-semibold text-zinc-900">Program Catalog</div>
+                          {selectedProgram.routines.map((routine) => {
+                            const routineSessions = getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
+                            return (
+                              <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="font-semibold text-zinc-900">{routine.label}</div>
+                                    <div className="text-xs text-zinc-500">{routine.blocks.length} blocks • {routineSessions.length} sessions</div>
+                                  </div>
+                                  <SmallButton
+                                    onClick={() => {
+                                      setAdminDashRoutineFilter(routine.id);
+                                      setSelectedRoutineId(routine.id);
+                                      setAdminDashSessionNumber("");
+                                      setSessionDraft(null);
+                                    }}
+                                  >
+                                    Open Routine
+                                  </SmallButton>
+                                </div>
+                                {renderReadOnlyProgramDesign({ ...selectedProgram, routines: [routine] })}
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {routineSessions.map((sessionNumber) => {
+                                    const hasSavedSession = savedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
+                                    return (
+                                      <button
+                                        key={sessionNumber}
+                                        type="button"
+                                        onClick={() => loadAdminDashSession(routine, sessionNumber)}
+                                        className={`rounded-xl border px-3 py-2 text-xs font-semibold ${hasSavedSession ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-zinc-50 text-zinc-700"}`}
+                                      >
+                                        S{sessionNumber}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : !adminDashSessionNumber ? (
+                        <div className="space-y-4">
+                          {(() => {
+                            const routine = selectedProgram.routines.find((item) => item.id === adminDashRoutineFilter);
+                            if (!routine) return <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">Select a routine.</div>;
+                            const routineSessions = getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
+                            return (
+                              <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                                <div className="mb-3">
+                                  <div className="font-semibold text-zinc-900">{routine.label}</div>
+                                  <div className="text-xs text-zinc-500">Choose a session to open the data-entry form.</div>
+                                </div>
+                                {renderReadOnlyProgramDesign({ ...selectedProgram, routines: [routine] })}
+                                <div className="mt-3 grid grid-cols-4 gap-2">
+                                  {routineSessions.map((sessionNumber) => {
+                                    const hasSavedSession = savedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
+                                    return (
+                                      <button
+                                        key={sessionNumber}
+                                        type="button"
+                                        onClick={() => loadAdminDashSession(routine, sessionNumber)}
+                                        className={`rounded-xl border px-3 py-2 text-xs font-semibold ${hasSavedSession ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-zinc-50 text-zinc-700"}`}
+                                      >
+                                        Session {sessionNumber}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <div>
+                              <Label>Date</Label>
+                              <TextInput value={sessionDraft?.date || ""} onChange={(e) => updateSessionDraftField("date", e.target.value)} placeholder="August 16, 2025" />
+                            </div>
+                            <div>
+                              <Label>Routine</Label>
+                              <div className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700">{selectedRoutine?.label || "Select Routine"}</div>
+                            </div>
+                            <div>
+                              <Label>Session #</Label>
+                              <TextInput value={sessionDraft?.sessionNumber || ""} onChange={(e) => { setAdminDashSessionNumber(e.target.value); updateSessionDraftField("sessionNumber", e.target.value); }} placeholder="16" />
+                            </div>
+                          </div>
+
+                          {selectedRoutine && sessionDraft ? (
+                            <>
+                              {selectedRoutine.blocks.map((block) => {
+                                const draftBlock = sessionDraft.blocks.find((entry) => entry.blockId === block.id);
+
+                                return (
+                                  <div key={block.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                                    <div className="mb-3 text-base font-semibold text-zinc-900">{block.title}</div>
+                                    <div className="mb-3 text-sm text-zinc-500">Screen tip for this block: {block.notes || "No screen tip added yet."}</div>
+                                    {block.type === "paired" ? (
+                                      <div className="space-y-3">
+                                        {block.exercises.map((exercise) => {
+                                          const draftExercise = draftBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
+
+                                          return (
+                                            <div key={exercise.id} className="grid gap-3 md:grid-cols-4">
+                                              <TextInput value={exercise.name} readOnly />
+                                              <TextInput type="text" inputMode="text" placeholder='Weight ("BW" or number)' value={draftExercise?.weight || ""} onChange={(e) => updateSessionExercise(block.id, exercise.id, "weight", e.target.value)} />
+                                              <TextInput value={formatExerciseTargetForAdminDash(exercise, block.type)} readOnly />
+                                              <TextInput placeholder="Sets Completed" value={draftExercise?.setsCompleted || ""} onChange={(e) => updateSessionExercise(block.id, exercise.id, "setsCompleted", e.target.value)} />
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div className="grid gap-3 md:grid-cols-4">
+                                        <TextInput value={block.exercises[0]?.name || "Exercise"} readOnly />
+                                        <TextInput type="text" inputMode="text" placeholder='Weight ("BW" or number)' value={draftBlock?.entries[0]?.weight || ""} onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "weight", e.target.value)} />
+                                        <TextInput value={formatExerciseTargetForAdminDash(block.exercises[0] || ({ id: "", name: "", target: "", metric: "" } as Exercise), block.type)} readOnly />
+                                        <TextInput placeholder="Performance" value={draftBlock?.entries[0]?.performance || ""} onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "performance", e.target.value)} />
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              <div className="flex justify-end">
+                                <PrimaryButton onClick={saveAdminDashSession} disabled={!sessionDraft.date.trim() || !sessionDraft.sessionNumber.trim()}>
+                                  Save Session
+                                </PrimaryButton>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">Select a routine and session to begin input.</div>
+                          )}
+                        </div>
+                      )
+                    ) : (
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">Select a program to begin.</div>
+                    )}
+
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="mb-2 text-sm font-semibold text-zinc-900">Bulk Import Data</div>
                       <div className="mb-3 text-sm text-zinc-500">Paste cleaned relay-format text here to replace all saved sessions for the selected member.</div>
-                      <TextArea value={importText} onChange={(e) => setImportText(e.target.value)} rows={16} />
+                      <TextArea value={importText} onChange={(e) => setImportText(e.target.value)} rows={10} />
                       <div className="mt-3 flex flex-wrap gap-2">
                         <PrimaryButton onClick={importProgramData}>Import Program Data</PrimaryButton>
                         <SmallButton onClick={clearStoredSessions}>Clear Stored Sessions</SmallButton>
@@ -9302,184 +9791,12 @@ export default function App() {
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="mb-2 text-sm font-semibold text-zinc-900">Relay Template</div>
                       <div className="mb-3 text-sm text-zinc-500">Use this format for future data handoff.</div>
-                      <TextArea value={RELAY_TEMPLATE_TEXT} readOnly rows={18} />
+                      <TextArea value={RELAY_TEMPLATE_TEXT} readOnly rows={10} />
                     </div>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <div>
-                        <Label>Date</Label>
-                        <TextInput value={sessionDraft?.date || ""} onChange={(e) => updateSessionDraftField("date", e.target.value)} placeholder="August 16, 2025" />
-                      </div>
-                      <div>
-                        <Label>Routine</Label>
-                        <div className="rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700">{selectedRoutine?.label || "Select Routine"}</div>
-                      </div>
-                      <div>
-                        <Label>Session #</Label>
-                        <TextInput value={sessionDraft?.sessionNumber || ""} onChange={(e) => updateSessionDraftField("sessionNumber", e.target.value)} placeholder="16" />
-                      </div>
-                    </div>
-
-                    {selectedRoutine && sessionDraft ? (
-                      <div className="space-y-4">
-                        {selectedRoutine.blocks.map((block) => {
-                          const draftBlock = sessionDraft.blocks.find((entry) => entry.blockId === block.id);
-
-                          return (
-                            <div key={block.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                              <div className="mb-3 text-base font-semibold text-zinc-900">{block.title}</div>
-                              <div className="mb-3 text-sm text-zinc-500">Screen tip for this block: {block.notes || "No screen tip added yet."}</div>
-                              {block.type === "paired" ? (
-                                <div className="space-y-3">
-                                  {block.exercises.map((exercise) => {
-                                    const draftExercise = draftBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
-
-                                    return (
-                                      <div key={exercise.id} className="grid gap-3 md:grid-cols-4">
-                                        <TextInput value={exercise.name} readOnly />
-                                        <TextInput
-                                          type="text"
-                                          inputMode="text"
-                                          placeholder='Weight ("BW" or number)'
-                                          value={draftExercise?.weight || ""}
-                                          onChange={(e) => updateSessionExercise(block.id, exercise.id, "weight", e.target.value)}
-                                        />
-                                        <TextInput
-                                          placeholder="Reps Per Set"
-                                          value={draftExercise?.performance || ""}
-                                          onChange={(e) => updateSessionExercise(block.id, exercise.id, "performance", e.target.value)}
-                                        />
-                                        <TextInput
-                                          placeholder="Sets Completed"
-                                          value={draftExercise?.setsCompleted || ""}
-                                          onChange={(e) => updateSessionExercise(block.id, exercise.id, "setsCompleted", e.target.value)}
-                                        />
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ) : (
-                                <div className="grid gap-3 md:grid-cols-4">
-                                  <TextInput value={block.exercises[0]?.name || "Exercise"} readOnly />
-                                  <TextInput
-                                    type="text"
-                                    inputMode="text"
-                                    placeholder='Weight ("BW" or number)'
-                                    value={draftBlock?.entries[0]?.weight || ""}
-                                    onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "weight", e.target.value)}
-                                  />
-                                  <TextInput
-                                    placeholder={`Metric / Target Per Set (${block.exercises[0]?.metric || "metric"})`}
-                                    value={draftBlock?.entries[0]?.performance || ""}
-                                    onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "performance", e.target.value)}
-                                  />
-                                  <TextInput
-                                    placeholder="Sets Completed"
-                                    value={draftBlock?.entries[0]?.setsCompleted || ""}
-                                    onChange={(e) => updateSessionExercise(block.id, block.exercises[0]?.id || "", "setsCompleted", e.target.value)}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        <div className="flex justify-end">
-                          <PrimaryButton onClick={saveSession} disabled={!sessionDraft.date.trim() || !sessionDraft.sessionNumber.trim()}>
-                            Save Session
-                          </PrimaryButton>
-                        </div>
-
-                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                          <div className="mb-2 text-sm font-semibold text-zinc-900">Saved Session Preview</div>
-                          {latestSavedSession ? (
-                            <div className="space-y-3 text-sm text-zinc-700">
-                              <div><span className="font-semibold">Date:</span> {latestSavedSession.date}</div>
-                              <div><span className="font-semibold">Session #:</span> {latestSavedSession.sessionNumber}</div>
-                              <div><span className="font-semibold">Routine:</span> {selectedRoutine?.label}</div>
-                              <div className="space-y-2">
-                                {latestSavedSession.blocks.map((block) => (
-                                  <div key={block.blockId} className="rounded-xl bg-zinc-50 p-3">
-                                    <div className="mb-1 font-medium text-zinc-900">{block.blockTitle}</div>
-                                    <div className="space-y-1 text-zinc-600">
-                                      {block.entries.map((entry) => (
-                                        <div key={entry.exerciseId}>
-                                          {entry.exerciseName}: {entry.weight || "—"} • {entry.performance || "—"} • {entry.setsCompleted || "—"}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-sm text-zinc-500">No saved session yet for this program/routine/member.</div>
-                          )}
-                        </div>
-
-                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold text-zinc-900">Saved Session History</div>
-                            <div className="text-xs text-zinc-500">Newest first</div>
-                          </div>
-                          {matchingSavedSessions.length ? (
-                            <div className="space-y-3">
-                              {matchingSavedSessions.map((session) => (
-                                <div key={session.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-                                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                    <div className="font-medium text-zinc-900">Session #{session.sessionNumber}</div>
-                                    <div className="text-xs text-zinc-500">{session.date}</div>
-                                  </div>
-                                  <div className="space-y-2">
-                                    {session.blocks.map((block) => (
-                                      <div key={block.blockId} className="rounded-lg bg-white p-2">
-                                        <div className="mb-1 text-sm font-medium text-zinc-900">{block.blockTitle}</div>
-                                        <div className="space-y-1 text-zinc-600">
-                                          {block.entries.map((entry) => (
-                                            <div key={entry.exerciseId}>
-                                              {entry.exerciseName}: {entry.weight || "—"} • {entry.performance || "—"} • {entry.setsCompleted || "—"}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-zinc-500">No saved session history yet for this program/routine/member.</div>
-                          )}
-                        </div>
-
-                        {selectedRoutine.blocks.length > 1 ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => stepGraphBlock("previous")}
-                              disabled={!canGoToPreviousBlock}
-                              aria-label="Previous graph"
-                              className="absolute left-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
-                            >
-                              ‹
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => stepGraphBlock("next")}
-                              disabled={!canGoToNextBlock}
-                              aria-label="Next graph"
-                              className="absolute right-0.5 top-1/2 flex h-11 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-zinc-300/35 bg-white/30 text-xl text-zinc-700 shadow-sm backdrop-blur-[1px] sm:hidden disabled:pointer-events-none disabled:opacity-20"
-                            >
-                              ›
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm text-zinc-500">No routine selected yet.</div>
-                    )}
                   </div>
                 </SectionCard>
               )}
+
 
               {role === "member" && screen === "memberHome" && selectedMember && (
                 <SectionCard title="Member View" collapsible>
@@ -10028,7 +10345,8 @@ export default function App() {
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <div className="text-xs text-zinc-500">{(selectedTrackerWorkout.exerciseSlots || []).length}</div>
-                          {!trackerWorkoutReturnCycleId ? <PrimaryButton onClick={() => startTrackerWorkout(selectedTrackerWorkout.id)}>{selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? "Resume Workout" : "Start Workout"}</PrimaryButton> : null}
+                          {!trackerWorkoutReturnCycleId ? renderTrackerCircuitControl(selectedTrackerWorkout) : null}
+                          {!trackerWorkoutReturnCycleId && !(selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt) ? <PrimaryButton onClick={() => startTrackerWorkout(selectedTrackerWorkout.id)}>Start Workout</PrimaryButton> : null}
                           {selectedTrackerWorkout.startedAt && !selectedTrackerWorkout.completedAt ? <SmallButton onClick={() => markTrackerWorkoutComplete(selectedTrackerWorkout.id)}>Mark Complete</SmallButton> : null}
                         </div>
                       </div>
