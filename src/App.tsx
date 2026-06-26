@@ -11377,6 +11377,7 @@ export default function App() {
   const [dbSessionsLoaded, setDbSessionsLoaded] = useState(false);
   const [dbSessionsLoading, setDbSessionsLoading] = useState(false);
   const [sessionsBridgeMessage, setSessionsBridgeMessage] = useState("");
+  const [importDiagnosticsLog, setImportDiagnosticsLog] = useState<string[]>([]);
   const [importText, setImportText] = useState(PROGRAM_1_IMPORT_TEMPLATE);
 
   const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(() => {
@@ -11707,6 +11708,56 @@ export default function App() {
     return parsed.toISOString().slice(0, 10);
   };
 
+  const formatImportError = (error: any) => {
+    if (!error) return "Unknown error";
+    const parts = [error.message, error.details, error.hint, error.code].filter(Boolean);
+    return parts.length ? parts.join(" | ") : String(error);
+  };
+
+  const pushImportDiagnostic = (line: string) => {
+    setImportDiagnosticsLog((prev) => [...prev, `${new Date().toLocaleTimeString()} — ${line}`].slice(-80));
+  };
+
+  const resetImportDiagnostics = (title: string) => {
+    setImportDiagnosticsLog([`${new Date().toLocaleTimeString()} — ${title}`]);
+  };
+
+  const getLocalSessionImportCandidates = () => {
+    const candidateMap = new Map<string, SavedSession>();
+    savedSessions.forEach((session) => candidateMap.set(session.id, session));
+
+    const ownerMemberId = members[0]?.id || selectedMember?.id || "";
+    const programOne = programs.find((program) => program.id === "program-1");
+    const programTwo = programs.find((program) => program.id === "program-2");
+    const programThree = programs.find((program) => program.id === "program-3");
+    const programFour = programs.find((program) => program.id === "program-4");
+
+    const seededSessions = [
+      ...(programOne && ownerMemberId ? parseImportedSessions(PROGRAM_1_IMPORT_TEMPLATE, programOne, ownerMemberId) : []),
+      ...(programTwo && ownerMemberId ? parseRelayImportedSessions(PROGRAM_2_RELAY_TEMPLATE, programTwo, ownerMemberId) : []),
+      ...(programThree && ownerMemberId ? parseRelayImportedSessions(PROGRAM_3_RELAY_TEMPLATE, programThree, ownerMemberId) : []),
+      ...(programFour && ownerMemberId ? buildProgramFourSeedSessions(ownerMemberId) : []),
+    ];
+
+    seededSessions.forEach((session) => {
+      if (!candidateMap.has(session.id)) candidateMap.set(session.id, session);
+    });
+
+    return [...candidateMap.values()].sort((a, b) => Number(a.sessionNumber || 0) - Number(b.sessionNumber || 0));
+  };
+
+  const getImportExpectedCounts = () => {
+    const localSessions = getLocalSessionImportCandidates();
+    return {
+      members: members.length,
+      programs: programs.length,
+      routines: programs.reduce((total, program) => total + program.routines.length, 0),
+      blocks: programs.reduce((programTotal, program) => programTotal + program.routines.reduce((routineTotal, routine) => routineTotal + routine.blocks.length, 0), 0),
+      sessions: localSessions.length,
+      sessionEntries: localSessions.reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0),
+    };
+  };
+
   const mapDbProgramToAppProgram = (program: DbProgramRow): Program =>
     normalizeProgram({
       id: String(program.id),
@@ -11860,19 +11911,28 @@ export default function App() {
   };
 
   const importLocalProgramsToSupabase = async () => {
+    resetImportDiagnostics("Program blueprint import started.");
+
     if (!canManageBusiness) {
-      setProgramsBridgeMessage("Only admins can import local programs.");
-      return;
+      const message = "Only admins can import local programs.";
+      setProgramsBridgeMessage(message);
+      pushImportDiagnostic(`STOP: ${message}`);
+      return false;
     }
 
     if (!dbMembersLoaded || !dbMembers.length) {
-      setProgramsBridgeMessage("Load/import Supabase members before importing programs.");
-      return;
+      const message = "Load/import Supabase members before importing programs.";
+      setProgramsBridgeMessage(message);
+      pushImportDiagnostic(`STOP: ${message}`);
+      return false;
     }
 
     setDbProgramsLoading(true);
     try {
-      await loadSupabasePrograms();
+      const expected = getImportExpectedCounts();
+      pushImportDiagnostic(`Expected local blueprints: ${expected.programs} programs, ${expected.routines} routines, ${expected.blocks} blocks.`);
+      pushImportDiagnostic(`DB members available: ${dbMembers.length}. Local members available: ${members.length}.`);
+
       const { data: existingRows, error: existingError } = await supabase
         .from("programs")
         .select("id, member_id, name, legacy_app_id");
@@ -11881,27 +11941,53 @@ export default function App() {
 
       const existingLegacyIds = new Set((existingRows || []).map((program: any) => String(program.legacy_app_id || "")).filter(Boolean));
       const existingSignatures = new Set((existingRows || []).map((program: any) => `${program.member_id}::${program.name}`.toLowerCase()));
+      pushImportDiagnostic(`Existing DB programs found before import: ${(existingRows || []).length}.`);
 
       let importedCount = 0;
+      let skippedCount = 0;
+      let routineCount = 0;
+      let blockCount = 0;
+
       for (const localProgram of programs) {
         const memberId = getDbMemberIdForLocalProgram(localProgram);
-        if (!memberId) continue;
+        const localMember = members.find((member) => member.id === localProgram.memberId) || members[0] || null;
+        const diagnosticName = `${localProgram.name} (${localProgram.id})`;
+
+        if (!memberId) {
+          skippedCount += 1;
+          pushImportDiagnostic(`SKIP ${diagnosticName}: no DB member match. Local member: ${localMember?.name || "none"} / ${localMember?.clientId || "no client ID"}.`);
+          continue;
+        }
 
         const signature = `${memberId}::${localProgram.name}`.toLowerCase();
-        if (existingLegacyIds.has(localProgram.id) || existingSignatures.has(signature)) continue;
+        if (existingLegacyIds.has(localProgram.id) || existingSignatures.has(signature)) {
+          skippedCount += 1;
+          pushImportDiagnostic(`SKIP ${diagnosticName}: already exists in DB.`);
+          continue;
+        }
 
+        pushImportDiagnostic(`INSERT ${diagnosticName}: member_id ${memberId}, ${localProgram.routines.length} routines.`);
         await insertSupabaseProgramBlueprint(localProgram, memberId);
         importedCount += 1;
+        routineCount += localProgram.routines.length;
+        blockCount += localProgram.routines.reduce((total, routine) => total + routine.blocks.length, 0);
+        existingLegacyIds.add(localProgram.id);
+        existingSignatures.add(signature);
       }
 
-      setProgramsBridgeMessage(
-        importedCount
-          ? `Imported ${importedCount} local program blueprint${importedCount === 1 ? "" : "s"} to Supabase.`
-          : "No new local program blueprints to import."
-      );
+      const message = importedCount
+        ? `Imported ${importedCount} local program blueprint${importedCount === 1 ? "" : "s"} to Supabase.`
+        : `No new local program blueprints to import. Skipped ${skippedCount}.`;
+
+      setProgramsBridgeMessage(message);
+      pushImportDiagnostic(`RESULT programs: inserted ${importedCount}, skipped ${skippedCount}, routines attempted ${routineCount}, blocks attempted ${blockCount}.`);
       await loadSupabasePrograms();
+      return true;
     } catch (error: any) {
-      setProgramsBridgeMessage(error?.message || "Unable to import local programs.");
+      const message = formatImportError(error);
+      setProgramsBridgeMessage(message || "Unable to import local programs.");
+      pushImportDiagnostic(`ERROR program import stopped: ${message}`);
+      return false;
     } finally {
       setDbProgramsLoading(false);
     }
@@ -12017,19 +12103,51 @@ export default function App() {
   };
 
   const importLocalSessionsToSupabase = async () => {
+    resetImportDiagnostics("Session import started.");
+
     if (!canManageBusiness) {
-      setSessionsBridgeMessage("Only admins can import local sessions.");
-      return;
+      const message = "Only admins can import local sessions.";
+      setSessionsBridgeMessage(message);
+      pushImportDiagnostic(`STOP: ${message}`);
+      return false;
     }
 
-    if (!dbMembersLoaded || !dbMembers.length || !dbProgramsLoaded || !dbPrograms.length) {
-      setSessionsBridgeMessage("Load/import Supabase members and programs before importing sessions.");
-      return;
+    if (!dbMembersLoaded || !dbMembers.length) {
+      const message = "Load/import Supabase members before importing sessions.";
+      setSessionsBridgeMessage(message);
+      pushImportDiagnostic(`STOP: ${message}`);
+      return false;
     }
 
     setDbSessionsLoading(true);
     try {
+      let availableDbPrograms = dbPrograms;
+      if (!dbProgramsLoaded || !dbPrograms.length) {
+        pushImportDiagnostic("DB programs not loaded; refreshing programs before session import.");
+        availableDbPrograms = await loadSupabasePrograms();
+      }
+
+      if (!availableDbPrograms.length) {
+        const message = "No Supabase programs found. Import program blueprints before importing sessions.";
+        setSessionsBridgeMessage(message);
+        pushImportDiagnostic(`STOP: ${message}`);
+        return false;
+      }
+
+      const localSessionsForImport = getLocalSessionImportCandidates();
+      const expectedEntries = localSessionsForImport.reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0);
+      pushImportDiagnostic(`Local session candidates: ${localSessionsForImport.length}. Saved localStorage sessions: ${savedSessions.length}. Expected entries: ${expectedEntries}.`);
+
+      if (!localSessionsForImport.length) {
+        const message = "No local or embedded seed sessions found to import.";
+        setSessionsBridgeMessage(message);
+        pushImportDiagnostic(`STOP: ${message}`);
+        return false;
+      }
+
       const { programByLegacy, routineByLegacy, blockByLegacy } = await buildDbProgramStructureMaps();
+      pushImportDiagnostic(`Structure maps: ${programByLegacy.size} programs, ${routineByLegacy.size} routines, ${blockByLegacy.size} blocks.`);
+
       const { data: existingRows, error: existingError } = await supabase
         .from("sessions")
         .select("id, program_id, session_number, legacy_app_id");
@@ -12038,26 +12156,31 @@ export default function App() {
 
       const existingLegacyIds = new Set((existingRows || []).map((session: any) => String(session.legacy_app_id || "")).filter(Boolean));
       const existingSignatures = new Set((existingRows || []).map((session: any) => `${session.program_id}::${session.session_number}`));
+      pushImportDiagnostic(`Existing DB sessions found before import: ${(existingRows || []).length}.`);
 
       let importedCount = 0;
       let skippedCount = 0;
+      let insertedEntryCount = 0;
 
-      for (const localSession of savedSessions) {
-        const dbProgramId = programByLegacy.get(localSession.programId) || (dbPrograms.some((program) => program.id === localSession.programId) ? localSession.programId : "");
+      for (const localSession of localSessionsForImport) {
+        const dbProgramId = programByLegacy.get(localSession.programId) || (availableDbPrograms.some((program) => program.id === localSession.programId) ? localSession.programId : "");
         const localMember = members.find((member) => member.id === localSession.memberId);
         const dbMemberId =
           (dbMembers.some((member) => member.id === localSession.memberId) ? localSession.memberId : "") ||
           (localMember ? dbMembers.find((member) => member.clientId === localMember.clientId)?.id || "" : "");
         const dbRoutineId = routineByLegacy.get(`${localSession.programId}::${localSession.routineId}`) || localSession.routineId;
         const sessionNumber = Number.parseInt(String(localSession.sessionNumber || "0"), 10);
+        const diagnosticName = `${localSession.id} / program ${localSession.programId} / session ${localSession.sessionNumber}`;
 
         if (!dbProgramId || !dbMemberId || !dbRoutineId || !Number.isFinite(sessionNumber) || sessionNumber <= 0) {
           skippedCount += 1;
+          pushImportDiagnostic(`SKIP ${diagnosticName}: missing mapping. dbProgram=${dbProgramId || "none"}, dbMember=${dbMemberId || "none"}, dbRoutine=${dbRoutineId || "none"}, sessionNumber=${localSession.sessionNumber || "none"}.`);
           continue;
         }
 
         if (existingLegacyIds.has(localSession.id) || existingSignatures.has(`${dbProgramId}::${sessionNumber}`)) {
           skippedCount += 1;
+          pushImportDiagnostic(`SKIP ${diagnosticName}: already exists in DB.`);
           continue;
         }
 
@@ -12099,22 +12222,42 @@ export default function App() {
         if (entryPayload.length) {
           const { error: entriesError } = await supabase.from("session_entries").insert(entryPayload);
           if (entriesError) throw entriesError;
+          insertedEntryCount += entryPayload.length;
         }
 
         importedCount += 1;
+        existingLegacyIds.add(localSession.id);
+        existingSignatures.add(`${dbProgramId}::${sessionNumber}`);
       }
 
-      setSessionsBridgeMessage(
-        importedCount
-          ? `Imported ${importedCount} local session${importedCount === 1 ? "" : "s"} to Supabase. Skipped ${skippedCount}.`
-          : `No new local sessions to import. Skipped ${skippedCount}.`
-      );
+      const message = importedCount
+        ? `Imported ${importedCount} local session${importedCount === 1 ? "" : "s"} and ${insertedEntryCount} entries to Supabase. Skipped ${skippedCount}.`
+        : `No new local sessions to import. Skipped ${skippedCount}.`;
+
+      setSessionsBridgeMessage(message);
+      pushImportDiagnostic(`RESULT sessions: inserted ${importedCount}, skipped ${skippedCount}, entries inserted ${insertedEntryCount}/${expectedEntries}.`);
       await loadSupabaseSessions();
+      return true;
     } catch (error: any) {
-      setSessionsBridgeMessage(error?.message || "Unable to import local sessions.");
+      const message = formatImportError(error);
+      setSessionsBridgeMessage(message || "Unable to import local sessions.");
+      pushImportDiagnostic(`ERROR session import stopped: ${message}`);
+      return false;
     } finally {
       setDbSessionsLoading(false);
     }
+  };
+
+  const runFullImportDiagnostic = async () => {
+    resetImportDiagnostics("Full import diagnostic started.");
+    const expected = getImportExpectedCounts();
+    pushImportDiagnostic(`Expected local totals: ${expected.programs} programs, ${expected.routines} routines, ${expected.blocks} blocks, ${expected.sessions} sessions, ${expected.sessionEntries} entries.`);
+    const programsOk = await importLocalProgramsToSupabase();
+    if (!programsOk) {
+      pushImportDiagnostic("Full import stopped before sessions because program import did not complete.");
+      return;
+    }
+    await importLocalSessionsToSupabase();
   };
 
 
@@ -15773,15 +15916,28 @@ export default function App() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           <SmallButton onClick={loadSupabaseSessions} disabled={dbSessionsLoading || !dbProgramsLoaded}>Refresh DB Sessions</SmallButton>
                           {canImportExportMembers ? (
-                            <SmallButton onClick={importLocalSessionsToSupabase} disabled={dbSessionsLoading || !dbProgramsLoaded}>Import Local Sessions</SmallButton>
+                            <>
+                              <SmallButton onClick={importLocalSessionsToSupabase} disabled={dbSessionsLoading}>Import Local Sessions</SmallButton>
+                              <SmallButton onClick={runFullImportDiagnostic} disabled={dbSessionsLoading || dbProgramsLoading}>Run Full Import Diagnostic</SmallButton>
+                            </>
                           ) : null}
                         </div>
+                        {importDiagnosticsLog.length ? (
+                          <div className="mt-3 max-h-48 overflow-auto rounded-xl border border-zinc-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-zinc-700">
+                            {importDiagnosticsLog.map((line, index) => (
+                              <div key={`${line}-${index}`}>{line}</div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
 
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
                         <div className="font-semibold text-zinc-900">Program Source: {programSourceLabel}</div>
                         <div className="mt-1">
                           DB Programs Loaded: {dbProgramsLoaded ? dbPrograms.length : "not loaded"} • Local Programs Available: {programs.length} • Displayed: {displayedPrograms.length}
+                        </div>
+                        <div className="mt-1">
+                          Expected Import: {getImportExpectedCounts().programs} programs • {getImportExpectedCounts().routines} routines • {getImportExpectedCounts().blocks} blocks • {getImportExpectedCounts().sessions} sessions • {getImportExpectedCounts().sessionEntries} entries
                         </div>
                         {dbProgramsLoaded && dbPrograms.length && displayedPrograms.length > dbPrograms.length ? (
                           <div className="mt-1 text-amber-700">Some local-only programs are still being shown until their Supabase import is complete.</div>
