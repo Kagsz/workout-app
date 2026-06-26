@@ -14,7 +14,7 @@ import appBanner from "./assets/appbanner1.png";
 // ===== TYPES =====
 
 type Role = "admin" | "trainer" | "member";
-type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
+type Screen = "account" | "business" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
 type ProgramInputMode = "trainerInput" | "memberInput";
@@ -11314,7 +11314,6 @@ export default function App() {
   const [authDisplayName, setAuthDisplayName] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
-  const [showMyProfile, setShowMyProfile] = useState(false);
   const [dbProfiles, setDbProfiles] = useState<AuthProfile[]>([]);
   const [dbProfilesLoading, setDbProfilesLoading] = useState(false);
   const [profilesBridgeMessage, setProfilesBridgeMessage] = useState("");
@@ -11424,6 +11423,12 @@ export default function App() {
   const canImportExportMembers = isAdminRole;
   const canEditMemberPlan = isAdminRole;
   const canEditPrograms = isAdminRole || isTrainerRole;
+  const isMemberProgramScreen = screen === "memberHome" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph" || screen === "trainerSupport";
+  const isTrackerScreen = screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder";
+  const isClientListScreen = screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder";
+  const isTrainerDashScreen = screen === "adminDash" || screen === "input";
+  const navButtonClass = "min-w-0 whitespace-nowrap px-2 text-center text-xs";
+  const profileButtonLabel = (authProfile?.display_name || authProfile?.email || authSession?.user?.email || "Account").trim().slice(0, 1).toUpperCase() || "👤";
 
   const displayedPrograms = useMemo(() => {
     if (!dbProgramsLoaded || !dbPrograms.length) return programs;
@@ -12117,7 +12122,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (role === "member" && screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
+    if (screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
       setTrackerTutorialStepIndex(0);
       setShowTrackerTutorial(true);
     }
@@ -14258,6 +14263,18 @@ export default function App() {
     );
   };
 
+  const goAccount = () => {
+    setScreen("account");
+  };
+
+  const goGymTracker = () => {
+    setScreen("openTracker");
+  };
+
+  const goBusiness = () => {
+    if (canManageBusiness) setScreen("business");
+  };
+
   const goAdminMembers = () => {
     setScreen("members");
   };
@@ -14334,6 +14351,7 @@ export default function App() {
   };
 
   const backLabel = useMemo(() => {
+    if (screen === "account" || screen === "business") return "";
     if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
@@ -14901,6 +14919,12 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
+    if (screen === "account") {
+      return [{ label: "Account" }];
+    }
+    if (screen === "business") {
+      return [{ label: "Business" }];
+    }
     if (canUseTrainerWorkspace && screen === "members") {
       return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
     }
@@ -14919,38 +14943,39 @@ export default function App() {
     if (canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")) {
       return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (role === "member" && screen === "memberHome") {
-      return [{ label: "Member" }, { label: "Member View" }];
+    if (screen === "memberHome") {
+      return [{ label: "My Programs" }];
     }
-    if (role === "member" && screen === "openTracker") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker" }];
+    if (screen === "openTracker") {
+      return [{ label: "Gym Tracker" }];
     }
-    if (role === "member" && screen === "trackerWorkouts") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
+    if (screen === "trackerWorkouts") {
+      return [{ label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
     }
-    if (role === "member" && screen === "trackerWorkoutBuilder") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
+    if (screen === "trackerWorkoutBuilder") {
+      return [{ label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
     }
-    if (role === "member" && screen === "trainerSupport") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Trainer Support" }];
+    if (screen === "trainerSupport") {
+      return [{ label: "My Programs", onClick: goMemberPrograms }, { label: "Trainer Support" }];
     }
-    if (role === "member" && screen === "programs") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs" }];
+    if (screen === "programs") {
+      return [{ label: "My Programs" }];
     }
-    if (role === "member" && screen === "routines") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+    if (screen === "routines") {
+      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (role === "member" && screen === "routine") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (screen === "routine") {
+      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (role === "member" && screen === "memberInput") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), { label: "Enter Results" }];
+    if (screen === "memberInput") {
+      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), { label: "Enter Results" }];
     }
-    if (role === "member" && screen === "graph") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
+    if (screen === "graph") {
+      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
     }
     return [];
-  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout]);
+  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout, canUseTrainerWorkspace]);
+
 
   if (authLoading) {
     return (
@@ -15057,115 +15082,22 @@ export default function App() {
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
               <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Account</div>
-                    <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{authProfile?.display_name || authSession?.user?.email || "Signed in"}</div>
-                    <div className="mt-0.5 text-xs text-zinc-500">
-                      {authProfile?.email || authSession?.user?.email || "No email"} • {role} • {authProfile?.member_plan || "basic"}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <SmallButton onClick={() => setShowMyProfile((prev) => !prev)}>My Profile</SmallButton>
-                    <SmallButton onClick={handleLogout}>Logout</SmallButton>
-                  </div>
-                </div>
-
-                {showMyProfile ? (
-                  <div className="mt-4 space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                    <div className="grid gap-2">
-                      <div><span className="font-semibold text-zinc-900">Email:</span> {authProfile?.email || authSession?.user?.email || "—"}</div>
-                      <div><span className="font-semibold text-zinc-900">Role:</span> {role}</div>
-                      <div><span className="font-semibold text-zinc-900">Member Plan:</span> {authProfile?.member_plan || authMember?.member_plan || "basic"}</div>
-                      <div><span className="font-semibold text-zinc-900">Client ID:</span> {authMember?.client_id || authProfile?.client_id || "—"}</div>
-                      <div><span className="font-semibold text-zinc-900">Linked Member:</span> {authMember ? `${authMember.name} (${authMember.client_id})` : "Not linked"}</div>
-                      <div><span className="font-semibold text-zinc-900">Link Status:</span> {authProfile?.client_link_status || "unlinked"}</div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <SmallButton disabled className="px-2 py-1 text-xs">Link Member Status Coming Soon</SmallButton>
-                      <SmallButton disabled className="px-2 py-1 text-xs">Upgrade Plan Coming Soon</SmallButton>
-                      <SmallButton disabled className="px-2 py-1 text-xs">Change Email Coming Soon</SmallButton>
-                    </div>
-
-                    {canManageBusiness ? (
-                      <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <div className="font-semibold text-zinc-900">User Management</div>
-                            <div className="mt-1 text-zinc-500">Admins can assign profile roles. Trainers and members are read-only.</div>
-                          </div>
-                          <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading}>Refresh</SmallButton>
-                        </div>
-                        {profilesBridgeMessage ? <div className="mt-2 text-zinc-500">{profilesBridgeMessage}</div> : null}
-                        <div className="mt-3 space-y-2">
-                          {dbProfiles.length ? dbProfiles.map((profile) => (
-                            <div key={profile.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                              <div className="font-semibold text-zinc-900">{profile.display_name || profile.email || "Unnamed profile"}</div>
-                              <div className="mt-1 text-zinc-500">{profile.email || "No email"} • {profile.member_plan || "basic"} • current role: {profile.role}</div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
-                                  <SmallButton
-                                    key={profileRole}
-                                    onClick={() => updateProfileRoleById(profile.id, profileRole)}
-                                    disabled={dbProfilesLoading || profile.role === profileRole}
-                                    className="px-2 py-1 text-xs"
-                                  >
-                                    Set {profileRole}
-                                  </SmallButton>
-                                ))}
-                              </div>
-                            </div>
-                          )) : (
-                            <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-zinc-500">No profiles loaded yet.</div>
-                          )}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              {canUseTrainerWorkspace ? (
-              <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
-                      <div className="mt-1 text-xs text-zinc-500">
-                        {authProfile?.display_name || authSession?.user?.email || "Signed in"}
-                        {authProfile?.member_plan ? ` • ${authProfile.member_plan}` : ""}
-                      </div>
-                    </div>
-                    <SmallButton onClick={() => setShowMyProfile((prev) => !prev)}>My Profile</SmallButton>
-                  </div>
-
-                  <div className="flex flex-nowrap gap-2">
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={canUseTrainerWorkspace && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Trainer Dash</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph"} onClick={goMemberPrograms}>Member View</ToggleButton>
-                  </div>
-
+                <div className="grid grid-cols-4 gap-2">
+                  <ToggleButton className={navButtonClass} active={screen === "account"} onClick={goAccount} title="Account">{profileButtonLabel}</ToggleButton>
+                  {canUseTrainerWorkspace ? (
+                    <ToggleButton className={navButtonClass} active={isClientListScreen} onClick={goAdminMembers}>Client List</ToggleButton>
+                  ) : (
+                    <ToggleButton className={navButtonClass} active={isMemberProgramScreen} onClick={goMemberPrograms}>My Programs</ToggleButton>
+                  )}
+                  {canUseTrainerWorkspace ? (
+                    <ToggleButton className={navButtonClass} active={isTrainerDashScreen} onClick={goAdminInput}>Trainer Dash</ToggleButton>
+                  ) : null}
+                  <ToggleButton className={navButtonClass} active={isTrackerScreen} onClick={goGymTracker}>Gym Tracker</ToggleButton>
                   {canManageBusiness ? (
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <div className="font-semibold text-zinc-900">Account Bootstrap</div>
-                          <div className="mt-1">
-                            Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
-                          </div>
-                          {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
-                        <SmallButton onClick={() => setShowMyProfile(true)} className="px-2 py-1 text-xs">Open User Management</SmallButton>
-                      </div>
-                    </div>
+                    <ToggleButton className={navButtonClass} active={screen === "business"} onClick={goBusiness}>Business</ToggleButton>
                   ) : null}
                 </div>
               </div>
-              ) : null}
 
               <div className="space-y-3">
                 {!!pathItems.length && <PathBar items={pathItems} />}
@@ -15175,6 +15107,88 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+
+              {screen === "account" && (
+                <SectionCard title="My Profile">
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="text-lg font-semibold text-zinc-900">{authProfile?.display_name || authSession?.user?.email || "Signed in"}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{authProfile?.email || authSession?.user?.email || "No email"} • {role} • {authProfile?.member_plan || "basic"}</div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm">
+                      <div className="grid gap-2">
+                        <div><span className="font-semibold text-zinc-900">Email:</span> {authProfile?.email || authSession?.user?.email || "—"}</div>
+                        <div><span className="font-semibold text-zinc-900">Role:</span> {role}</div>
+                        <div><span className="font-semibold text-zinc-900">Member Plan:</span> {authProfile?.member_plan || authMember?.member_plan || "basic"}</div>
+                        <div><span className="font-semibold text-zinc-900">Client ID:</span> {authMember?.client_id || authProfile?.client_id || "—"}</div>
+                        <div><span className="font-semibold text-zinc-900">Linked Member:</span> {authMember ? `${authMember.name} (${authMember.client_id})` : "Not linked"}</div>
+                        <div><span className="font-semibold text-zinc-900">Link Status:</span> {authProfile?.client_link_status || "unlinked"}</div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <SmallButton disabled className="px-2 py-1 text-xs">Link Member Status Coming Soon</SmallButton>
+                        <SmallButton disabled className="px-2 py-1 text-xs">Upgrade Plan Coming Soon</SmallButton>
+                        <SmallButton disabled className="px-2 py-1 text-xs">Change Email Coming Soon</SmallButton>
+                      </div>
+
+                      <div className="mt-5 border-t border-zinc-200 pt-4">
+                        <SmallButton onClick={handleLogout} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Logout</SmallButton>
+                      </div>
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
+
+              {canManageBusiness && screen === "business" && (
+                <SectionCard title="Business" collapsible>
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                      <div className="font-semibold text-zinc-900">Account Bootstrap</div>
+                      <div className="mt-1">
+                        Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
+                      </div>
+                      {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="font-semibold text-zinc-900">User Management</div>
+                          <div className="mt-1 text-zinc-500">Admins can assign profile roles. Trainers and members are read-only.</div>
+                        </div>
+                        <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading}>Refresh</SmallButton>
+                      </div>
+                      {profilesBridgeMessage ? <div className="mt-2 text-zinc-500">{profilesBridgeMessage}</div> : null}
+                      <div className="mt-3 space-y-2">
+                        {dbProfiles.length ? dbProfiles.map((profile) => (
+                          <div key={profile.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                            <div className="font-semibold text-zinc-900">{profile.display_name || profile.email || "Unnamed profile"}</div>
+                            <div className="mt-1 text-zinc-500">{profile.email || "No email"} • {profile.member_plan || "basic"} • current role: {profile.role}</div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
+                                <SmallButton
+                                  key={profileRole}
+                                  onClick={() => updateProfileRoleById(profile.id, profileRole)}
+                                  disabled={dbProfilesLoading || profile.role === profileRole}
+                                  className="px-2 py-1 text-xs"
+                                >
+                                  Set {profileRole}
+                                </SmallButton>
+                              ))}
+                            </div>
+                          </div>
+                        )) : (
+                          <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-zinc-500">No profiles loaded yet.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
 
               {canUseTrainerWorkspace && screen === "members" && (
                 <SectionCard title="Client List" collapsible>
@@ -16170,7 +16184,7 @@ export default function App() {
               )}
 
 
-              {role === "member" && screen === "memberHome" && selectedMember && (
+              {screen === "memberHome" && selectedMember && (
                 <SectionCard title="Member View" collapsible>
                   <div className="space-y-3">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -16209,7 +16223,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "openTracker" && (
+              {screen === "openTracker" && (
                 <SectionCard
                   title="Gym Tracker"
                   collapsible
@@ -16583,7 +16597,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "trackerWorkouts" && (
+              {screen === "trackerWorkouts" && (
                 <SectionCard title="Workouts" collapsible>
                   <div className="space-y-5">
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -16632,7 +16646,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
+              {screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
                 <>
                   <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2">
                     <button onClick={() => { setScreen("openTracker"); setTrackerTab("exercises"); }} className="rounded-xl bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-600 transition">My Exercises</button>
@@ -16793,7 +16807,7 @@ export default function App() {
                 </>
               )}
 
-              {role === "member" && screen === "trainerSupport" && (
+              {screen === "trainerSupport" && (
                 <SectionCard title="Trainer Support" collapsible>
                   <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
                     Remote trainer support shell is installed. Messaging, trainer notes, and support requests will be connected in a later pass.
@@ -17158,7 +17172,7 @@ export default function App() {
                 </div>
               )}
 
-              {role === "member" && screen === "programs" && (
+              {screen === "programs" && (
                 <SectionCard title="My Programs" collapsible>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members start here and open the most recent program first.</div>
@@ -17183,7 +17197,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "routines" && selectedProgram && (
+              {screen === "routines" && selectedProgram && (
                 <SectionCard title={`${selectedProgram.name} Routines`}>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
@@ -17224,7 +17238,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "routine" && selectedRoutine && (
+              {screen === "routine" && selectedRoutine && (
                 <SectionCard title={selectedRoutine.label}>
                   <div className="space-y-3">
                     {selectedRoutine.blocks.map((block) =>
@@ -17276,7 +17290,7 @@ export default function App() {
               )}
 
 
-              {role === "member" && screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
+              {screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
                 <SectionCard title={`${selectedRoutine.label} Results`}>
                   <div className="space-y-4">
                     <div className="grid grid-cols-[minmax(0,2fr)_minmax(80px,1fr)] gap-3">
@@ -17367,7 +17381,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "graph" && selectedRoutine && selectedBlock && (
+              {screen === "graph" && selectedRoutine && selectedBlock && (
                 <SectionCard title={`${selectedRoutine.label} • ${selectedBlock.title}`}>
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
