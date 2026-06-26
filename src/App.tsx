@@ -15960,7 +15960,7 @@ export default function App() {
                           <SmallButton onClick={loadSupabaseSessions} disabled={dbSessionsLoading || !dbProgramsLoaded}>Refresh DB Sessions</SmallButton>
                           {canImportExportMembers ? (
                             <>
-                              <SmallButton onClick={importLocalSessionsToSupabase} disabled={dbSessionsLoading}>Import Local Sessions</SmallButton>
+                              <SmallButton onClick={() => { void importLocalSessionsToSupabase(); }} disabled={dbSessionsLoading}>Import Local Sessions</SmallButton>
                               <SmallButton onClick={runFullImportDiagnostic} disabled={dbSessionsLoading || dbProgramsLoading}>Run Full Import Diagnostic</SmallButton>
                             </>
                           ) : null}
@@ -15989,7 +15989,7 @@ export default function App() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           <SmallButton onClick={loadSupabasePrograms} disabled={dbProgramsLoading}>Refresh DB Programs</SmallButton>
                           {canImportExportMembers ? (
-                            <SmallButton onClick={importLocalProgramsToSupabase} disabled={dbProgramsLoading}>Import Local Programs</SmallButton>
+                            <SmallButton onClick={() => { void importLocalProgramsToSupabase(); }} disabled={dbProgramsLoading}>Import Local Programs</SmallButton>
                           ) : null}
                         </div>
                       </div>
