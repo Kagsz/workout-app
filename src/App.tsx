@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type AuthChangeEvent, type Session, type User } from "@supabase/supabase-js";
 import {
   CartesianGrid,
   Line,
@@ -11235,7 +11235,7 @@ export default function App() {
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
   const [role, setRole] = useState<Role>("admin");
-  const [authSession, setAuthSession] = useState<any>(null);
+  const [authSession, setAuthSession] = useState<Session | null>(null);
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
@@ -11344,7 +11344,7 @@ export default function App() {
     [members, selectedMemberId]
   );
 
-  const hydrateAuthProfile = async (user: any) => {
+  const hydrateAuthProfile = async (user: User) => {
     if (!user?.id) {
       setAuthProfile(null);
       setRole("member");
@@ -11406,7 +11406,7 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    supabase.auth.getSession().then(async ({ data }: { data: { session: Session | null } }) => {
       if (!isMounted) return;
       const session = data.session || null;
       setAuthSession(session);
@@ -11419,7 +11419,7 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setAuthSession(session);
       if (session?.user) {
         hydrateAuthProfile(session.user);
