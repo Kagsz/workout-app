@@ -149,6 +149,37 @@ type DbProgramRow = {
   routines?: DbRoutineRow[] | null;
 };
 
+type DbSessionEntryRow = {
+  id: string;
+  session_id: string;
+  block_id: string | null;
+  exercise_id: string | null;
+  exercise_name: string;
+  slot: number | null;
+  weight: string | null;
+  performance: string | null;
+  sets_completed: string | null;
+  target: string | null;
+  metric: string | null;
+  support_metrics: Record<string, string> | null;
+  context_flags: string[] | null;
+  scoring_direction: SessionScoringDirection | null;
+  legacy_app_id?: string | null;
+};
+
+type DbSessionRow = {
+  id: string;
+  program_id: string;
+  routine_id: string;
+  member_id: string;
+  session_number: number | null;
+  session_date: string | null;
+  context_flags: string[] | null;
+  created_at: string | null;
+  legacy_app_id?: string | null;
+  session_entries?: DbSessionEntryRow[] | null;
+};
+
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
 type TrackerMetric = string;
@@ -11342,6 +11373,10 @@ export default function App() {
     const stored = window.localStorage.getItem(STORAGE_KEYS.savedSessions);
     return stored ? JSON.parse(stored) : [];
   });
+  const [dbSavedSessions, setDbSavedSessions] = useState<SavedSession[]>([]);
+  const [dbSessionsLoaded, setDbSessionsLoaded] = useState(false);
+  const [dbSessionsLoading, setDbSessionsLoading] = useState(false);
+  const [sessionsBridgeMessage, setSessionsBridgeMessage] = useState("");
   const [importText, setImportText] = useState(PROGRAM_1_IMPORT_TEMPLATE);
 
   const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(() => {
@@ -11428,7 +11463,7 @@ export default function App() {
   const isClientListScreen = screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder";
   const isTrainerDashScreen = screen === "adminDash" || screen === "input";
   const navButtonClass = "min-w-0 whitespace-nowrap px-2 text-center text-xs";
-  const profileButtonLabel = (authProfile?.display_name || authProfile?.email || authSession?.user?.email || "Account").trim().slice(0, 1).toUpperCase() || "👤";
+  const profileButtonLabel = "👤";
 
   const displayedPrograms = useMemo(() => {
     if (!dbProgramsLoaded || !dbPrograms.length) return programs;
@@ -11445,6 +11480,9 @@ export default function App() {
 
     return [...dbPrograms, ...localOnlyPrograms];
   }, [dbMembers, dbPrograms, dbProgramsLoaded, members, programs]);
+
+  const activeSavedSessions = dbSessionsLoaded && dbSavedSessions.length ? dbSavedSessions : savedSessions;
+  const sessionSourceLabel = dbSessionsLoaded && dbSavedSessions.length ? "Supabase" : "Local fallback";
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
@@ -11545,7 +11583,7 @@ export default function App() {
     if (authProfile.id === normalizedProfile.id) {
       setAuthProfile(normalizedProfile);
       setRole(normalizedProfile.role);
-      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "memberHome");
+      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "programs");
     }
 
     setProfilesBridgeMessage(`Updated ${normalizedProfile.email || normalizedProfile.display_name || "profile"} to ${normalizedProfile.role}.`);
@@ -11855,6 +11893,216 @@ export default function App() {
   };
 
 
+
+  const buildDbProgramStructureMaps = async () => {
+    const { data, error } = await supabase
+      .from("programs")
+      .select("id, member_id, legacy_app_id, routines(id, legacy_app_id, blocks(id, legacy_app_id))");
+
+    if (error) throw error;
+
+    const programByLegacy = new Map<string, string>();
+    const routineByLegacy = new Map<string, string>();
+    const blockByLegacy = new Map<string, string>();
+
+    ((data || []) as any[]).forEach((programRow) => {
+      const programLegacy = String(programRow.legacy_app_id || "");
+      if (programLegacy) programByLegacy.set(programLegacy, String(programRow.id));
+
+      (programRow.routines || []).forEach((routineRow: any) => {
+        const routineLegacy = String(routineRow.legacy_app_id || "");
+        if (programLegacy && routineLegacy) {
+          routineByLegacy.set(`${programLegacy}::${routineLegacy}`, String(routineRow.id));
+        }
+
+        (routineRow.blocks || []).forEach((blockRow: any) => {
+          const blockLegacy = String(blockRow.legacy_app_id || "");
+          if (programLegacy && routineLegacy && blockLegacy) {
+            blockByLegacy.set(`${programLegacy}::${routineLegacy}::${blockLegacy}`, String(blockRow.id));
+          }
+        });
+      });
+    });
+
+    return { programByLegacy, routineByLegacy, blockByLegacy };
+  };
+
+  const mapDbSessionToAppSession = (session: DbSessionRow): SavedSession => {
+    const program = dbPrograms.find((item) => item.id === String(session.program_id));
+    const routine = program?.routines.find((item) => item.id === String(session.routine_id));
+    const blocksById = new Map((routine?.blocks || []).map((block) => [block.id, block]));
+
+    const groupedBlocks = new Map<string, SessionBlockInput>();
+    [...(session.session_entries || [])]
+      .sort((a, b) => Number(a.slot || 0) - Number(b.slot || 0))
+      .forEach((entry) => {
+        const blockId = String(entry.block_id || "unassigned-block");
+        const block = blocksById.get(blockId);
+        const currentBlock = groupedBlocks.get(blockId) || {
+          blockId,
+          blockTitle: block?.title || "Block",
+          entries: [],
+          contextFlags: [],
+        };
+
+        currentBlock.entries.push({
+          exerciseId: String(entry.exercise_id || entry.id),
+          exerciseName: String(entry.exercise_name || "Exercise"),
+          weight: String(entry.weight || ""),
+          performance: String(entry.performance || ""),
+          setsCompleted: String(entry.sets_completed || ""),
+          target: String(entry.target || ""),
+          metric: String(entry.metric || ""),
+          supportMetrics: entry.support_metrics || {},
+          contextFlags: entry.context_flags || [],
+          scoringDirection: entry.scoring_direction || "higherIsBetter",
+        });
+
+        groupedBlocks.set(blockId, currentBlock);
+      });
+
+    return {
+      id: String(session.id),
+      programId: String(session.program_id),
+      routineId: String(session.routine_id),
+      memberId: String(session.member_id),
+      date: normalizeDbDateForInput(session.session_date),
+      sessionNumber: String(session.session_number || ""),
+      contextFlags: session.context_flags || [],
+      createdAt: session.created_at || new Date().toISOString(),
+      blocks: [...groupedBlocks.values()],
+    };
+  };
+
+  const loadSupabaseSessions = async () => {
+    if (!authProfile || !canUseTrainerWorkspace) {
+      setDbSavedSessions([]);
+      setDbSessionsLoaded(false);
+      return [];
+    }
+
+    setDbSessionsLoading(true);
+    const { data, error } = await supabase
+      .from("sessions")
+      .select("*, session_entries(*)")
+      .order("session_number", { ascending: true });
+    setDbSessionsLoading(false);
+
+    if (error) {
+      setSessionsBridgeMessage(error.message || "Unable to load Supabase sessions.");
+      setDbSessionsLoaded(false);
+      return [];
+    }
+
+    const mappedSessions = ((data || []) as DbSessionRow[]).map(mapDbSessionToAppSession);
+    setDbSavedSessions(mappedSessions);
+    setDbSessionsLoaded(true);
+    setSessionsBridgeMessage(`Loaded ${mappedSessions.length} session${mappedSessions.length === 1 ? "" : "s"} from Supabase.`);
+    return mappedSessions;
+  };
+
+  const importLocalSessionsToSupabase = async () => {
+    if (!canManageBusiness) {
+      setSessionsBridgeMessage("Only admins can import local sessions.");
+      return;
+    }
+
+    if (!dbMembersLoaded || !dbMembers.length || !dbProgramsLoaded || !dbPrograms.length) {
+      setSessionsBridgeMessage("Load/import Supabase members and programs before importing sessions.");
+      return;
+    }
+
+    setDbSessionsLoading(true);
+    try {
+      const { programByLegacy, routineByLegacy, blockByLegacy } = await buildDbProgramStructureMaps();
+      const { data: existingRows, error: existingError } = await supabase
+        .from("sessions")
+        .select("id, program_id, session_number, legacy_app_id");
+
+      if (existingError) throw existingError;
+
+      const existingLegacyIds = new Set((existingRows || []).map((session: any) => String(session.legacy_app_id || "")).filter(Boolean));
+      const existingSignatures = new Set((existingRows || []).map((session: any) => `${session.program_id}::${session.session_number}`));
+
+      let importedCount = 0;
+      let skippedCount = 0;
+
+      for (const localSession of savedSessions) {
+        const dbProgramId = programByLegacy.get(localSession.programId) || (dbPrograms.some((program) => program.id === localSession.programId) ? localSession.programId : "");
+        const localMember = members.find((member) => member.id === localSession.memberId);
+        const dbMemberId =
+          (dbMembers.some((member) => member.id === localSession.memberId) ? localSession.memberId : "") ||
+          (localMember ? dbMembers.find((member) => member.clientId === localMember.clientId)?.id || "" : "");
+        const dbRoutineId = routineByLegacy.get(`${localSession.programId}::${localSession.routineId}`) || localSession.routineId;
+        const sessionNumber = Number.parseInt(String(localSession.sessionNumber || "0"), 10);
+
+        if (!dbProgramId || !dbMemberId || !dbRoutineId || !Number.isFinite(sessionNumber) || sessionNumber <= 0) {
+          skippedCount += 1;
+          continue;
+        }
+
+        if (existingLegacyIds.has(localSession.id) || existingSignatures.has(`${dbProgramId}::${sessionNumber}`)) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const { data: insertedSession, error: sessionError } = await supabase
+          .from("sessions")
+          .insert({
+            program_id: dbProgramId,
+            routine_id: dbRoutineId,
+            member_id: dbMemberId,
+            session_number: sessionNumber,
+            session_date: formatDateForSupabase(localSession.date),
+            context_flags: localSession.contextFlags || [],
+            legacy_app_id: localSession.id,
+          })
+          .select("*")
+          .single();
+
+        if (sessionError) throw sessionError;
+
+        const entryPayload = localSession.blocks.flatMap((block) =>
+          block.entries.map((entry, entryIndex) => ({
+            session_id: insertedSession.id,
+            block_id: blockByLegacy.get(`${localSession.programId}::${localSession.routineId}::${block.blockId}`) || null,
+            exercise_id: entry.exerciseId || null,
+            exercise_name: entry.exerciseName || "Exercise",
+            slot: entryIndex + 1,
+            weight: entry.weight || null,
+            performance: entry.performance || null,
+            sets_completed: entry.setsCompleted || null,
+            target: entry.target || null,
+            metric: entry.metric || null,
+            support_metrics: entry.supportMetrics || {},
+            context_flags: entry.contextFlags || [],
+            scoring_direction: entry.scoringDirection || "higherIsBetter",
+            legacy_app_id: `${localSession.id}:${block.blockId}:${entry.exerciseId || entryIndex}`,
+          }))
+        );
+
+        if (entryPayload.length) {
+          const { error: entriesError } = await supabase.from("session_entries").insert(entryPayload);
+          if (entriesError) throw entriesError;
+        }
+
+        importedCount += 1;
+      }
+
+      setSessionsBridgeMessage(
+        importedCount
+          ? `Imported ${importedCount} local session${importedCount === 1 ? "" : "s"} to Supabase. Skipped ${skippedCount}.`
+          : `No new local sessions to import. Skipped ${skippedCount}.`
+      );
+      await loadSupabaseSessions();
+    } catch (error: any) {
+      setSessionsBridgeMessage(error?.message || "Unable to import local sessions.");
+    } finally {
+      setDbSessionsLoading(false);
+    }
+  };
+
+
   const buildDefaultClientIdForUser = (user: User) => `PR-${String(user.id).slice(0, 8).toUpperCase()}`;
 
   const ensureProfileForUser = async (user: User) => {
@@ -11981,7 +12229,7 @@ export default function App() {
       setAuthMember(normalizedMember);
       setRole(normalizedProfile.role);
       setAuthBootstrapMessage(`Profile linked to member ${normalizedMember.client_id}.`);
-      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "memberHome");
+      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "programs");
       return normalizedProfile;
     } catch (error: any) {
       setAuthMessage(error?.message || "Unable to complete account bootstrap.");
@@ -12034,7 +12282,7 @@ export default function App() {
         setAuthProfile(null);
         setAuthMember(null);
         setRole("member");
-        setScreen("memberHome");
+        setScreen("programs");
       }
       setAuthLoading(false);
     });
@@ -12071,6 +12319,15 @@ export default function App() {
       setDbProgramsLoaded(false);
     }
   }, [authProfile?.id, authProfile?.role]);
+
+  useEffect(() => {
+    if (authProfile && canUseTrainerWorkspace && dbProgramsLoaded) {
+      loadSupabaseSessions();
+    } else {
+      setDbSavedSessions([]);
+      setDbSessionsLoaded(false);
+    }
+  }, [authProfile?.id, authProfile?.role, dbProgramsLoaded, dbPrograms.length]);
 
   const handleAuthSubmit = async () => {
     const email = authEmail.trim();
@@ -12118,7 +12375,7 @@ export default function App() {
     setAuthMember(null);
     setAuthBootstrapMessage("");
     setRole("member");
-    setScreen("memberHome");
+    setScreen("programs");
   };
 
   useEffect(() => {
@@ -12633,12 +12890,19 @@ export default function App() {
       const programMemberId = program.memberId || displayedMembers[0]?.id || null;
       if (programMemberId === selectedMember.id) return true;
 
-      const localMember = members.find((member) => member.id === programMemberId);
-      if (!localMember) return false;
+      const dbMember = dbMembers.find((member) => member.id === programMemberId);
+      if (dbMember?.clientId === selectedMember.clientId) return true;
 
-      return localMember.clientId === selectedMember.clientId;
+      const localMember = members.find((member) => member.id === programMemberId);
+      if (localMember?.clientId === selectedMember.clientId) return true;
+
+      const localOwnerMember = members[0] || null;
+      const selectedLooksLikeOwner = selectedMember.clientId === authMember?.client_id || selectedMember.clientId === authProfile?.client_id;
+      if (selectedLooksLikeOwner && localOwnerMember && programMemberId === localOwnerMember.id) return true;
+
+      return false;
     });
-  }, [displayedPrograms, selectedMember, displayedMembers, members]);
+  }, [displayedPrograms, selectedMember, displayedMembers, members, dbMembers, authMember?.client_id, authProfile?.client_id]);
 
   const adminSortedPrograms = useMemo(
     () => [...adminPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
@@ -12694,7 +12958,7 @@ export default function App() {
   };
 
   const selectedProgramPlannedTotal = selectedProgram ? getProgramPlannedSessionTotal(selectedProgram) : 0;
-  const selectedProgramCompletedTotal = selectedProgram ? getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id) : 0;
+  const selectedProgramCompletedTotal = selectedProgram ? getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember?.id) : 0;
   const selectedProgramIsComplete = selectedProgramPlannedTotal > 0 && selectedProgramCompletedTotal >= selectedProgramPlannedTotal;
 
   const nextRoutineId = useMemo(() => {
@@ -12702,7 +12966,7 @@ export default function App() {
     if ((selectedMember.memberPlan || "direct") === "basic") return null;
     if (selectedProgramIsComplete) return null;
 
-    const memberProgramSessions = savedSessions
+    const memberProgramSessions = activeSavedSessions
       .filter((session) => session.programId === selectedProgram.id && session.memberId === selectedMember.id)
       .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a));
 
@@ -12713,12 +12977,12 @@ export default function App() {
     if (latestRoutineIndex < 0) return selectedProgram.routines[0]?.id || null;
 
     return selectedProgram.routines[(latestRoutineIndex + 1) % selectedProgram.routines.length]?.id || null;
-  }, [savedSessions, selectedMember, selectedProgram, selectedProgramIsComplete]);
+  }, [activeSavedSessions, selectedMember, selectedProgram, selectedProgramIsComplete]);
 
   const latestSelectedRoutineSession = useMemo(() => {
     if (!premiumProgramInputActive || !selectedProgram || !selectedRoutine || !selectedMember) return null;
 
-    return savedSessions
+    return activeSavedSessions
       .filter(
         (session) =>
           session.programId === selectedProgram.id &&
@@ -12726,7 +12990,7 @@ export default function App() {
           session.memberId === selectedMember.id
       )
       .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a))[0] || null;
-  }, [premiumProgramInputActive, savedSessions, selectedMember, selectedProgram, selectedRoutine]);
+  }, [premiumProgramInputActive, activeSavedSessions, selectedMember, selectedProgram, selectedRoutine]);
 
   const premiumNextBlockId = useMemo(() => {
     if (!premiumProgramInputActive || !selectedRoutine || !selectedRoutine.blocks.length) return null;
@@ -12741,7 +13005,7 @@ export default function App() {
     const seriesMap: Record<string, GraphSeries> = {};
     const exerciseLookup = new Map(selectedBlock.exercises.map((exercise) => [exercise.id, exercise]));
 
-    const scopedSessions = savedSessions.filter(
+    const scopedSessions = activeSavedSessions.filter(
       (session) =>
         session.programId === selectedProgram.id &&
         session.routineId === selectedRoutine.id &&
@@ -12800,7 +13064,7 @@ export default function App() {
         return a.sessionNumber - b.sessionNumber;
       }),
     }));
-  }, [savedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
+  }, [activeSavedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
 
   const generatedWorkoutSummaryInsight = useMemo(
     () => generateWorkoutSummaryInsightFromGraphData(graphData, selectedBlock?.type),
@@ -14360,11 +14624,11 @@ export default function App() {
       if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Client List";
       return "";
     }
-    if (screen === "programs") return "Back to Member View";
-    if (screen === "openTracker") return "Back to Member View";
+    if (screen === "programs") return "";
+    if (screen === "openTracker") return "";
     if (screen === "trackerWorkouts") return "Back to Gym Tracker";
     if (screen === "trackerWorkoutBuilder") return trackerWorkoutReturnCycleId ? "Back to Cycle" : "Back to Workouts";
-    if (screen === "trainerSupport") return "Back to Member View";
+    if (screen === "trainerSupport") return "";
     if (screen === "routines") return "Back to My Programs";
     if (screen === "routine") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to My Programs";
     if (screen === "memberInput") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
@@ -14499,7 +14763,7 @@ export default function App() {
   };
 
   const goMemberPrograms = () => {
-    setScreen("memberHome");
+    setScreen("programs");
   };
 
   const openProgram = (programId: string) => {
@@ -14606,7 +14870,7 @@ export default function App() {
       };
     }
 
-    const nextSessionNumber = String(getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember.id) + 1);
+    const nextSessionNumber = String(getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember.id) + 1);
     const draft = createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id);
     return {
       ...draft,
@@ -14620,7 +14884,7 @@ export default function App() {
     const sessionNumber = String(draft.sessionNumber || "").trim();
     if (!sessionNumber) return null;
 
-    return savedSessions.find(
+    return activeSavedSessions.find(
       (session) =>
         session.memberId === selectedMember.id &&
         session.programId === selectedProgram.id &&
@@ -14823,7 +15087,7 @@ export default function App() {
   const getAdminDashSessionNumbersForRoutine = (program: Program, routine: Routine | null | undefined) => {
     if (!routine) return [];
     const planned = getRoutinePlannedSessionNumbers(program, routine);
-    const saved = savedSessions
+    const saved = activeSavedSessions
       .filter((session) => session.programId === program.id && session.routineId === routine.id && (!selectedMember || session.memberId === selectedMember.id))
       .map((session) => String(session.sessionNumber || "").trim())
       .filter(Boolean);
@@ -14841,11 +15105,11 @@ export default function App() {
     if (!selectedProgram || adminDashRoutineFilter === "all") return [];
     const routine = selectedProgram.routines.find((item) => item.id === adminDashRoutineFilter) || null;
     return getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
-  }, [adminDashRoutineFilter, savedSessions, selectedMember, selectedProgram]);
+  }, [adminDashRoutineFilter, activeSavedSessions, selectedMember, selectedProgram]);
 
   const loadAdminDashSession = (routine: Routine, sessionNumber: string) => {
     if (!selectedProgram || !selectedMember) return;
-    const existingSession = savedSessions.find(
+    const existingSession = activeSavedSessions.find(
       (session) =>
         session.programId === selectedProgram.id &&
         session.routineId === routine.id &&
@@ -14894,7 +15158,7 @@ export default function App() {
     const trimmedSessionNumber = sessionDraft.sessionNumber.trim();
     if (!trimmedDate || !trimmedSessionNumber) return;
 
-    const existingSession = savedSessions.find(
+    const existingSession = activeSavedSessions.find(
       (session) =>
         session.programId === selectedProgram.id &&
         session.routineId === selectedRoutine.id &&
@@ -14921,9 +15185,6 @@ export default function App() {
   const pathItems = useMemo(() => {
     if (screen === "account") {
       return [{ label: "Account" }];
-    }
-    if (screen === "business") {
-      return [{ label: "Business" }];
     }
     if (canUseTrainerWorkspace && screen === "members") {
       return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
@@ -15083,19 +15344,15 @@ export default function App() {
         <div className="space-y-6 pb-10">
               <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
                 <div className="grid grid-cols-4 gap-2">
-                  <ToggleButton className={navButtonClass} active={screen === "account"} onClick={goAccount} title="Account">{profileButtonLabel}</ToggleButton>
+                  <ToggleButton className="px-2 text-center text-base" active={screen === "account"} onClick={goAccount} title="Account" aria-label="Account">{profileButtonLabel}</ToggleButton>
+                  <ToggleButton className={navButtonClass} active={isMemberProgramScreen} onClick={goMemberPrograms}>My Programs</ToggleButton>
                   {canUseTrainerWorkspace ? (
                     <ToggleButton className={navButtonClass} active={isClientListScreen} onClick={goAdminMembers}>Client List</ToggleButton>
-                  ) : (
-                    <ToggleButton className={navButtonClass} active={isMemberProgramScreen} onClick={goMemberPrograms}>My Programs</ToggleButton>
-                  )}
+                  ) : null}
                   {canUseTrainerWorkspace ? (
                     <ToggleButton className={navButtonClass} active={isTrainerDashScreen} onClick={goAdminInput}>Trainer Dash</ToggleButton>
                   ) : null}
                   <ToggleButton className={navButtonClass} active={isTrackerScreen} onClick={goGymTracker}>Gym Tracker</ToggleButton>
-                  {canManageBusiness ? (
-                    <ToggleButton className={navButtonClass} active={screen === "business"} onClick={goBusiness}>Business</ToggleButton>
-                  ) : null}
                 </div>
               </div>
 
@@ -15134,56 +15391,6 @@ export default function App() {
 
                       <div className="mt-5 border-t border-zinc-200 pt-4">
                         <SmallButton onClick={handleLogout} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Logout</SmallButton>
-                      </div>
-                    </div>
-                  </div>
-                </SectionCard>
-              )}
-
-              {canManageBusiness && screen === "business" && (
-                <SectionCard title="Business" collapsible>
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                      <div className="font-semibold text-zinc-900">Account Bootstrap</div>
-                      <div className="mt-1">
-                        Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
-                      </div>
-                      {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-3 text-xs text-zinc-600">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <div className="font-semibold text-zinc-900">User Management</div>
-                          <div className="mt-1 text-zinc-500">Admins can assign profile roles. Trainers and members are read-only.</div>
-                        </div>
-                        <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading}>Refresh</SmallButton>
-                      </div>
-                      {profilesBridgeMessage ? <div className="mt-2 text-zinc-500">{profilesBridgeMessage}</div> : null}
-                      <div className="mt-3 space-y-2">
-                        {dbProfiles.length ? dbProfiles.map((profile) => (
-                          <div key={profile.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                            <div className="font-semibold text-zinc-900">{profile.display_name || profile.email || "Unnamed profile"}</div>
-                            <div className="mt-1 text-zinc-500">{profile.email || "No email"} • {profile.member_plan || "basic"} • current role: {profile.role}</div>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
-                                <SmallButton
-                                  key={profileRole}
-                                  onClick={() => updateProfileRoleById(profile.id, profileRole)}
-                                  disabled={dbProfilesLoading || profile.role === profileRole}
-                                  className="px-2 py-1 text-xs"
-                                >
-                                  Set {profileRole}
-                                </SmallButton>
-                              ))}
-                            </div>
-                          </div>
-                        )) : (
-                          <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-zinc-500">No profiles loaded yet.</div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -15403,6 +15610,53 @@ export default function App() {
                         </div>
                       </div>
 
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                        <div className="mb-2 text-sm font-semibold text-zinc-900">Account Management</div>
+                        <div className="space-y-1 text-xs text-zinc-600">
+                          <div><span className="font-semibold text-zinc-900">Client ID:</span> {selectedMember.clientId}</div>
+                          <div><span className="font-semibold text-zinc-900">Invite/Login Email:</span> {selectedMember.inviteEmail || "Not set"}</div>
+                          <div><span className="font-semibold text-zinc-900">Member Status:</span> {getMemberPlanLabel(selectedMember.memberPlan)}</div>
+                          <div><span className="font-semibold text-zinc-900">Archived:</span> {selectedMember.archived ? "Yes" : "No"}</div>
+                        </div>
+
+                        {canManageBusiness ? (
+                          <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Profile Roles</div>
+                                <div className="mt-1 text-xs text-zinc-500">Assign roles to signed-in profiles. Full client linking comes later.</div>
+                              </div>
+                              <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading} className="px-2 py-1 text-xs">Refresh</SmallButton>
+                            </div>
+                            {profilesBridgeMessage ? <div className="mt-2 text-xs text-zinc-500">{profilesBridgeMessage}</div> : null}
+                            <div className="mt-3 space-y-2">
+                              {dbProfiles.length ? dbProfiles.map((profile) => (
+                                <div key={profile.id} className="rounded-xl border border-zinc-200 bg-white p-3">
+                                  <div className="text-sm font-semibold text-zinc-900">{profile.display_name || profile.email || "Unnamed profile"}</div>
+                                  <div className="mt-1 text-xs text-zinc-500">{profile.email || "No email"} • {profile.member_plan || "basic"} • current role: {profile.role}</div>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
+                                      <SmallButton
+                                        key={profileRole}
+                                        onClick={() => updateProfileRoleById(profile.id, profileRole)}
+                                        disabled={dbProfilesLoading || profile.role === profileRole}
+                                        className="px-2 py-1 text-xs"
+                                      >
+                                        Set {profileRole}
+                                      </SmallButton>
+                                    ))}
+                                  </div>
+                                </div>
+                              )) : (
+                                <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500">No profiles loaded yet.</div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-4 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-500">Account details are read-only for trainers.</div>
+                        )}
+                      </div>
+
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                           <div className="text-sm font-semibold text-zinc-900">Active Program</div>
@@ -15423,7 +15677,7 @@ export default function App() {
                                   <div>Sessions / Routine</div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
+                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(activeSavedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
                                   <div>Total Sessions</div>
                                 </div>
                               </div>
@@ -15508,6 +15762,20 @@ export default function App() {
                       </PrimaryButton>
 
                       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                        <div className="font-semibold text-zinc-900">Session Source: {sessionSourceLabel}</div>
+                        <div className="mt-1">
+                          DB Sessions Loaded: {dbSessionsLoaded ? dbSavedSessions.length : "not loaded"} • Local Sessions Available: {savedSessions.length} • Active: {activeSavedSessions.length}
+                        </div>
+                        {sessionsBridgeMessage ? <div className="mt-1 text-zinc-500">{sessionsBridgeMessage}</div> : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <SmallButton onClick={loadSupabaseSessions} disabled={dbSessionsLoading || !dbProgramsLoaded}>Refresh DB Sessions</SmallButton>
+                          {canImportExportMembers ? (
+                            <SmallButton onClick={importLocalSessionsToSupabase} disabled={dbSessionsLoading || !dbProgramsLoaded}>Import Local Sessions</SmallButton>
+                          ) : null}
+                        </div>
+                      </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
                         <div className="font-semibold text-zinc-900">Program Source: {programSourceLabel}</div>
                         <div className="mt-1">
                           DB Programs Loaded: {dbProgramsLoaded ? dbPrograms.length : "not loaded"} • Local Programs Available: {programs.length} • Displayed: {displayedPrograms.length}
@@ -15539,7 +15807,7 @@ export default function App() {
                             >
                               <div className="font-semibold text-zinc-900">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(activeSavedSessions, program.id, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </button>
                             <div className={`text-xs font-semibold uppercase tracking-wide ${
                               program.status === "active"
@@ -15646,7 +15914,7 @@ export default function App() {
                           <div>Sessions / Routine</div>
                         </div>
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
+                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
                           <div>Total Sessions</div>
                         </div>
                       </div>
@@ -16048,7 +16316,7 @@ export default function App() {
                                 {renderReadOnlyProgramDesign({ ...selectedProgram, routines: [routine] })}
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {routineSessions.map((sessionNumber) => {
-                                    const hasSavedSession = savedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
+                                    const hasSavedSession = activeSavedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
                                     return (
                                       <button
                                         key={sessionNumber}
@@ -16080,7 +16348,7 @@ export default function App() {
                                 {renderReadOnlyProgramDesign({ ...selectedProgram, routines: [routine] })}
                                 <div className="mt-3 grid grid-cols-4 gap-2">
                                   {routineSessions.map((sessionNumber) => {
-                                    const hasSavedSession = savedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
+                                    const hasSavedSession = activeSavedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
                                     return (
                                       <button
                                         key={sessionNumber}
@@ -17183,7 +17451,7 @@ export default function App() {
                             <div>
                               <div className="text-lg font-semibold">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(activeSavedSessions, program.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -17202,7 +17470,7 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
+                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
                     </div>
                     {selectedProgramIsComplete ? (
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">Program Complete</div>
@@ -17223,7 +17491,7 @@ export default function App() {
                                   {isNextRoutine ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                 </div>
                                 <div className="text-sm text-zinc-500">{routine.blocks.length} blocks</div>
-                                <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(savedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
+                                <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(activeSavedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
                               </div>
                               <div className="flex flex-col items-end gap-1">
                                 <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
