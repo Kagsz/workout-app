@@ -13,7 +13,7 @@ import appBanner from "./assets/appbanner1.png";
 
 // ===== TYPES =====
 
-type Role = "admin" | "member";
+type Role = "admin" | "trainer" | "member";
 type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
@@ -73,6 +73,7 @@ type Member = {
   programClosed?: boolean;
   archived?: boolean;
   memberPlan?: MemberPlan;
+  inviteEmail?: string;
 };
 
 type AuthProfile = {
@@ -95,6 +96,43 @@ type AuthMember = {
   member_plan: MemberPlan;
   archived: boolean;
   location_id: string | null;
+  invite_email?: string | null;
+};
+
+type DbBlockRow = {
+  id: string;
+  routine_id: string;
+  block_type: string;
+  title: string;
+  duration: string | null;
+  notes: string | null;
+  interaction_mode: string | null;
+  sort_order: number | null;
+  context_flags?: string[] | null;
+  exercises: Exercise[] | null;
+  legacy_app_id?: string | null;
+};
+
+type DbRoutineRow = {
+  id: string;
+  program_id: string;
+  label: string;
+  sort_order: number | null;
+  legacy_app_id?: string | null;
+  blocks?: DbBlockRow[] | null;
+};
+
+type DbProgramRow = {
+  id: string;
+  member_id: string;
+  name: string;
+  started_at: string | null;
+  status: string;
+  notes: string | null;
+  program_length: number | null;
+  input_mode: string | null;
+  legacy_app_id?: string | null;
+  routines?: DbRoutineRow[] | null;
 };
 
 
@@ -1409,6 +1447,7 @@ const getMemberPlanLabel = (plan: MemberPlan | undefined) => {
 const normalizeMember = (member: Member): Member => ({
   ...member,
   memberPlan: member.memberPlan || "direct",
+  inviteEmail: member.inviteEmail || "",
 });
 
 const normalizeProgram = (program: Program): Program => ({
@@ -11237,6 +11276,10 @@ export default function App() {
     const stored = window.localStorage.getItem(STORAGE_KEYS.members);
     return stored ? (JSON.parse(stored) as Member[]).map(normalizeMember) : [normalizeMember({ id: "member-1", clientId: "100001", name: "Test Subject" })];
   });
+  const [dbMembers, setDbMembers] = useState<Member[]>([]);
+  const [dbMembersLoaded, setDbMembersLoaded] = useState(false);
+  const [dbMembersLoading, setDbMembersLoading] = useState(false);
+  const [membersBridgeMessage, setMembersBridgeMessage] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
@@ -11244,6 +11287,7 @@ export default function App() {
   const [isEditingMember, setIsEditingMember] = useState(false);
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
+  const [editedMemberInviteEmail, setEditedMemberInviteEmail] = useState("");
   const [role, setRole] = useState<Role>("admin");
   const [authSession, setAuthSession] = useState<Session | null>(null);
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null);
@@ -11262,6 +11306,10 @@ export default function App() {
     const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
     return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms().map(normalizeProgram);
   });
+  const [dbPrograms, setDbPrograms] = useState<Program[]>([]);
+  const [dbProgramsLoaded, setDbProgramsLoaded] = useState(false);
+  const [dbProgramsLoading, setDbProgramsLoading] = useState(false);
+  const [programsBridgeMessage, setProgramsBridgeMessage] = useState("");
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
   const [builderSource, setBuilderSource] = useState<BuilderSource>("adminPrograms");
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
@@ -11341,26 +11389,49 @@ export default function App() {
     return window.localStorage.getItem(STORAGE_KEYS.trackerTutorialDismissed) === "true";
   });
 
+  const displayedMembers = useMemo(
+    () => (dbMembersLoaded && dbMembers.length ? dbMembers : members),
+    [dbMembers, dbMembersLoaded, members]
+  );
+  const memberSourceLabel = dbMembersLoaded && dbMembers.length ? "Supabase" : "Local fallback";
+  const programSourceLabel = dbProgramsLoaded && dbPrograms.length ? "Supabase" : "Local fallback";
+  const isAdminRole = role === "admin";
+  const isTrainerRole = role === "trainer";
+  const canUseTrainerWorkspace = role === "admin" || role === "trainer";
+  const canManageBusiness = isAdminRole;
+  const canManageMembers = isAdminRole;
+  const canEditMemberIdentity = isAdminRole;
+  const canArchiveMembers = isAdminRole;
+  const canDeleteMembers = isAdminRole;
+  const canImportExportMembers = isAdminRole;
+  const canEditMemberPlan = isAdminRole;
+  const canEditPrograms = isAdminRole || isTrainerRole;
+
+  const displayedPrograms = useMemo(
+    () => (dbProgramsLoaded && dbPrograms.length ? dbPrograms : programs),
+    [dbPrograms, dbProgramsLoaded, programs]
+  );
+
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
-    const scopedMembers = members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived));
+    const scopedMembers = displayedMembers.filter((member) => (canArchiveMembers && viewArchivedMembers ? Boolean(member.archived) : !member.archived));
 
     if (!query) return showAllMembers ? scopedMembers : scopedMembers.slice(0, 10);
     return scopedMembers.filter((member) =>
-      member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query)
+      member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query) || (member.inviteEmail || "").toLowerCase().includes(query)
     );
-  }, [members, memberSearch, viewArchivedMembers, showAllMembers]);
+  }, [displayedMembers, memberSearch, viewArchivedMembers, showAllMembers, canArchiveMembers]);
 
   const selectedMember = useMemo(
-    () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
-    [members, selectedMemberId]
+    () => displayedMembers.find((member) => member.id === selectedMemberId) || displayedMembers[0] || null,
+    [displayedMembers, selectedMemberId]
   );
 
   const normalizeAuthProfile = (profile: any, fallbackEmail?: string | null): AuthProfile => ({
     id: String(profile.id),
     email: profile.email || fallbackEmail || null,
     display_name: profile.display_name || null,
-    role: profile.role === "admin" ? "admin" : "member",
+    role: profile.role === "admin" || profile.role === "trainer" ? profile.role : "member",
     member_plan: ["basic", "direct", "premium"].includes(profile.member_plan) ? profile.member_plan : "basic",
     client_id: profile.client_id || null,
     linked_company_client_id: profile.linked_company_client_id || null,
@@ -11376,7 +11447,321 @@ export default function App() {
     member_plan: ["basic", "direct", "premium"].includes(member.member_plan) ? member.member_plan : "basic",
     archived: Boolean(member.archived),
     location_id: member.location_id || null,
+    invite_email: member.invite_email || null,
   });
+
+  const mapDbMemberToAppMember = (member: any): Member =>
+    normalizeMember({
+      id: String(member.id),
+      clientId: String(member.client_id || ""),
+      name: String(member.name || "Member"),
+      archived: Boolean(member.archived),
+      memberPlan: ["basic", "direct", "premium"].includes(member.member_plan) ? member.member_plan : "basic",
+      inviteEmail: member.invite_email || "",
+    });
+
+  const loadSupabaseMembers = async () => {
+    if (!authProfile || !["admin", "trainer"].includes(authProfile.role)) {
+      setDbMembers([]);
+      setDbMembersLoaded(false);
+      return [];
+    }
+
+    setDbMembersLoading(true);
+    const { data, error } = await supabase
+      .from("members")
+      .select("*")
+      .order("created_at", { ascending: true });
+    setDbMembersLoading(false);
+
+    if (error) {
+      setMembersBridgeMessage(error.message || "Unable to load Supabase members.");
+      setDbMembersLoaded(false);
+      return [];
+    }
+
+    const mappedMembers = (data || []).map(mapDbMemberToAppMember);
+    setDbMembers(mappedMembers);
+    setDbMembersLoaded(true);
+    setMembersBridgeMessage(`Loaded ${mappedMembers.length} member${mappedMembers.length === 1 ? "" : "s"} from Supabase.`);
+    if (mappedMembers.length && !mappedMembers.some((member) => member.id === selectedMemberId)) {
+      setSelectedMemberId(mappedMembers[0].id);
+    }
+    return mappedMembers;
+  };
+
+  const insertSupabaseMember = async (member: Member) => {
+    const { data, error } = await supabase
+      .from("members")
+      .insert({
+        client_id: member.clientId,
+        name: member.name,
+        member_plan: member.memberPlan || "direct",
+        archived: Boolean(member.archived),
+        invite_email: member.inviteEmail || null,
+      })
+      .select("*")
+      .maybeSingle();
+
+    if (error) throw error;
+    return mapDbMemberToAppMember(data);
+  };
+
+  const importLocalMembersToSupabase = async () => {
+    if (!authProfile || authProfile.role !== "admin") {
+      setMembersBridgeMessage("Only admins can import local members.");
+      return;
+    }
+
+    setDbMembersLoading(true);
+    try {
+      const existing = await loadSupabaseMembers();
+      const existingClientIds = new Set(existing.map((member) => member.clientId));
+      const membersToImport = members.filter((member) => member.clientId && !existingClientIds.has(member.clientId));
+
+      if (!membersToImport.length) {
+        setMembersBridgeMessage("No new local members to import.");
+        return;
+      }
+
+      const payload = membersToImport.map((member) => ({
+        client_id: member.clientId,
+        name: member.name,
+        member_plan: member.memberPlan || "direct",
+        archived: Boolean(member.archived),
+        invite_email: member.inviteEmail || null,
+      }));
+
+      const { error } = await supabase.from("members").insert(payload);
+      if (error) throw error;
+
+      setMembersBridgeMessage(`Imported ${membersToImport.length} local member${membersToImport.length === 1 ? "" : "s"} to Supabase.`);
+      await loadSupabaseMembers();
+    } catch (error: any) {
+      setMembersBridgeMessage(error?.message || "Unable to import local members.");
+    } finally {
+      setDbMembersLoading(false);
+    }
+  };
+
+
+  const normalizeDbDateForInput = (value: string | null | undefined) => {
+    if (!value) return "";
+    const dateOnly = String(value).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return String(value);
+    const [year, month, day] = dateOnly.split("-");
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  const formatDateForSupabase = (value: string) => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10);
+  };
+
+  const mapDbProgramToAppProgram = (program: DbProgramRow): Program =>
+    normalizeProgram({
+      id: String(program.id),
+      name: String(program.name || "Program"),
+      startedAt: normalizeDbDateForInput(program.started_at),
+      status: program.status === "paused" || program.status === "closed" ? program.status : "active",
+      notes: program.notes || "",
+      programLength: Number(program.program_length || DEFAULT_PROGRAM_LENGTH),
+      inputMode: program.input_mode === "memberInput" ? "memberInput" : "trainerInput",
+      memberId: String(program.member_id || ""),
+      routines: [...(program.routines || [])]
+        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+        .map((routine) => ({
+          id: String(routine.id),
+          label: String(routine.label || "Routine"),
+          blocks: [...(routine.blocks || [])]
+            .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+            .map((block) => ({
+              id: String(block.id),
+              type: block.block_type === "single" ? "single" : "paired",
+              title: String(block.title || ""),
+              duration: String(block.duration || ""),
+              notes: String(block.notes || ""),
+              interactionMode: block.interaction_mode === "alternating" ? "alternating" : block.interaction_mode === "na" ? "na" : undefined,
+              exercises: Array.isArray(block.exercises) ? block.exercises : [],
+            })),
+        })),
+    });
+
+  const loadSupabasePrograms = async () => {
+    if (!authProfile || !canUseTrainerWorkspace) {
+      setDbPrograms([]);
+      setDbProgramsLoaded(false);
+      return [];
+    }
+
+    setDbProgramsLoading(true);
+    const { data, error } = await supabase
+      .from("programs")
+      .select("*, routines(*, blocks(*))")
+      .order("created_at", { ascending: true });
+    setDbProgramsLoading(false);
+
+    if (error) {
+      setProgramsBridgeMessage(error.message || "Unable to load Supabase programs.");
+      setDbProgramsLoaded(false);
+      return [];
+    }
+
+    const mappedPrograms = ((data || []) as DbProgramRow[]).map(mapDbProgramToAppProgram);
+    setDbPrograms(mappedPrograms);
+    setDbProgramsLoaded(true);
+    setProgramsBridgeMessage(`Loaded ${mappedPrograms.length} program${mappedPrograms.length === 1 ? "" : "s"} from Supabase.`);
+    if (mappedPrograms.length && selectedProgramId && !mappedPrograms.some((program) => program.id === selectedProgramId)) {
+      setSelectedProgramId(mappedPrograms[0].id);
+    }
+    return mappedPrograms;
+  };
+
+  const getDbMemberIdForLocalProgram = (program: Program) => {
+    if (dbMembersLoaded && dbMembers.some((member) => member.id === program.memberId)) return program.memberId || null;
+
+    const localMember = members.find((member) => member.id === program.memberId) || members[0] || null;
+    if (!localMember) return selectedMember?.id || null;
+
+    return dbMembers.find((member) => member.clientId === localMember.clientId)?.id || selectedMember?.id || null;
+  };
+
+  const insertSupabaseProgramBlueprint = async (program: Program, memberId: string) => {
+    const normalized = normalizeProgram(program);
+    const { data: insertedProgram, error: programError } = await supabase
+      .from("programs")
+      .insert({
+        member_id: memberId,
+        name: normalized.name,
+        started_at: formatDateForSupabase(normalized.startedAt),
+        status: normalized.status,
+        notes: normalized.notes || null,
+        program_length: normalized.programLength || DEFAULT_PROGRAM_LENGTH,
+        input_mode: normalized.inputMode || "trainerInput",
+        legacy_app_id: normalized.id,
+      })
+      .select("*")
+      .single();
+
+    if (programError) throw programError;
+
+    const routineIdMap = new Map<string, string>();
+    for (const [routineIndex, routine] of normalized.routines.entries()) {
+      const { data: insertedRoutine, error: routineError } = await supabase
+        .from("routines")
+        .insert({
+          program_id: insertedProgram.id,
+          label: routine.label,
+          sort_order: routineIndex,
+          legacy_app_id: routine.id,
+        })
+        .select("*")
+        .single();
+
+      if (routineError) throw routineError;
+      routineIdMap.set(routine.id, insertedRoutine.id);
+
+      const blockPayload = routine.blocks.map((block, blockIndex) => ({
+        routine_id: insertedRoutine.id,
+        block_type: block.type,
+        title: block.title,
+        duration: block.duration || null,
+        notes: block.notes || null,
+        interaction_mode: block.interactionMode || null,
+        sort_order: blockIndex,
+        context_flags: [],
+        exercises: block.exercises || [],
+        legacy_app_id: block.id,
+      }));
+
+      if (blockPayload.length) {
+        const { error: blockError } = await supabase.from("blocks").insert(blockPayload);
+        if (blockError) throw blockError;
+      }
+    }
+
+    return insertedProgram.id as string;
+  };
+
+  const updateSupabaseProgramStatus = async (programId: string, status: Program["status"]) => {
+    if (!dbProgramsLoaded || !dbPrograms.some((program) => program.id === programId)) return false;
+
+    const { error } = await supabase.from("programs").update({ status }).eq("id", programId);
+    if (error) {
+      setProgramsBridgeMessage(error.message || "Unable to update Supabase program status.");
+      return false;
+    }
+
+    setDbPrograms((prev) => prev.map((program) => (program.id === programId ? { ...program, status } : program)));
+    return true;
+  };
+
+  const deleteSupabaseProgram = async (programId: string) => {
+    if (!dbProgramsLoaded || !dbPrograms.some((program) => program.id === programId)) return false;
+
+    const { error } = await supabase.from("programs").delete().eq("id", programId);
+    if (error) {
+      setProgramsBridgeMessage(error.message || "Unable to delete Supabase program.");
+      return false;
+    }
+
+    setDbPrograms((prev) => prev.filter((program) => program.id !== programId));
+    return true;
+  };
+
+  const importLocalProgramsToSupabase = async () => {
+    if (!canManageBusiness) {
+      setProgramsBridgeMessage("Only admins can import local programs.");
+      return;
+    }
+
+    if (!dbMembersLoaded || !dbMembers.length) {
+      setProgramsBridgeMessage("Load/import Supabase members before importing programs.");
+      return;
+    }
+
+    setDbProgramsLoading(true);
+    try {
+      await loadSupabasePrograms();
+      const { data: existingRows, error: existingError } = await supabase
+        .from("programs")
+        .select("id, member_id, name, legacy_app_id");
+
+      if (existingError) throw existingError;
+
+      const existingLegacyIds = new Set((existingRows || []).map((program: any) => String(program.legacy_app_id || "")).filter(Boolean));
+      const existingSignatures = new Set((existingRows || []).map((program: any) => `${program.member_id}::${program.name}`.toLowerCase()));
+
+      let importedCount = 0;
+      for (const localProgram of programs) {
+        const memberId = getDbMemberIdForLocalProgram(localProgram);
+        if (!memberId) continue;
+
+        const signature = `${memberId}::${localProgram.name}`.toLowerCase();
+        if (existingLegacyIds.has(localProgram.id) || existingSignatures.has(signature)) continue;
+
+        await insertSupabaseProgramBlueprint(localProgram, memberId);
+        importedCount += 1;
+      }
+
+      setProgramsBridgeMessage(
+        importedCount
+          ? `Imported ${importedCount} local program blueprint${importedCount === 1 ? "" : "s"} to Supabase.`
+          : "No new local program blueprints to import."
+      );
+      await loadSupabasePrograms();
+    } catch (error: any) {
+      setProgramsBridgeMessage(error?.message || "Unable to import local programs.");
+    } finally {
+      setDbProgramsLoading(false);
+    }
+  };
+
 
   const buildDefaultClientIdForUser = (user: User) => `PR-${String(user.id).slice(0, 8).toUpperCase()}`;
 
@@ -11420,6 +11805,8 @@ export default function App() {
   };
 
   const ensureMemberForProfile = async (profile: AuthProfile) => {
+    const email = String(profile.email || "").trim().toLowerCase();
+
     const { data: existingMember, error: memberReadError } = await supabase
       .from("members")
       .select("*")
@@ -11434,6 +11821,37 @@ export default function App() {
       return normalizeAuthMember(existingMember);
     }
 
+    if (email) {
+      const { data: invitedMember, error: inviteReadError } = await supabase
+        .from("members")
+        .select("*")
+        .is("profile_id", null)
+        .ilike("invite_email", email)
+        .maybeSingle();
+
+      if (inviteReadError) {
+        throw inviteReadError;
+      }
+
+      if (invitedMember) {
+        const { data: claimedMember, error: claimError } = await supabase
+          .from("members")
+          .update({
+            profile_id: profile.id,
+            member_plan: invitedMember.member_plan || profile.member_plan,
+          })
+          .eq("id", invitedMember.id)
+          .select("*")
+          .maybeSingle();
+
+        if (claimError) {
+          throw claimError;
+        }
+
+        return normalizeAuthMember(claimedMember);
+      }
+    }
+
     const clientId = profile.client_id || `PR-${String(profile.id).slice(0, 8).toUpperCase()}`;
     const { data: insertedMember, error: memberInsertError } = await supabase
       .from("members")
@@ -11443,6 +11861,7 @@ export default function App() {
         name: profile.display_name || profile.email?.split("@")[0] || "Member",
         member_plan: profile.member_plan,
         location_id: profile.location_id,
+        invite_email: profile.email || null,
       })
       .select("*")
       .maybeSingle();
@@ -11470,7 +11889,7 @@ export default function App() {
       setAuthMember(normalizedMember);
       setRole(normalizedProfile.role);
       setAuthBootstrapMessage(`Profile linked to member ${normalizedMember.client_id}.`);
-      setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
+      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "memberHome");
       return normalizedProfile;
     } catch (error: any) {
       setAuthMessage(error?.message || "Unable to complete account bootstrap.");
@@ -11525,7 +11944,7 @@ export default function App() {
     setAuthProfile(normalizedProfile);
     setRole(normalizedProfile.role);
     setAuthBootstrapMessage(`Role updated to ${normalizedProfile.role}.`);
-    setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
+    setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "memberHome");
   };
 
   useEffect(() => {
@@ -11563,6 +11982,24 @@ export default function App() {
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (authProfile && ["admin", "trainer"].includes(authProfile.role)) {
+      loadSupabaseMembers();
+    } else {
+      setDbMembers([]);
+      setDbMembersLoaded(false);
+    }
+  }, [authProfile?.id, authProfile?.role]);
+
+  useEffect(() => {
+    if (authProfile && canUseTrainerWorkspace) {
+      loadSupabasePrograms();
+    } else {
+      setDbPrograms([]);
+      setDbProgramsLoaded(false);
+    }
+  }, [authProfile?.id, authProfile?.role]);
 
   const handleAuthSubmit = async () => {
     const email = authEmail.trim();
@@ -12110,18 +12547,19 @@ export default function App() {
 
     setEditedMemberName(selectedMember.name);
     setEditedMemberClientId(selectedMember.clientId);
+    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
     setIsEditingMember(false);
   }, [selectedMember?.id]);
 
   const sortedPrograms = useMemo(
-    () => [...programs].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
-    [programs]
+    () => [...displayedPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
+    [displayedPrograms]
   );
 
   const adminPrograms = useMemo(() => {
     if (!selectedMember) return [];
-    return programs.filter((program) => (program.memberId || members[0]?.id || null) === selectedMember.id);
-  }, [programs, selectedMember, members]);
+    return displayedPrograms.filter((program) => (program.memberId || displayedMembers[0]?.id || null) === selectedMember.id);
+  }, [displayedPrograms, selectedMember, displayedMembers]);
 
   const adminSortedPrograms = useMemo(
     () => [...adminPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
@@ -12135,11 +12573,11 @@ export default function App() {
 
   const selectedProgram = useMemo(
     () =>
-      programs.find((program) => program.id === selectedProgramId) ||
-      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
+      displayedPrograms.find((program) => program.id === selectedProgramId) ||
+      (canUseTrainerWorkspace && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
         ? adminSortedPrograms[0] || null
         : sortedPrograms[0] || null),
-    [programs, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
+    [displayedPrograms, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
   );
 
   const selectedRoutine = useMemo(
@@ -12635,6 +13073,11 @@ export default function App() {
   }, [selectedProgram?.id, selectedRoutine?.id, selectedMember?.id]);
 
   const updatePrograms = (updater: (current: Program[]) => Program[]) => {
+    if (dbProgramsLoaded && dbPrograms.length) {
+      setDbPrograms((prev) => updater(prev));
+      return;
+    }
+
     setPrograms((prev) => updater(prev));
   };
 
@@ -13742,23 +14185,20 @@ export default function App() {
   };
 
   const goAdminMembers = () => {
-    setRole("admin");
     setScreen("members");
   };
 
   const openMemberOverview = (memberId: string) => {
     setSelectedMemberId(memberId);
-    setRole("admin");
     setScreen("memberOverview");
   };
 
   const goAdminPrograms = () => {
-    setRole("admin");
     setScreen("adminPrograms");
   };
 
   const goBack = () => {
-    if (role === "admin") {
+    if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") {
         goAdminMembers();
         return;
@@ -13820,7 +14260,7 @@ export default function App() {
   };
 
   const backLabel = useMemo(() => {
-    if (role === "admin") {
+    if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
       if (screen === "programView") return "Back to All Programs";
@@ -13838,60 +14278,135 @@ export default function App() {
     if (screen === "memberInput") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     if (screen === "graph") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     return "";
-  }, [role, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
+  }, [canUseTrainerWorkspace, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
 
-  const addMember = () => {
-    const nextMemberNumber = members.length + 1;
+  const addMember = async () => {
+    if (!canManageMembers) {
+      setMembersBridgeMessage("Only admins can add clients.");
+      return;
+    }
+
+    const nextMemberNumber = displayedMembers.length + 1;
+    const defaultClientId = String(100000 + nextMemberNumber);
+    const name = window.prompt("Client name", `New Member ${nextMemberNumber}`)?.trim();
+    if (!name) return;
+
+    const clientId = window.prompt("Client ID", defaultClientId)?.trim() || defaultClientId;
+    const inviteEmail = window.prompt("Invite/login email (optional)", "")?.trim().toLowerCase() || "";
+    const planInput = window.prompt("Member plan: basic, premium, or direct", "direct")?.trim().toLowerCase() || "direct";
+    const memberPlan: MemberPlan = planInput === "basic" || planInput === "premium" || planInput === "direct" ? planInput : "direct";
+
     const newMember: Member = {
       id: uid(),
-      clientId: String(100000 + nextMemberNumber),
-      name: `New Member ${nextMemberNumber}`,
+      clientId,
+      name,
       programClosed: false,
       archived: false,
-      memberPlan: "direct",
+      memberPlan,
+      inviteEmail,
     };
 
-    setMembers((prev) => [...prev, newMember]);
-    setSelectedMemberId(newMember.id);
+    if (authProfile?.role === "admin") {
+      setMembersBridgeMessage("Creating Supabase member...");
+      try {
+        const insertedMember = await insertSupabaseMember(newMember);
+        setDbMembers((prev) => [...prev, insertedMember]);
+        setDbMembersLoaded(true);
+        setSelectedMemberId(insertedMember.id);
+        setMembersBridgeMessage(`Created Supabase member ${insertedMember.clientId}.`);
+      } catch (error: any) {
+        setMembersBridgeMessage(error?.message || "Unable to create Supabase member. Added locally instead.");
+        setMembers((prev) => [...prev, newMember]);
+        setSelectedMemberId(newMember.id);
+      }
+    } else {
+      setMembers((prev) => [...prev, newMember]);
+      setSelectedMemberId(newMember.id);
+    }
+
     setMemberSearch("");
     setViewArchivedMembers(false);
     setShowAllMembers(false);
   };
 
-  const removeMember = (memberId: string) => {
+  const removeMember = async (memberId: string) => {
+    if (!canDeleteMembers) return;
+
     const confirmDelete = window.confirm("Are you sure? This action cannot be undone.");
     if (!confirmDelete) return;
-    setMembers((prev) => prev.filter((member) => member.id !== memberId));
+
+    if (dbMembersLoaded && dbMembers.some((member) => member.id === memberId) && authProfile?.role === "admin") {
+      const { error } = await supabase.from("members").delete().eq("id", memberId);
+      if (error) {
+        setMembersBridgeMessage(error.message || "Unable to delete Supabase member.");
+        return;
+      }
+      setDbMembers((prev) => prev.filter((member) => member.id !== memberId));
+    } else {
+      setMembers((prev) => prev.filter((member) => member.id !== memberId));
+    }
+
     if (selectedMemberId === memberId) {
       setSelectedMemberId(null);
       setScreen("members");
     }
   };
 
-  const archiveMember = (memberId: string) => {
-    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
+  const archiveMember = async (memberId: string) => {
+    if (!canArchiveMembers) return;
+
+    if (dbMembersLoaded && dbMembers.some((member) => member.id === memberId) && authProfile?.role === "admin") {
+      const { error } = await supabase.from("members").update({ archived: true }).eq("id", memberId);
+      if (error) {
+        setMembersBridgeMessage(error.message || "Unable to archive Supabase member.");
+        return;
+      }
+      setDbMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
+    } else {
+      setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
+    }
+
     if (selectedMemberId === memberId) {
       setSelectedMemberId(null);
       setScreen("members");
     }
   };
 
-  const restoreMember = (memberId: string) => {
-    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
+  const restoreMember = async (memberId: string) => {
+    if (!canArchiveMembers) return;
+
+    if (dbMembersLoaded && dbMembers.some((member) => member.id === memberId) && authProfile?.role === "admin") {
+      const { error } = await supabase.from("members").update({ archived: false }).eq("id", memberId);
+      if (error) {
+        setMembersBridgeMessage(error.message || "Unable to restore Supabase member.");
+        return;
+      }
+      setDbMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
+    } else {
+      setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
+    }
   };
 
-  const updateSelectedMemberPlan = (plan: MemberPlan) => {
-    if (!selectedMember) return;
-    setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
+  const updateSelectedMemberPlan = async (plan: MemberPlan) => {
+    if (!selectedMember || !canEditMemberPlan) return;
+
+    if (dbMembersLoaded && dbMembers.some((member) => member.id === selectedMember.id) && authProfile?.role === "admin") {
+      const { error } = await supabase.from("members").update({ member_plan: plan }).eq("id", selectedMember.id);
+      if (error) {
+        setMembersBridgeMessage(error.message || "Unable to update Supabase member plan.");
+        return;
+      }
+      setDbMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
+    } else {
+      setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
+    }
   };
 
   const goAdminInput = () => {
-    setRole("admin");
     setScreen("adminDash");
   };
 
   const goMemberPrograms = () => {
-    setRole("member");
     setScreen("memberHome");
   };
 
@@ -13899,7 +14414,7 @@ export default function App() {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen(role === "admin" ? "programView" : "routines");
+    setScreen(canUseTrainerWorkspace ? "programView" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -14312,23 +14827,23 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
-    if (role === "admin" && screen === "members") {
-      return [{ label: "Admin" }, { label: "Client List" }];
+    if (canUseTrainerWorkspace && screen === "members") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
     }
-    if (role === "admin" && screen === "memberOverview") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+    if (canUseTrainerWorkspace && screen === "memberOverview") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
-    if (role === "admin" && screen === "adminPrograms") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+    if (canUseTrainerWorkspace && screen === "adminPrograms") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
-    if (role === "admin" && screen === "programView") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+    if (canUseTrainerWorkspace && screen === "programView") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (role === "admin" && screen === "builder") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (canUseTrainerWorkspace && screen === "builder") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (role === "admin" && (screen === "adminDash" || screen === "input")) {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Admin Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")) {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "member" && screen === "memberHome") {
       return [{ label: "Member" }, { label: "Member View" }];
@@ -14467,6 +14982,7 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
+              {canUseTrainerWorkspace ? (
               <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-4">
                   <div className="flex items-start justify-between gap-3">
@@ -14481,29 +14997,33 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-nowrap gap-2">
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={canUseTrainerWorkspace && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Trainer Dash</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph"} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
 
-                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <div className="font-semibold text-zinc-900">Account Bootstrap</div>
-                        <div className="mt-1">
-                          Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
+                  {canManageBusiness ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="font-semibold text-zinc-900">Account Bootstrap</div>
+                          <div className="mt-1">
+                            Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
+                          </div>
+                          {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
                         </div>
-                        {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
+                        <SmallButton onClick={() => updateCurrentProfileRole("admin")} disabled={authSubmitting || authProfile?.role === "admin"} className="px-2 py-1 text-xs">Set Admin</SmallButton>
+                        <SmallButton onClick={() => updateCurrentProfileRole("trainer")} disabled={authSubmitting || authProfile?.role === "trainer"} className="px-2 py-1 text-xs">Set Trainer</SmallButton>
+                        <SmallButton onClick={() => updateCurrentProfileRole("member")} disabled={authSubmitting || authProfile?.role === "member"} className="px-2 py-1 text-xs">Set Member</SmallButton>
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
-                      <SmallButton onClick={() => updateCurrentProfileRole("admin")} disabled={authSubmitting || authProfile?.role === "admin"} className="px-2 py-1 text-xs">Promote Me</SmallButton>
-                      <SmallButton onClick={() => updateCurrentProfileRole("member")} disabled={authSubmitting || authProfile?.role === "member"} className="px-2 py-1 text-xs">Demote Me</SmallButton>
-                    </div>
-                  </div>
+                  ) : null}
                 </div>
               </div>
+              ) : null}
 
               <div className="space-y-3">
                 {!!pathItems.length && <PathBar items={pathItems} />}
@@ -14514,7 +15034,7 @@ export default function App() {
                 ) : null}
               </div>
 
-              {role === "admin" && screen === "members" && (
+              {canUseTrainerWorkspace && screen === "members" && (
                 <SectionCard title="Client List" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
@@ -14532,20 +15052,38 @@ export default function App() {
                         >
                           Active
                         </button>
-                        <button
-                          onClick={() => {
-                            setViewArchivedMembers(true);
-                            setShowAllMembers(false);
-                          }}
-                          className={`rounded-full border px-3 py-1 ${viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
-                        >
-                          Archived
-                        </button>
+                        {canArchiveMembers ? (
+                          <button
+                            onClick={() => {
+                              setViewArchivedMembers(true);
+                              setShowAllMembers(false);
+                            }}
+                            className={`rounded-full border px-3 py-1 ${viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+                          >
+                            Archived
+                          </button>
+                        ) : null}
                       </div>
                     </div>
-                    <div className="self-end flex gap-2">
-                      <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
+                    {canManageMembers ? (
+                      <div className="self-end flex gap-2">
+                        <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                    <div className="font-semibold text-zinc-900">Member Source: {memberSourceLabel}</div>
+                    <div className="mt-1">
+                      DB Members Loaded: {dbMembersLoaded ? dbMembers.length : "not loaded"} • Local Members Available: {members.length}
                     </div>
+                    {membersBridgeMessage ? <div className="mt-1 text-zinc-500">{membersBridgeMessage}</div> : null}
+                    {canImportExportMembers ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <SmallButton onClick={loadSupabaseMembers} disabled={dbMembersLoading}>Refresh DB Members</SmallButton>
+                        <SmallButton onClick={importLocalMembersToSupabase} disabled={dbMembersLoading}>Import Local Members</SmallButton>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -14554,21 +15092,23 @@ export default function App() {
                         <button onClick={() => openMemberOverview(member.id)} className="w-full text-left">
                           <div className="font-semibold text-zinc-900">{member.name}</div>
                         </button>
-                        <div className="mt-3 flex gap-2">
-                          {member.archived ? (
-                            <SmallButton onClick={() => restoreMember(member.id)}>Restore</SmallButton>
-                          ) : (
-                            <>
-                              <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton>
-                              <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton>
-                            </>
-                          )}
-                        </div>
+                        {canManageMembers ? (
+                          <div className="mt-3 flex gap-2">
+                            {member.archived ? (
+                              <SmallButton onClick={() => restoreMember(member.id)}>Restore</SmallButton>
+                            ) : (
+                              <>
+                                {canArchiveMembers ? <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton> : null}
+                                {canDeleteMembers ? <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton> : null}
+                              </>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
 
-                  {!memberSearch.trim() && !showAllMembers && members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
+                  {!memberSearch.trim() && !showAllMembers && displayedMembers.filter((member) => (canArchiveMembers && viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
                     <div className="mt-4">
                       <SmallButton onClick={() => setShowAllMembers(true)}>Show All Clients</SmallButton>
                     </div>
@@ -14576,7 +15116,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "admin" && screen === "memberOverview" && selectedMember && (
+              {canUseTrainerWorkspace && screen === "memberOverview" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
@@ -14601,11 +15141,21 @@ export default function App() {
                                     className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                                   />
                                 </div>
+                                <div>
+                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite/Login Email</div>
+                                  <input
+                                    value={editedMemberInviteEmail}
+                                    onChange={(event) => setEditedMemberInviteEmail(event.target.value)}
+                                    placeholder="optional"
+                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                  />
+                                </div>
                               </>
                             ) : (
                               <>
                                 <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
                                 <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
+                                {selectedMember.inviteEmail ? <div className="text-xs text-zinc-500">Invite Email {selectedMember.inviteEmail}</div> : null}
                               </>
                             )}
                           </div>
@@ -14614,18 +15164,44 @@ export default function App() {
                             {isEditingMember ? (
                               <>
                                 <SmallButton
-                                  onClick={() => {
+                                  onClick={async () => {
                                     const nextName = editedMemberName.trim();
                                     const nextClientId = editedMemberClientId.trim();
+                                    const nextInviteEmail = editedMemberInviteEmail.trim().toLowerCase();
                                     if (!nextName || !nextClientId) return;
 
-                                    setMembers((current) =>
-                                      current.map((member) =>
-                                        member.id === selectedMember.id
-                                          ? { ...member, name: nextName, clientId: nextClientId }
-                                          : member
-                                      )
-                                    );
+                                    if (dbMembersLoaded && dbMembers.some((member) => member.id === selectedMember.id) && authProfile?.role === "admin") {
+                                      const { error } = await supabase
+                                        .from("members")
+                                        .update({
+                                          name: nextName,
+                                          client_id: nextClientId,
+                                          invite_email: nextInviteEmail || null,
+                                        })
+                                        .eq("id", selectedMember.id);
+
+                                      if (error) {
+                                        setMembersBridgeMessage(error.message || "Unable to update Supabase member.");
+                                        return;
+                                      }
+
+                                      setDbMembers((current) =>
+                                        current.map((member) =>
+                                          member.id === selectedMember.id
+                                            ? { ...member, name: nextName, clientId: nextClientId, inviteEmail: nextInviteEmail }
+                                            : member
+                                        )
+                                      );
+                                    } else {
+                                      setMembers((current) =>
+                                        current.map((member) =>
+                                          member.id === selectedMember.id
+                                            ? { ...member, name: nextName, clientId: nextClientId, inviteEmail: nextInviteEmail }
+                                            : member
+                                        )
+                                      );
+                                    }
+
                                     setIsEditingMember(false);
                                   }}
                                 >
@@ -14635,27 +15211,37 @@ export default function App() {
                                   onClick={() => {
                                     setEditedMemberName(selectedMember.name);
                                     setEditedMemberClientId(selectedMember.clientId);
+                                    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
                                     setIsEditingMember(false);
                                   }}
                                 >
                                   Cancel
                                 </SmallButton>
                               </>
-                            ) : (
-                              <SmallButton onClick={() => setIsEditingMember(true)}>Edit</SmallButton>
-                            )}
+                            ) : canEditMemberIdentity ? (
+                              <SmallButton onClick={() => {
+                                setEditedMemberName(selectedMember.name);
+                                setEditedMemberClientId(selectedMember.clientId);
+                                setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+                                setIsEditingMember(true);
+                              }}>Edit</SmallButton>
+                            ) : null}
                           </div>
                         </div>
                       </div>
 
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Type</div>
-                        <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
-                        <div className="grid gap-2 sm:grid-cols-3">
-                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
-                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
-                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
+                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Status</div>
+                        <div className="mb-3 text-xs text-zinc-500">
+                          {canEditMemberPlan ? "Controls what this member can access in Member View." : "Visible for trainer context. Admins manage member type and account details."}
                         </div>
+                        {canEditMemberPlan ? (
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
+                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
+                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
+                          </div>
+                        ) : null}
                         <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                           Current: {getMemberPlanLabel(selectedMember.memberPlan)}
                         </div>
@@ -14718,13 +15304,15 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && screen === "adminPrograms" && selectedMember && (
+              {canUseTrainerWorkspace && screen === "adminPrograms" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="All Programs" collapsible>
                     <div className="space-y-3">
                       <PrimaryButton
-                        onClick={() => {
-                          const nextProgramIndex = programs.length + 1;
+                        onClick={async () => {
+                          if (!canEditPrograms) return;
+
+                          const nextProgramIndex = displayedPrograms.length + 1;
                           const newProgram: Program = {
                             id: uid(),
                             name: `Program ${nextProgramIndex}`,
@@ -14736,8 +15324,23 @@ export default function App() {
                             inputMode: getDefaultProgramInputModeForMember(selectedMember),
                             memberId: selectedMember?.id,
                           };
-                          setPrograms((prev) => [...prev, newProgram]);
-                          setSelectedProgramId(newProgram.id);
+
+                          if (dbProgramsLoaded && dbMembersLoaded && dbMembers.some((member) => member.id === selectedMember.id)) {
+                            try {
+                              const insertedProgramId = await insertSupabaseProgramBlueprint(newProgram, selectedMember.id);
+                              await loadSupabasePrograms();
+                              setSelectedProgramId(insertedProgramId);
+                              setProgramsBridgeMessage("Created Supabase program blueprint.");
+                            } catch (error: any) {
+                              setProgramsBridgeMessage(error?.message || "Unable to create Supabase program. Added locally instead.");
+                              setPrograms((prev) => [...prev, newProgram]);
+                              setSelectedProgramId(newProgram.id);
+                            }
+                          } else {
+                            setPrograms((prev) => [...prev, newProgram]);
+                            setSelectedProgramId(newProgram.id);
+                          }
+
                           setSelectedRoutineId(newProgram.routines[0]?.id || null);
                           setSelectedBlockId(newProgram.routines[0]?.blocks[0]?.id || null);
                           setBuilderSource("adminPrograms");
@@ -14747,6 +15350,20 @@ export default function App() {
                       >
                         + New Program
                       </PrimaryButton>
+
+                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                        <div className="font-semibold text-zinc-900">Program Source: {programSourceLabel}</div>
+                        <div className="mt-1">
+                          DB Programs Loaded: {dbProgramsLoaded ? dbPrograms.length : "not loaded"} • Local Programs Available: {programs.length}
+                        </div>
+                        {programsBridgeMessage ? <div className="mt-1 text-zinc-500">{programsBridgeMessage}</div> : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <SmallButton onClick={loadSupabasePrograms} disabled={dbProgramsLoading}>Refresh DB Programs</SmallButton>
+                          {canImportExportMembers ? (
+                            <SmallButton onClick={importLocalProgramsToSupabase} disabled={dbProgramsLoading}>Import Local Programs</SmallButton>
+                          ) : null}
+                        </div>
+                      </div>
 
                       {adminSortedPrograms.map((program) => (
                         <div key={program.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -14778,11 +15395,17 @@ export default function App() {
                           <div className="mt-3 flex gap-2">
                             {program.status !== "closed" ? (
                               <SmallButton
-                                onClick={() => {
-                                  setPrograms((prev) =>
+                                onClick={async () => {
+                                  const nextStatus = program.status === "paused" ? "active" : "paused";
+                                  if (dbProgramsLoaded && dbPrograms.some((item) => item.id === program.id)) {
+                                    const updated = await updateSupabaseProgramStatus(program.id, nextStatus);
+                                    if (updated) return;
+                                  }
+
+                                  updatePrograms((prev) =>
                                     prev.map((item) =>
                                       item.id === program.id
-                                        ? { ...item, status: item.status === "paused" ? "active" : "paused" }
+                                        ? { ...item, status: nextStatus }
                                         : item
                                     )
                                   );
@@ -14794,10 +15417,16 @@ export default function App() {
 
                             {program.status === "active" ? (
                               <SmallButton
-                                onClick={() => {
+                                onClick={async () => {
                                   const confirmClose = window.confirm("Are you sure you want to close this program? This action cannot be undone.");
                                   if (!confirmClose) return;
-                                  setPrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
+
+                                  if (dbProgramsLoaded && dbPrograms.some((item) => item.id === program.id)) {
+                                    const updated = await updateSupabaseProgramStatus(program.id, "closed");
+                                    if (updated) return;
+                                  }
+
+                                  updatePrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
                                 }}
                                 className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                               >
@@ -14805,10 +15434,19 @@ export default function App() {
                               </SmallButton>
                             ) : (
                               <SmallButton
-                                onClick={() => {
+                                onClick={async () => {
                                   const confirmDelete = window.confirm("Are you sure you want to delete this program? This action cannot be undone.");
                                   if (!confirmDelete) return;
-                                  setPrograms((prev) => prev.filter((item) => item.id !== program.id));
+
+                                  if (dbProgramsLoaded && dbPrograms.some((item) => item.id === program.id)) {
+                                    const deleted = await deleteSupabaseProgram(program.id);
+                                    if (deleted) {
+                                      if (selectedProgramId === program.id) setSelectedProgramId(null);
+                                      return;
+                                    }
+                                  }
+
+                                  updatePrograms((prev) => prev.filter((item) => item.id !== program.id));
                                   if (selectedProgramId === program.id) {
                                     setSelectedProgramId(null);
                                   }
@@ -14827,7 +15465,7 @@ export default function App() {
               )}
 
 
-              {role === "admin" && screen === "programView" && selectedProgram && (
+              {canUseTrainerWorkspace && screen === "programView" && selectedProgram && (
                 <div className="space-y-6">
                   <SectionCard title="Program Summary" collapsible>
                     <div className="space-y-4">
@@ -14873,7 +15511,7 @@ export default function App() {
                             setScreen("adminDash");
                           }}
                         >
-                          Open Admin Dash
+                          Open Trainer Dash
                         </SmallButton>
                       </div>
                     </div>
@@ -14885,7 +15523,7 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && screen === "builder" && (
+              {canUseTrainerWorkspace && screen === "builder" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Builder Workspace</div>
@@ -15132,8 +15770,8 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && (screen === "adminDash" || screen === "input") && (
-                <SectionCard title="Admin Dash" collapsible>
+              {canUseTrainerWorkspace && (screen === "adminDash" || screen === "input") && (
+                <SectionCard title="Trainer Dash" collapsible>
                   <div className="space-y-4">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
                       Choose a client, program, routine, and session. Leave Routine or Session on All to review the broader scope; choose a session to open the fast data-entry form.

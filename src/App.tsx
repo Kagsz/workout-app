@@ -64,6 +64,7 @@ type Program = {
   memberId?: string;
   programLength?: number;
   inputMode?: ProgramInputMode;
+  legacyAppId?: string;
 };
 
 type Member = {
@@ -98,6 +99,19 @@ type AuthMember = {
   location_id: string | null;
   invite_email?: string | null;
 };
+
+type DbProfileRow = {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: Role;
+  member_plan: MemberPlan;
+  client_id: string | null;
+  linked_company_client_id: string | null;
+  client_link_status: string;
+  location_id: string | null;
+};
+
 
 type DbBlockRow = {
   id: string;
@@ -11300,6 +11314,10 @@ export default function App() {
   const [authDisplayName, setAuthDisplayName] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [showMyProfile, setShowMyProfile] = useState(false);
+  const [dbProfiles, setDbProfiles] = useState<AuthProfile[]>([]);
+  const [dbProfilesLoading, setDbProfilesLoading] = useState(false);
+  const [profilesBridgeMessage, setProfilesBridgeMessage] = useState("");
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
@@ -11407,10 +11425,21 @@ export default function App() {
   const canEditMemberPlan = isAdminRole;
   const canEditPrograms = isAdminRole || isTrainerRole;
 
-  const displayedPrograms = useMemo(
-    () => (dbProgramsLoaded && dbPrograms.length ? dbPrograms : programs),
-    [dbPrograms, dbProgramsLoaded, programs]
-  );
+  const displayedPrograms = useMemo(() => {
+    if (!dbProgramsLoaded || !dbPrograms.length) return programs;
+
+    const dbLegacyIds = new Set(dbPrograms.map((program) => program.legacyAppId || program.id).filter(Boolean));
+    const dbSignatures = new Set(dbPrograms.map((program) => `${program.memberId || ""}::${program.name}`.toLowerCase()));
+
+    const localOnlyPrograms = programs.filter((program) => {
+      const localMember = members.find((member) => member.id === program.memberId) || members[0] || null;
+      const bridgedMemberId = localMember ? dbMembers.find((member) => member.clientId === localMember.clientId)?.id || program.memberId || "" : program.memberId || "";
+      const signature = `${bridgedMemberId || ""}::${program.name}`.toLowerCase();
+      return !dbLegacyIds.has(program.id) && !dbSignatures.has(signature);
+    });
+
+    return [...dbPrograms, ...localOnlyPrograms];
+  }, [dbMembers, dbPrograms, dbProgramsLoaded, members, programs]);
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
@@ -11459,6 +11488,63 @@ export default function App() {
       memberPlan: ["basic", "direct", "premium"].includes(member.member_plan) ? member.member_plan : "basic",
       inviteEmail: member.invite_email || "",
     });
+
+
+  const loadSupabaseProfiles = async () => {
+    if (!authProfile || authProfile.role !== "admin") {
+      setDbProfiles([]);
+      return [];
+    }
+
+    setDbProfilesLoading(true);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: true });
+    setDbProfilesLoading(false);
+
+    if (error) {
+      setProfilesBridgeMessage(error.message || "Unable to load profiles.");
+      return [];
+    }
+
+    const mappedProfiles = ((data || []) as DbProfileRow[]).map((profile) => normalizeAuthProfile(profile));
+    setDbProfiles(mappedProfiles);
+    setProfilesBridgeMessage(`Loaded ${mappedProfiles.length} profile${mappedProfiles.length === 1 ? "" : "s"}.`);
+    return mappedProfiles;
+  };
+
+  const updateProfileRoleById = async (profileId: string, nextRole: Role) => {
+    if (!authProfile || authProfile.role !== "admin") {
+      setProfilesBridgeMessage("Only admins can manage user roles.");
+      return;
+    }
+
+    setDbProfilesLoading(true);
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ role: nextRole })
+      .eq("id", profileId)
+      .select("*")
+      .maybeSingle();
+    setDbProfilesLoading(false);
+
+    if (error) {
+      setProfilesBridgeMessage(error.message || "Unable to update role.");
+      return;
+    }
+
+    const normalizedProfile = normalizeAuthProfile(data);
+    setDbProfiles((prev) => prev.map((profile) => (profile.id === normalizedProfile.id ? normalizedProfile : profile)));
+
+    if (authProfile.id === normalizedProfile.id) {
+      setAuthProfile(normalizedProfile);
+      setRole(normalizedProfile.role);
+      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "memberHome");
+    }
+
+    setProfilesBridgeMessage(`Updated ${normalizedProfile.email || normalizedProfile.display_name || "profile"} to ${normalizedProfile.role}.`);
+  };
 
   const loadSupabaseMembers = async () => {
     if (!authProfile || !["admin", "trainer"].includes(authProfile.role)) {
@@ -11566,6 +11652,7 @@ export default function App() {
   const mapDbProgramToAppProgram = (program: DbProgramRow): Program =>
     normalizeProgram({
       id: String(program.id),
+      legacyAppId: program.legacy_app_id || undefined,
       name: String(program.name || "Program"),
       startedAt: normalizeDbDateForInput(program.started_at),
       status: program.status === "paused" || program.status === "closed" ? program.status : "active",
@@ -11917,36 +12004,6 @@ export default function App() {
     }
   };
 
-  const updateCurrentProfileRole = async (nextRole: Role) => {
-    if (!authProfile?.id || !authSession?.user) {
-      setAuthBootstrapMessage("No profile loaded.");
-      return;
-    }
-
-    setAuthSubmitting(true);
-    setAuthBootstrapMessage(`Updating role to ${nextRole}...`);
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .update({ role: nextRole })
-      .eq("id", authProfile.id)
-      .select("*")
-      .maybeSingle();
-
-    setAuthSubmitting(false);
-
-    if (error) {
-      setAuthBootstrapMessage(error.message || "Unable to update role.");
-      return;
-    }
-
-    const normalizedProfile = normalizeAuthProfile(data, authSession.user.email || null);
-    setAuthProfile(normalizedProfile);
-    setRole(normalizedProfile.role);
-    setAuthBootstrapMessage(`Role updated to ${normalizedProfile.role}.`);
-    setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "memberHome");
-  };
-
   useEffect(() => {
     let isMounted = true;
 
@@ -11989,6 +12046,15 @@ export default function App() {
     } else {
       setDbMembers([]);
       setDbMembersLoaded(false);
+    }
+  }, [authProfile?.id, authProfile?.role]);
+
+  useEffect(() => {
+    if (authProfile?.role === "admin") {
+      loadSupabaseProfiles();
+    } else {
+      setDbProfiles([]);
+      setProfilesBridgeMessage("");
     }
   }, [authProfile?.id, authProfile?.role]);
 
@@ -12558,8 +12624,16 @@ export default function App() {
 
   const adminPrograms = useMemo(() => {
     if (!selectedMember) return [];
-    return displayedPrograms.filter((program) => (program.memberId || displayedMembers[0]?.id || null) === selectedMember.id);
-  }, [displayedPrograms, selectedMember, displayedMembers]);
+    return displayedPrograms.filter((program) => {
+      const programMemberId = program.memberId || displayedMembers[0]?.id || null;
+      if (programMemberId === selectedMember.id) return true;
+
+      const localMember = members.find((member) => member.id === programMemberId);
+      if (!localMember) return false;
+
+      return localMember.clientId === selectedMember.clientId;
+    });
+  }, [displayedPrograms, selectedMember, displayedMembers, members]);
 
   const adminSortedPrograms = useMemo(
     () => [...adminPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
@@ -14982,6 +15056,76 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
+              <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Account</div>
+                    <div className="mt-1 truncate text-sm font-semibold text-zinc-900">{authProfile?.display_name || authSession?.user?.email || "Signed in"}</div>
+                    <div className="mt-0.5 text-xs text-zinc-500">
+                      {authProfile?.email || authSession?.user?.email || "No email"} • {role} • {authProfile?.member_plan || "basic"}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <SmallButton onClick={() => setShowMyProfile((prev) => !prev)}>My Profile</SmallButton>
+                    <SmallButton onClick={handleLogout}>Logout</SmallButton>
+                  </div>
+                </div>
+
+                {showMyProfile ? (
+                  <div className="mt-4 space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                    <div className="grid gap-2">
+                      <div><span className="font-semibold text-zinc-900">Email:</span> {authProfile?.email || authSession?.user?.email || "—"}</div>
+                      <div><span className="font-semibold text-zinc-900">Role:</span> {role}</div>
+                      <div><span className="font-semibold text-zinc-900">Member Plan:</span> {authProfile?.member_plan || authMember?.member_plan || "basic"}</div>
+                      <div><span className="font-semibold text-zinc-900">Client ID:</span> {authMember?.client_id || authProfile?.client_id || "—"}</div>
+                      <div><span className="font-semibold text-zinc-900">Linked Member:</span> {authMember ? `${authMember.name} (${authMember.client_id})` : "Not linked"}</div>
+                      <div><span className="font-semibold text-zinc-900">Link Status:</span> {authProfile?.client_link_status || "unlinked"}</div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <SmallButton disabled className="px-2 py-1 text-xs">Link Member Status Coming Soon</SmallButton>
+                      <SmallButton disabled className="px-2 py-1 text-xs">Upgrade Plan Coming Soon</SmallButton>
+                      <SmallButton disabled className="px-2 py-1 text-xs">Change Email Coming Soon</SmallButton>
+                    </div>
+
+                    {canManageBusiness ? (
+                      <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-zinc-900">User Management</div>
+                            <div className="mt-1 text-zinc-500">Admins can assign profile roles. Trainers and members are read-only.</div>
+                          </div>
+                          <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading}>Refresh</SmallButton>
+                        </div>
+                        {profilesBridgeMessage ? <div className="mt-2 text-zinc-500">{profilesBridgeMessage}</div> : null}
+                        <div className="mt-3 space-y-2">
+                          {dbProfiles.length ? dbProfiles.map((profile) => (
+                            <div key={profile.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                              <div className="font-semibold text-zinc-900">{profile.display_name || profile.email || "Unnamed profile"}</div>
+                              <div className="mt-1 text-zinc-500">{profile.email || "No email"} • {profile.member_plan || "basic"} • current role: {profile.role}</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
+                                  <SmallButton
+                                    key={profileRole}
+                                    onClick={() => updateProfileRoleById(profile.id, profileRole)}
+                                    disabled={dbProfilesLoading || profile.role === profileRole}
+                                    className="px-2 py-1 text-xs"
+                                  >
+                                    Set {profileRole}
+                                  </SmallButton>
+                                ))}
+                              </div>
+                            </div>
+                          )) : (
+                            <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-zinc-500">No profiles loaded yet.</div>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
               {canUseTrainerWorkspace ? (
               <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-4">
@@ -14993,7 +15137,7 @@ export default function App() {
                         {authProfile?.member_plan ? ` • ${authProfile.member_plan}` : ""}
                       </div>
                     </div>
-                    <SmallButton onClick={handleLogout}>Logout</SmallButton>
+                    <SmallButton onClick={() => setShowMyProfile((prev) => !prev)}>My Profile</SmallButton>
                   </div>
 
                   <div className="flex flex-nowrap gap-2">
@@ -15015,9 +15159,7 @@ export default function App() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
-                        <SmallButton onClick={() => updateCurrentProfileRole("admin")} disabled={authSubmitting || authProfile?.role === "admin"} className="px-2 py-1 text-xs">Set Admin</SmallButton>
-                        <SmallButton onClick={() => updateCurrentProfileRole("trainer")} disabled={authSubmitting || authProfile?.role === "trainer"} className="px-2 py-1 text-xs">Set Trainer</SmallButton>
-                        <SmallButton onClick={() => updateCurrentProfileRole("member")} disabled={authSubmitting || authProfile?.role === "member"} className="px-2 py-1 text-xs">Set Member</SmallButton>
+                        <SmallButton onClick={() => setShowMyProfile(true)} className="px-2 py-1 text-xs">Open User Management</SmallButton>
                       </div>
                     </div>
                   ) : null}
@@ -15354,8 +15496,11 @@ export default function App() {
                       <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
                         <div className="font-semibold text-zinc-900">Program Source: {programSourceLabel}</div>
                         <div className="mt-1">
-                          DB Programs Loaded: {dbProgramsLoaded ? dbPrograms.length : "not loaded"} • Local Programs Available: {programs.length}
+                          DB Programs Loaded: {dbProgramsLoaded ? dbPrograms.length : "not loaded"} • Local Programs Available: {programs.length} • Displayed: {displayedPrograms.length}
                         </div>
+                        {dbProgramsLoaded && dbPrograms.length && displayedPrograms.length > dbPrograms.length ? (
+                          <div className="mt-1 text-amber-700">Some local-only programs are still being shown until their Supabase import is complete.</div>
+                        ) : null}
                         {programsBridgeMessage ? <div className="mt-1 text-zinc-500">{programsBridgeMessage}</div> : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <SmallButton onClick={loadSupabasePrograms} disabled={dbProgramsLoading}>Refresh DB Programs</SmallButton>
