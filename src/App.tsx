@@ -11406,7 +11406,6 @@ export default function App() {
   const canImportExportMembers = isAdminRole;
   const canEditMemberPlan = isAdminRole;
   const canEditPrograms = isAdminRole || isTrainerRole;
-  const canEnterSessions = isAdminRole || isTrainerRole;
 
   const displayedPrograms = useMemo(
     () => (dbProgramsLoaded && dbPrograms.length ? dbPrograms : programs),
@@ -15000,7 +14999,7 @@ export default function App() {
                   <div className="flex flex-nowrap gap-2">
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={canUseTrainerWorkspace && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Trainer Dash</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph"} onClick={goMemberPrograms}>Member View</ToggleButton>
                   </div>
 
                   {canManageBusiness ? (
