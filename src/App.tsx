@@ -448,21 +448,13 @@ function GraphTooltip({
   const point = payload[0]?.payload;
   if (!point) return null;
 
-  const durationValue = String(point.duration || "").trim();
-  const durationNumber = Number(durationValue);
-  const durationLabel = durationValue
-    ? `${durationValue} minute${Number.isFinite(durationNumber) && durationNumber === 1 ? "" : "s"}`
-    : "—";
-
-  const targetContext =
-    point.blockType === "single"
-      ? `${durationLabel} for ${point.target || point.metric || "output"}`
-      : `Target: ${formatTargetLabel(point.target, point.metric)}`;
-
-  const supportEntries = Object.entries(point.supportMetrics || {}).filter(([metric]) => {
+  const supportEntries = Object.entries(point.supportMetrics || {}).filter(([metric, value]) => {
     const key = metric.trim().toLowerCase();
-    return !["weight", "sets", "set", "performance", "output"].includes(key);
+    const text = String(value || "").trim();
+    return Boolean(text) && !["weight", "sets", "set", "performance", "output"].includes(key);
   });
+  const hasSupportTarget = supportEntries.some(([metric]) => metric.trim().toLowerCase() === "target");
+  const fallbackTarget = String(point.target || "").trim();
   const flagLabels = (point.contextFlags || []).map(formatContextFlagLabel).filter(Boolean);
 
   return (
@@ -475,9 +467,11 @@ function GraphTooltip({
           ))}
         </div>
       ) : null}
-      <div className="mt-1 text-zinc-700">{targetContext}</div>
+      {fallbackTarget && !hasSupportTarget ? (
+        <div className="mt-1 text-zinc-700">Target: <span className="font-semibold">{fallbackTarget}</span></div>
+      ) : null}
       {supportEntries.map(([metric, value]) => (
-        <div key={metric} className="mt-1 text-zinc-700">{metric}: <span className="font-semibold">{value}</span></div>
+        <div key={metric} className="mt-1 text-zinc-700">{metric}: <span className="font-semibold">{String(value).trim()}</span></div>
       ))}
       {point.scoringDirection === "lowerIsBetter" ? <div className="mt-1 text-zinc-500">Lower value is better.</div> : null}
     </div>
