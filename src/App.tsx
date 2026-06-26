@@ -12240,10 +12240,7 @@ export default function App() {
       return null;
     }
   };
-
-    setAuthSubmitting(true);
-    setAuthBootstrapMessage("Checking account records...");
-
+  
     try {
       await hydrateAuthProfile(authSession.user);
     } finally {
