@@ -11337,7 +11337,7 @@ export default function App() {
   const [authSession, setAuthSession] = useState<Session | null>(null);
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null);
   const [authMember, setAuthMember] = useState<AuthMember | null>(null);
-  
+  const [authBootstrapMessage, setAuthBootstrapMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authEmail, setAuthEmail] = useState("");
@@ -12240,7 +12240,16 @@ export default function App() {
       return null;
     }
   };
-  
+
+  const repairCurrentAccountBootstrap = async () => {
+    if (!authSession?.user) {
+      setAuthBootstrapMessage("No signed-in user found.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthBootstrapMessage("Checking account records...");
+
     try {
       await hydrateAuthProfile(authSession.user);
     } finally {
@@ -14524,6 +14533,10 @@ export default function App() {
 
   const goGymTracker = () => {
     setScreen("openTracker");
+  };
+
+  const goBusiness = () => {
+    if (canManageBusiness) setScreen("business");
   };
 
   const goAdminMembers = () => {
@@ -17922,3 +17935,4 @@ export default function App() {
       </div>
     </div>
   );
+}
