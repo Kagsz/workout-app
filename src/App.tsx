@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import {
   CartesianGrid,
   Line,
@@ -73,6 +74,19 @@ type Member = {
   archived?: boolean;
   memberPlan?: MemberPlan;
 };
+
+type AuthProfile = {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: Role;
+  member_plan: MemberPlan;
+  client_id: string | null;
+  linked_company_client_id: string | null;
+  client_link_status: string;
+  location_id: string | null;
+};
+
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
 type TrackerMetric = string;
@@ -266,6 +280,16 @@ type PositionedSeries = GraphSeries & {
   points: ChartPoint[];
 };
 
+
+const SUPABASE_URL =
+  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_URL) ||
+  "https://hgvqosprkdbvmbmticbi.supabase.co";
+
+const SUPABASE_ANON_KEY =
+  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhndnFvc3Bya2Ridm1ibXRpY2JpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0MzE3OTgsImV4cCI6MjA5ODAwNzc5OH0.2Gm6rXIekV1xT_8rEWRCiRUbKZ7YA2ucIlGb_v4RUBM";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const WEIGHT_COLOR_BANDS = [
   ["#2563eb", "#06b6d4", "#22c55e", "#eab308", "#f97316", "#ef4444"],
@@ -11211,6 +11235,15 @@ export default function App() {
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
   const [role, setRole] = useState<Role>("admin");
+  const [authSession, setAuthSession] = useState<any>(null);
+  const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authDisplayName, setAuthDisplayName] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
@@ -11310,6 +11343,146 @@ export default function App() {
     () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
     [members, selectedMemberId]
   );
+
+  const hydrateAuthProfile = async (user: any) => {
+    if (!user?.id) {
+      setAuthProfile(null);
+      setRole("member");
+      return null;
+    }
+
+    const email = String(user.email || "").trim() || null;
+    let { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (!data && !error) {
+      const generatedClientId = `PR-${String(user.id).slice(0, 8).toUpperCase()}`;
+      const { data: insertedProfile, error: insertError } = await supabase
+        .from("profiles")
+        .insert({
+          id: user.id,
+          email,
+          display_name: user.user_metadata?.display_name || email?.split("@")[0] || "Member",
+          role: "member",
+          member_plan: "basic",
+          client_id: generatedClientId,
+          client_link_status: "unlinked",
+        })
+        .select("*")
+        .maybeSingle();
+
+      data = insertedProfile;
+      error = insertError;
+    }
+
+    if (error) {
+      setAuthMessage(error.message || "Unable to load profile.");
+      setAuthProfile(null);
+      setRole("member");
+      return null;
+    }
+
+    const normalizedProfile: AuthProfile = {
+      id: data.id,
+      email: data.email || email,
+      display_name: data.display_name || null,
+      role: data.role === "admin" ? "admin" : "member",
+      member_plan: ["basic", "direct", "premium"].includes(data.member_plan) ? data.member_plan : "basic",
+      client_id: data.client_id || null,
+      linked_company_client_id: data.linked_company_client_id || null,
+      client_link_status: data.client_link_status || "unlinked",
+      location_id: data.location_id || null,
+    };
+
+    setAuthProfile(normalizedProfile);
+    setRole(normalizedProfile.role);
+    setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
+    return normalizedProfile;
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!isMounted) return;
+      const session = data.session || null;
+      setAuthSession(session);
+      if (session?.user) {
+        await hydrateAuthProfile(session.user);
+      } else {
+        setAuthProfile(null);
+        setRole("member");
+      }
+      setAuthLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session);
+      if (session?.user) {
+        hydrateAuthProfile(session.user);
+      } else {
+        setAuthProfile(null);
+        setRole("member");
+        setScreen("memberHome");
+      }
+      setAuthLoading(false);
+    });
+
+    return () => {
+      isMounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleAuthSubmit = async () => {
+    const email = authEmail.trim();
+    const password = authPassword;
+
+    if (!email || !password) {
+      setAuthMessage("Enter an email and password.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthMessage("");
+
+    const authResult =
+      authMode === "signup"
+        ? await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: {
+                display_name: authDisplayName.trim() || email.split("@")[0],
+              },
+            },
+          })
+        : await supabase.auth.signInWithPassword({ email, password });
+
+    setAuthSubmitting(false);
+
+    if (authResult.error) {
+      setAuthMessage(authResult.error.message);
+      return;
+    }
+
+    if (authMode === "signup") {
+      setAuthMessage("Account created. You are signed in.");
+    } else {
+      setAuthMessage("Logged in.");
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setAuthSession(null);
+    setAuthProfile(null);
+    setRole("member");
+    setScreen("memberHome");
+  };
 
   useEffect(() => {
     if (role === "member" && screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
@@ -14061,6 +14234,96 @@ export default function App() {
     return [];
   }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout]);
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-100 text-zinc-900 flex items-center justify-center px-4">
+        <div className="w-full max-w-[430px] rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
+          <div className="text-sm font-semibold text-zinc-900">Loading Pratt Report...</div>
+          <div className="mt-2 text-xs text-zinc-500">Checking your session.</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authSession) {
+    return (
+      <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
+        <div className="relative z-0 bg-black">
+          <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-center justify-center overflow-visible">
+            <img
+              src={appBanner}
+              alt="Pratt Report banner"
+              className="w-[58%] max-w-[220px] translate-y-[-20px] object-contain"
+            />
+          </div>
+        </div>
+
+        <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
+          <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Account</div>
+            <h1 className="mt-2 text-2xl font-bold text-zinc-950">{authMode === "login" ? "Login" : "Sign Up"}</h1>
+            <p className="mt-2 text-sm text-zinc-600">
+              {authMode === "login"
+                ? "Log in to access your member workspace."
+                : "Create an account. New users start as Basic Members."}
+            </p>
+
+            <div className="mt-5 flex gap-2">
+              <ToggleButton className="flex-1" active={authMode === "login"} onClick={() => { setAuthMode("login"); setAuthMessage(""); }}>Login</ToggleButton>
+              <ToggleButton className="flex-1" active={authMode === "signup"} onClick={() => { setAuthMode("signup"); setAuthMessage(""); }}>Sign Up</ToggleButton>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {authMode === "signup" ? (
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Name</span>
+                  <input
+                    value={authDisplayName}
+                    onChange={(event) => setAuthDisplayName(event.target.value)}
+                    className="mt-1 w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm"
+                    placeholder="Your name"
+                  />
+                </label>
+              ) : null}
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Email</span>
+                <input
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  className="mt-1 w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm"
+                  placeholder="you@example.com"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Password</span>
+                <input
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  className="mt-1 w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm"
+                  placeholder="Password"
+                  type="password"
+                  autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                />
+              </label>
+
+              {authMessage ? (
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">{authMessage}</div>
+              ) : null}
+
+              <PrimaryButton onClick={handleAuthSubmit} disabled={authSubmitting} className="w-full">
+                {authSubmitting ? "Working..." : authMode === "login" ? "Login" : "Create Account"}
+              </PrimaryButton>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
       <div className="relative z-0 bg-black">
@@ -14077,8 +14340,15 @@ export default function App() {
         <div className="space-y-6 pb-10">
               <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-4">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
+                      <div className="mt-1 text-xs text-zinc-500">
+                        {authProfile?.display_name || authSession?.user?.email || "Signed in"}
+                        {authProfile?.member_plan ? ` • ${authProfile.member_plan}` : ""}
+                      </div>
+                    </div>
+                    <SmallButton onClick={handleLogout}>Logout</SmallButton>
                   </div>
 
                   <div className="flex flex-nowrap gap-2">
