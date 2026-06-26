@@ -87,6 +87,16 @@ type AuthProfile = {
   location_id: string | null;
 };
 
+type AuthMember = {
+  id: string;
+  profile_id: string | null;
+  client_id: string;
+  name: string;
+  member_plan: MemberPlan;
+  archived: boolean;
+  location_id: string | null;
+};
+
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
 type TrackerMetric = string;
@@ -11237,6 +11247,8 @@ export default function App() {
   const [role, setRole] = useState<Role>("admin");
   const [authSession, setAuthSession] = useState<Session | null>(null);
   const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null);
+  const [authMember, setAuthMember] = useState<AuthMember | null>(null);
+  const [authBootstrapMessage, setAuthBootstrapMessage] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authEmail, setAuthEmail] = useState("");
@@ -11344,63 +11356,176 @@ export default function App() {
     [members, selectedMemberId]
   );
 
-  const hydrateAuthProfile = async (user: User) => {
-    if (!user?.id) {
-      setAuthProfile(null);
-      setRole("member");
-      return null;
-    }
+  const normalizeAuthProfile = (profile: any, fallbackEmail?: string | null): AuthProfile => ({
+    id: String(profile.id),
+    email: profile.email || fallbackEmail || null,
+    display_name: profile.display_name || null,
+    role: profile.role === "admin" ? "admin" : "member",
+    member_plan: ["basic", "direct", "premium"].includes(profile.member_plan) ? profile.member_plan : "basic",
+    client_id: profile.client_id || null,
+    linked_company_client_id: profile.linked_company_client_id || null,
+    client_link_status: profile.client_link_status || "unlinked",
+    location_id: profile.location_id || null,
+  });
 
+  const normalizeAuthMember = (member: any): AuthMember => ({
+    id: String(member.id),
+    profile_id: member.profile_id || null,
+    client_id: String(member.client_id || ""),
+    name: String(member.name || "Member"),
+    member_plan: ["basic", "direct", "premium"].includes(member.member_plan) ? member.member_plan : "basic",
+    archived: Boolean(member.archived),
+    location_id: member.location_id || null,
+  });
+
+  const buildDefaultClientIdForUser = (user: User) => `PR-${String(user.id).slice(0, 8).toUpperCase()}`;
+
+  const ensureProfileForUser = async (user: User) => {
     const email = String(user.email || "").trim() || null;
-    let { data, error } = await supabase
+
+    const { data: existingProfile, error: profileReadError } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (!data && !error) {
-      const generatedClientId = `PR-${String(user.id).slice(0, 8).toUpperCase()}`;
-      const { data: insertedProfile, error: insertError } = await supabase
-        .from("profiles")
-        .insert({
-          id: user.id,
-          email,
-          display_name: user.user_metadata?.display_name || email?.split("@")[0] || "Member",
-          role: "member",
-          member_plan: "basic",
-          client_id: generatedClientId,
-          client_link_status: "unlinked",
-        })
-        .select("*")
-        .maybeSingle();
-
-      data = insertedProfile;
-      error = insertError;
+    if (profileReadError) {
+      throw profileReadError;
     }
 
-    if (error) {
-      setAuthMessage(error.message || "Unable to load profile.");
+    if (existingProfile) {
+      return normalizeAuthProfile(existingProfile, email);
+    }
+
+    const generatedClientId = buildDefaultClientIdForUser(user);
+    const { data: insertedProfile, error: profileInsertError } = await supabase
+      .from("profiles")
+      .insert({
+        id: user.id,
+        email,
+        display_name: user.user_metadata?.display_name || email?.split("@")[0] || "Member",
+        role: "member",
+        member_plan: "basic",
+        client_id: generatedClientId,
+        client_link_status: "unlinked",
+      })
+      .select("*")
+      .maybeSingle();
+
+    if (profileInsertError) {
+      throw profileInsertError;
+    }
+
+    return normalizeAuthProfile(insertedProfile, email);
+  };
+
+  const ensureMemberForProfile = async (profile: AuthProfile) => {
+    const { data: existingMember, error: memberReadError } = await supabase
+      .from("members")
+      .select("*")
+      .eq("profile_id", profile.id)
+      .maybeSingle();
+
+    if (memberReadError) {
+      throw memberReadError;
+    }
+
+    if (existingMember) {
+      return normalizeAuthMember(existingMember);
+    }
+
+    const clientId = profile.client_id || `PR-${String(profile.id).slice(0, 8).toUpperCase()}`;
+    const { data: insertedMember, error: memberInsertError } = await supabase
+      .from("members")
+      .insert({
+        profile_id: profile.id,
+        client_id: clientId,
+        name: profile.display_name || profile.email?.split("@")[0] || "Member",
+        member_plan: profile.member_plan,
+        location_id: profile.location_id,
+      })
+      .select("*")
+      .maybeSingle();
+
+    if (memberInsertError) {
+      throw memberInsertError;
+    }
+
+    return normalizeAuthMember(insertedMember);
+  };
+
+  const hydrateAuthProfile = async (user: User) => {
+    if (!user?.id) {
       setAuthProfile(null);
+      setAuthMember(null);
       setRole("member");
       return null;
     }
 
-    const normalizedProfile: AuthProfile = {
-      id: data.id,
-      email: data.email || email,
-      display_name: data.display_name || null,
-      role: data.role === "admin" ? "admin" : "member",
-      member_plan: ["basic", "direct", "premium"].includes(data.member_plan) ? data.member_plan : "basic",
-      client_id: data.client_id || null,
-      linked_company_client_id: data.linked_company_client_id || null,
-      client_link_status: data.client_link_status || "unlinked",
-      location_id: data.location_id || null,
-    };
+    try {
+      const normalizedProfile = await ensureProfileForUser(user);
+      const normalizedMember = await ensureMemberForProfile(normalizedProfile);
 
+      setAuthProfile(normalizedProfile);
+      setAuthMember(normalizedMember);
+      setRole(normalizedProfile.role);
+      setAuthBootstrapMessage(`Profile linked to member ${normalizedMember.client_id}.`);
+      setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
+      return normalizedProfile;
+    } catch (error: any) {
+      setAuthMessage(error?.message || "Unable to complete account bootstrap.");
+      setAuthBootstrapMessage(error?.message || "Unable to complete account bootstrap.");
+      setAuthProfile(null);
+      setAuthMember(null);
+      setRole("member");
+      return null;
+    }
+  };
+
+  const repairCurrentAccountBootstrap = async () => {
+    if (!authSession?.user) {
+      setAuthBootstrapMessage("No signed-in user found.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthBootstrapMessage("Checking account records...");
+
+    try {
+      await hydrateAuthProfile(authSession.user);
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const updateCurrentProfileRole = async (nextRole: Role) => {
+    if (!authProfile?.id || !authSession?.user) {
+      setAuthBootstrapMessage("No profile loaded.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthBootstrapMessage(`Updating role to ${nextRole}...`);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ role: nextRole })
+      .eq("id", authProfile.id)
+      .select("*")
+      .maybeSingle();
+
+    setAuthSubmitting(false);
+
+    if (error) {
+      setAuthBootstrapMessage(error.message || "Unable to update role.");
+      return;
+    }
+
+    const normalizedProfile = normalizeAuthProfile(data, authSession.user.email || null);
     setAuthProfile(normalizedProfile);
     setRole(normalizedProfile.role);
+    setAuthBootstrapMessage(`Role updated to ${normalizedProfile.role}.`);
     setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
-    return normalizedProfile;
   };
 
   useEffect(() => {
@@ -11414,6 +11539,7 @@ export default function App() {
         await hydrateAuthProfile(session.user);
       } else {
         setAuthProfile(null);
+        setAuthMember(null);
         setRole("member");
       }
       setAuthLoading(false);
@@ -11425,6 +11551,7 @@ export default function App() {
         hydrateAuthProfile(session.user);
       } else {
         setAuthProfile(null);
+        setAuthMember(null);
         setRole("member");
         setScreen("memberHome");
       }
@@ -11480,6 +11607,8 @@ export default function App() {
     await supabase.auth.signOut();
     setAuthSession(null);
     setAuthProfile(null);
+    setAuthMember(null);
+    setAuthBootstrapMessage("");
     setRole("member");
     setScreen("memberHome");
   };
@@ -14355,6 +14484,23 @@ export default function App() {
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
                     <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                  </div>
+
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-semibold text-zinc-900">Account Bootstrap</div>
+                        <div className="mt-1">
+                          Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
+                        </div>
+                        {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
+                      <SmallButton onClick={() => updateCurrentProfileRole("admin")} disabled={authSubmitting || authProfile?.role === "admin"} className="px-2 py-1 text-xs">Promote Me</SmallButton>
+                      <SmallButton onClick={() => updateCurrentProfileRole("member")} disabled={authSubmitting || authProfile?.role === "member"} className="px-2 py-1 text-xs">Demote Me</SmallButton>
+                    </div>
                   </div>
                 </div>
               </div>
