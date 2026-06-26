@@ -11818,13 +11818,13 @@ export default function App() {
     return mappedPrograms;
   };
 
-  const getDbMemberIdForLocalProgram = (program: Program) => {
-    if (dbMembersLoaded && dbMembers.some((member) => member.id === program.memberId)) return program.memberId || null;
+  const getDbMemberIdForLocalProgram = (program: Program, memberRows = dbMembers) => {
+    if (memberRows.some((member) => member.id === program.memberId)) return program.memberId || null;
 
     const localMember = members.find((member) => member.id === program.memberId) || members[0] || null;
     if (!localMember) return selectedMember?.id || null;
 
-    return dbMembers.find((member) => member.clientId === localMember.clientId)?.id || selectedMember?.id || null;
+    return memberRows.find((member) => member.clientId === localMember.clientId)?.id || selectedMember?.id || null;
   };
 
   const insertSupabaseProgramBlueprint = async (program: Program, memberId: string) => {
@@ -11910,8 +11910,8 @@ export default function App() {
     return true;
   };
 
-  const importLocalProgramsToSupabase = async () => {
-    resetImportDiagnostics("Program blueprint import started.");
+  const importLocalProgramsToSupabase = async (options?: { appendDiagnostics?: boolean }) => {
+    if (!options?.appendDiagnostics) resetImportDiagnostics("Program blueprint import started.");
 
     if (!canManageBusiness) {
       const message = "Only admins can import local programs.";
@@ -11920,8 +11920,14 @@ export default function App() {
       return false;
     }
 
-    if (!dbMembersLoaded || !dbMembers.length) {
-      const message = "Load/import Supabase members before importing programs.";
+    let availableDbMembers = dbMembers;
+    if (!dbMembersLoaded || !availableDbMembers.length) {
+      pushImportDiagnostic("DB members not loaded; refreshing members before program import.");
+      availableDbMembers = await loadSupabaseMembers();
+    }
+
+    if (!availableDbMembers.length) {
+      const message = "No Supabase members found. Import local members or create member rows before importing programs.";
       setProgramsBridgeMessage(message);
       pushImportDiagnostic(`STOP: ${message}`);
       return false;
@@ -11931,7 +11937,7 @@ export default function App() {
     try {
       const expected = getImportExpectedCounts();
       pushImportDiagnostic(`Expected local blueprints: ${expected.programs} programs, ${expected.routines} routines, ${expected.blocks} blocks.`);
-      pushImportDiagnostic(`DB members available: ${dbMembers.length}. Local members available: ${members.length}.`);
+      pushImportDiagnostic(`DB members available: ${availableDbMembers.length}. Local members available: ${members.length}.`);
 
       const { data: existingRows, error: existingError } = await supabase
         .from("programs")
@@ -11949,7 +11955,7 @@ export default function App() {
       let blockCount = 0;
 
       for (const localProgram of programs) {
-        const memberId = getDbMemberIdForLocalProgram(localProgram);
+        const memberId = getDbMemberIdForLocalProgram(localProgram, availableDbMembers);
         const localMember = members.find((member) => member.id === localProgram.memberId) || members[0] || null;
         const diagnosticName = `${localProgram.name} (${localProgram.id})`;
 
@@ -12102,8 +12108,8 @@ export default function App() {
     return mappedSessions;
   };
 
-  const importLocalSessionsToSupabase = async () => {
-    resetImportDiagnostics("Session import started.");
+  const importLocalSessionsToSupabase = async (options?: { appendDiagnostics?: boolean }) => {
+    if (!options?.appendDiagnostics) resetImportDiagnostics("Session import started.");
 
     if (!canManageBusiness) {
       const message = "Only admins can import local sessions.";
@@ -12112,8 +12118,14 @@ export default function App() {
       return false;
     }
 
-    if (!dbMembersLoaded || !dbMembers.length) {
-      const message = "Load/import Supabase members before importing sessions.";
+    let availableDbMembers = dbMembers;
+    if (!dbMembersLoaded || !availableDbMembers.length) {
+      pushImportDiagnostic("DB members not loaded; refreshing members before session import.");
+      availableDbMembers = await loadSupabaseMembers();
+    }
+
+    if (!availableDbMembers.length) {
+      const message = "No Supabase members found. Import local members or create member rows before importing sessions.";
       setSessionsBridgeMessage(message);
       pushImportDiagnostic(`STOP: ${message}`);
       return false;
@@ -12166,8 +12178,8 @@ export default function App() {
         const dbProgramId = programByLegacy.get(localSession.programId) || (availableDbPrograms.some((program) => program.id === localSession.programId) ? localSession.programId : "");
         const localMember = members.find((member) => member.id === localSession.memberId);
         const dbMemberId =
-          (dbMembers.some((member) => member.id === localSession.memberId) ? localSession.memberId : "") ||
-          (localMember ? dbMembers.find((member) => member.clientId === localMember.clientId)?.id || "" : "");
+          (availableDbMembers.some((member) => member.id === localSession.memberId) ? localSession.memberId : "") ||
+          (localMember ? availableDbMembers.find((member) => member.clientId === localMember.clientId)?.id || "" : "");
         const dbRoutineId = routineByLegacy.get(`${localSession.programId}::${localSession.routineId}`) || localSession.routineId;
         const sessionNumber = Number.parseInt(String(localSession.sessionNumber || "0"), 10);
         const diagnosticName = `${localSession.id} / program ${localSession.programId} / session ${localSession.sessionNumber}`;
@@ -12252,12 +12264,17 @@ export default function App() {
     resetImportDiagnostics("Full import diagnostic started.");
     const expected = getImportExpectedCounts();
     pushImportDiagnostic(`Expected local totals: ${expected.programs} programs, ${expected.routines} routines, ${expected.blocks} blocks, ${expected.sessions} sessions, ${expected.sessionEntries} entries.`);
-    const programsOk = await importLocalProgramsToSupabase();
+    pushImportDiagnostic("Step 1: checking Supabase members.");
+    const loadedMembers = dbMembersLoaded && dbMembers.length ? dbMembers : await loadSupabaseMembers();
+    pushImportDiagnostic(`Supabase members available to importer: ${loadedMembers.length}.`);
+    const programsOk = await importLocalProgramsToSupabase({ appendDiagnostics: true });
     if (!programsOk) {
       pushImportDiagnostic("Full import stopped before sessions because program import did not complete.");
       return;
     }
-    await importLocalSessionsToSupabase();
+    pushImportDiagnostic("Step 2: importing sessions and session entries.");
+    await importLocalSessionsToSupabase({ appendDiagnostics: true });
+    pushImportDiagnostic("Full import diagnostic completed. Verify Supabase table counts next.");
   };
 
 
@@ -15802,6 +15819,32 @@ export default function App() {
                           <div className="mt-4 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-500">Account details are read-only for trainers.</div>
                         )}
                       </div>
+
+                      {canImportExportMembers ? (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                          <div className="text-sm font-semibold text-amber-950">Migration Diagnostics</div>
+                          <div className="mt-1 text-xs text-amber-800">
+                            Use this from Client Overview before testing program/session ownership. It imports members/program blueprints/sessions in order and prints the exact stopping point if Supabase rejects anything.
+                          </div>
+                          <div className="mt-3 grid gap-2 text-xs text-amber-900 sm:grid-cols-2">
+                            <div className="rounded-xl bg-white/70 px-3 py-2">Expected: {getImportExpectedCounts().programs} programs • {getImportExpectedCounts().sessions} sessions • {getImportExpectedCounts().sessionEntries} entries</div>
+                            <div className="rounded-xl bg-white/70 px-3 py-2">DB Loaded: {dbProgramsLoaded ? dbPrograms.length : "programs not loaded"} programs • {dbSessionsLoaded ? dbSavedSessions.length : "sessions not loaded"} sessions</div>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <SmallButton onClick={loadSupabaseMembers} disabled={dbMembersLoading}>Refresh Members</SmallButton>
+                            <SmallButton onClick={loadSupabasePrograms} disabled={dbProgramsLoading}>Refresh Programs</SmallButton>
+                            <SmallButton onClick={loadSupabaseSessions} disabled={dbSessionsLoading || !dbProgramsLoaded}>Refresh Sessions</SmallButton>
+                            <SmallButton onClick={runFullImportDiagnostic} disabled={dbMembersLoading || dbProgramsLoading || dbSessionsLoading}>Run Full Import Diagnostic</SmallButton>
+                          </div>
+                          {importDiagnosticsLog.length ? (
+                            <div className="mt-3 max-h-56 overflow-auto rounded-xl border border-amber-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-zinc-700">
+                              {importDiagnosticsLog.map((line, index) => (
+                                <div key={`${line}-${index}`}>{line}</div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
 
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
