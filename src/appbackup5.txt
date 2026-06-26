@@ -13,7 +13,7 @@ import appBanner from "./assets/appbanner1.png";
 
 // ===== TYPES =====
 
-type Role = "admin" | "trainer" | "member";
+type Role = "admin" | "member";
 type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
@@ -11356,29 +11356,17 @@ export default function App() {
     [members, selectedMemberId]
   );
 
-  const isBusinessAdmin = authProfile?.role === "admin";
-  const isTrainerAccount = authProfile?.role === "trainer";
-  const canUseTrainerWorkspace = isBusinessAdmin || isTrainerAccount;
-  const accountRoleLabel = authProfile?.role === "admin" ? "Admin" : authProfile?.role === "trainer" ? "Trainer" : "Member";
-
-  const isStaffProfileRole = (profileRole?: Role | null) => profileRole === "admin" || profileRole === "trainer";
-  const getWorkspaceRoleForProfile = (profileRole?: Role | null): Role => (isStaffProfileRole(profileRole) ? "admin" : "member");
-
-  const normalizeAuthProfile = (profile: any, fallbackEmail?: string | null): AuthProfile => {
-    const normalizedRole: Role = profile.role === "admin" || profile.role === "trainer" ? profile.role : "member";
-
-    return {
-      id: String(profile.id),
-      email: profile.email || fallbackEmail || null,
-      display_name: profile.display_name || null,
-      role: normalizedRole,
-      member_plan: ["basic", "direct", "premium"].includes(profile.member_plan) ? profile.member_plan : "basic",
-      client_id: profile.client_id || null,
-      linked_company_client_id: profile.linked_company_client_id || null,
-      client_link_status: profile.client_link_status || "unlinked",
-      location_id: profile.location_id || null,
-    };
-  };
+  const normalizeAuthProfile = (profile: any, fallbackEmail?: string | null): AuthProfile => ({
+    id: String(profile.id),
+    email: profile.email || fallbackEmail || null,
+    display_name: profile.display_name || null,
+    role: profile.role === "admin" ? "admin" : "member",
+    member_plan: ["basic", "direct", "premium"].includes(profile.member_plan) ? profile.member_plan : "basic",
+    client_id: profile.client_id || null,
+    linked_company_client_id: profile.linked_company_client_id || null,
+    client_link_status: profile.client_link_status || "unlinked",
+    location_id: profile.location_id || null,
+  });
 
   const normalizeAuthMember = (member: any): AuthMember => ({
     id: String(member.id),
@@ -11480,10 +11468,9 @@ export default function App() {
 
       setAuthProfile(normalizedProfile);
       setAuthMember(normalizedMember);
-      const nextWorkspaceRole = getWorkspaceRoleForProfile(normalizedProfile.role);
-      setRole(nextWorkspaceRole);
+      setRole(normalizedProfile.role);
       setAuthBootstrapMessage(`Profile linked to member ${normalizedMember.client_id}.`);
-      setScreen(nextWorkspaceRole === "admin" ? "members" : "memberHome");
+      setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
       return normalizedProfile;
     } catch (error: any) {
       setAuthMessage(error?.message || "Unable to complete account bootstrap.");
@@ -11536,10 +11523,9 @@ export default function App() {
 
     const normalizedProfile = normalizeAuthProfile(data, authSession.user.email || null);
     setAuthProfile(normalizedProfile);
-    const nextWorkspaceRole = getWorkspaceRoleForProfile(normalizedProfile.role);
-    setRole(nextWorkspaceRole);
+    setRole(normalizedProfile.role);
     setAuthBootstrapMessage(`Role updated to ${normalizedProfile.role}.`);
-    setScreen(nextWorkspaceRole === "admin" ? "members" : "memberHome");
+    setScreen(normalizedProfile.role === "admin" ? "members" : "memberHome");
   };
 
   useEffect(() => {
@@ -11626,14 +11612,6 @@ export default function App() {
     setRole("member");
     setScreen("memberHome");
   };
-
-  useEffect(() => {
-    const trainerOnlyScreens: Screen[] = ["members", "memberOverview", "adminPrograms", "programView", "builder", "input", "adminDash"];
-    if (!canUseTrainerWorkspace && trainerOnlyScreens.includes(screen)) {
-      setRole("member");
-      setScreen("memberHome");
-    }
-  }, [canUseTrainerWorkspace, screen]);
 
   useEffect(() => {
     if (role === "member" && screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
@@ -13764,35 +13742,17 @@ export default function App() {
   };
 
   const goAdminMembers = () => {
-    if (!canUseTrainerWorkspace) {
-      setRole("member");
-      setScreen("memberHome");
-      return;
-    }
-
     setRole("admin");
     setScreen("members");
   };
 
   const openMemberOverview = (memberId: string) => {
-    if (!canUseTrainerWorkspace) {
-      setRole("member");
-      setScreen("memberHome");
-      return;
-    }
-
     setSelectedMemberId(memberId);
     setRole("admin");
     setScreen("memberOverview");
   };
 
   const goAdminPrograms = () => {
-    if (!canUseTrainerWorkspace) {
-      setRole("member");
-      setScreen("memberHome");
-      return;
-    }
-
     setRole("admin");
     setScreen("adminPrograms");
   };
@@ -13926,12 +13886,6 @@ export default function App() {
   };
 
   const goAdminInput = () => {
-    if (!canUseTrainerWorkspace) {
-      setRole("member");
-      setScreen("memberHome");
-      return;
-    }
-
     setRole("admin");
     setScreen("adminDash");
   };
@@ -14359,22 +14313,22 @@ export default function App() {
 
   const pathItems = useMemo(() => {
     if (role === "admin" && screen === "members") {
-      return [{ label: "Trainer" }, { label: "Client List" }];
+      return [{ label: "Admin" }, { label: "Client List" }];
     }
     if (role === "admin" && screen === "memberOverview") {
-      return [{ label: "Trainer", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
     if (role === "admin" && screen === "adminPrograms") {
-      return [{ label: "Trainer", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
     if (role === "admin" && screen === "programView") {
-      return [{ label: "Trainer", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
     if (role === "admin" && screen === "builder") {
-      return [{ label: "Trainer", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "admin" && (screen === "adminDash" || screen === "input")) {
-      return [{ label: "Trainer", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Admin Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "member" && screen === "memberHome") {
       return [{ label: "Member" }, { label: "Member View" }];
@@ -14513,52 +14467,11 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
-              {canUseTrainerWorkspace ? (
-                <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{accountRoleLabel} Workspace</div>
-                        <div className="mt-1 text-xs text-zinc-500">
-                          {authProfile?.display_name || authSession?.user?.email || "Signed in"}
-                          {authProfile?.member_plan ? ` • ${authProfile.member_plan}` : ""}
-                        </div>
-                      </div>
-                      <SmallButton onClick={handleLogout}>Logout</SmallButton>
-                    </div>
-
-                    <div className="flex flex-nowrap gap-2">
-                      <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
-                      <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Trainer Dash</ToggleButton>
-                      <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
-                    </div>
-
-                    {isBusinessAdmin ? (
-                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <div className="font-semibold text-zinc-900">Account Bootstrap</div>
-                            <div className="mt-1">
-                              Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {authProfile?.role || "member"}
-                            </div>
-                            {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
-                          </div>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
-                          <SmallButton onClick={() => updateCurrentProfileRole("admin")} disabled={authSubmitting || authProfile?.role === "admin"} className="px-2 py-1 text-xs">Set Admin</SmallButton>
-                          <SmallButton onClick={() => updateCurrentProfileRole("trainer")} disabled={authSubmitting || authProfile?.role === "trainer"} className="px-2 py-1 text-xs">Set Trainer</SmallButton>
-                          <SmallButton onClick={() => updateCurrentProfileRole("member")} disabled={authSubmitting || authProfile?.role === "member"} className="px-2 py-1 text-xs">Set Member</SmallButton>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Account</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
                       <div className="mt-1 text-xs text-zinc-500">
                         {authProfile?.display_name || authSession?.user?.email || "Signed in"}
                         {authProfile?.member_plan ? ` • ${authProfile.member_plan}` : ""}
@@ -14566,8 +14479,31 @@ export default function App() {
                     </div>
                     <SmallButton onClick={handleLogout}>Logout</SmallButton>
                   </div>
+
+                  <div className="flex flex-nowrap gap-2">
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                  </div>
+
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-semibold text-zinc-900">Account Bootstrap</div>
+                        <div className="mt-1">
+                          Profile: {authProfile ? "loaded" : "missing"} • Member: {authMember ? `${authMember.name} (${authMember.client_id})` : "missing"} • Role: {role}
+                        </div>
+                        {authBootstrapMessage ? <div className="mt-1 text-zinc-500">{authBootstrapMessage}</div> : null}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <SmallButton onClick={repairCurrentAccountBootstrap} disabled={authSubmitting} className="px-2 py-1 text-xs">Repair Account Link</SmallButton>
+                      <SmallButton onClick={() => updateCurrentProfileRole("admin")} disabled={authSubmitting || authProfile?.role === "admin"} className="px-2 py-1 text-xs">Promote Me</SmallButton>
+                      <SmallButton onClick={() => updateCurrentProfileRole("member")} disabled={authSubmitting || authProfile?.role === "member"} className="px-2 py-1 text-xs">Demote Me</SmallButton>
+                    </div>
+                  </div>
                 </div>
-              )}
+              </div>
 
               <div className="space-y-3">
                 {!!pathItems.length && <PathBar items={pathItems} />}
@@ -14937,7 +14873,7 @@ export default function App() {
                             setScreen("adminDash");
                           }}
                         >
-                          Open Trainer Dash
+                          Open Admin Dash
                         </SmallButton>
                       </div>
                     </div>
@@ -15197,7 +15133,7 @@ export default function App() {
               )}
 
               {role === "admin" && (screen === "adminDash" || screen === "input") && (
-                <SectionCard title="Trainer Dash" collapsible>
+                <SectionCard title="Admin Dash" collapsible>
                   <div className="space-y-4">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
                       Choose a client, program, routine, and session. Leave Routine or Session on All to review the broader scope; choose a session to open the fast data-entry form.
