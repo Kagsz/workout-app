@@ -459,9 +459,10 @@ function GraphTooltip({
       ? `${durationLabel} for ${point.target || point.metric || "output"}`
       : `Target: ${formatTargetLabel(point.target, point.metric)}`;
 
-  const supportEntries = Object.entries(point.supportMetrics || {}).filter(
-    ([metric]) => !["weight"].includes(metric.trim().toLowerCase())
-  );
+  const supportEntries = Object.entries(point.supportMetrics || {}).filter(([metric]) => {
+    const key = metric.trim().toLowerCase();
+    return !["weight", "sets", "set", "performance", "output"].includes(key);
+  });
   const flagLabels = (point.contextFlags || []).map(formatContextFlagLabel).filter(Boolean);
 
   return (
@@ -475,8 +476,6 @@ function GraphTooltip({
         </div>
       ) : null}
       <div className="mt-1 text-zinc-700">{targetContext}</div>
-      {point.rawPerformance ? <div className="mt-1 text-zinc-700">Performance: <span className="font-semibold">{point.rawPerformance}</span></div> : null}
-      {point.weight ? <div className="mt-1 text-zinc-700">Weight: <span className="font-semibold">{point.weight}</span></div> : null}
       {supportEntries.map(([metric, value]) => (
         <div key={metric} className="mt-1 text-zinc-700">{metric}: <span className="font-semibold">{value}</span></div>
       ))}
@@ -13174,7 +13173,7 @@ export default function App() {
         const normalized = normalizeTrackerWorkout(workout);
         const nextTarget = Math.max(1, getTrackerWorkoutCircuitTarget(normalized) + delta);
         const nextCurrent = Math.min(getTrackerWorkoutCurrentCircuit(normalized), nextTarget);
-        return { ...normalized, circuitTarget: nextTarget, currentCircuit: nextCurrent, completedAt: undefined };
+        return { ...normalized, circuitTarget: nextTarget, currentCircuit: nextCurrent };
       })
     );
   };
