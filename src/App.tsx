@@ -11462,7 +11462,7 @@ export default function App() {
   const isTrackerScreen = screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder";
   const isClientListScreen = screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder";
   const isTrainerDashScreen = screen === "adminDash" || screen === "input";
-  const navButtonClass = "min-w-0 whitespace-nowrap px-2 text-center text-xs";
+  const navButtonClass = "h-9 shrink-0 whitespace-nowrap px-3 text-center text-xs";
   const profileButtonLabel = "👤";
 
   const displayedPrograms = useMemo(() => {
@@ -11498,6 +11498,21 @@ export default function App() {
     () => displayedMembers.find((member) => member.id === selectedMemberId) || displayedMembers[0] || null,
     [displayedMembers, selectedMemberId]
   );
+
+  const selectedMemberProfile = useMemo(() => {
+    if (!selectedMember || !dbProfiles.length) return null;
+    const selectedClientId = String(selectedMember.clientId || "").trim().toLowerCase();
+    const selectedInviteEmail = String(selectedMember.inviteEmail || "").trim().toLowerCase();
+
+    return dbProfiles.find((profile) => {
+      const profileEmail = String(profile.email || "").trim().toLowerCase();
+      const profileClientId = String(profile.client_id || "").trim().toLowerCase();
+      const linkedClientId = String(profile.linked_company_client_id || "").trim().toLowerCase();
+
+      return (selectedClientId && (profileClientId === selectedClientId || linkedClientId === selectedClientId)) ||
+        (selectedInviteEmail && profileEmail === selectedInviteEmail);
+    }) || null;
+  }, [dbProfiles, selectedMember?.clientId, selectedMember?.inviteEmail]);
 
   const normalizeAuthProfile = (profile: any, fallbackEmail?: string | null): AuthProfile => ({
     id: String(profile.id),
@@ -12258,8 +12273,16 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
       setAuthSession(session);
+
+      // Do not re-hydrate or move screens during passive Supabase token refreshes.
+      // This prevents the app from feeling like it "refreshes" when the tab is minimized, refocused, or backgrounded.
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        setAuthLoading(false);
+        return;
+      }
+
       if (session?.user) {
         hydrateAuthProfile(session.user);
       } else {
@@ -14750,7 +14773,7 @@ export default function App() {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen(canUseTrainerWorkspace ? "programView" : "routines");
+    setScreen("routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -15323,15 +15346,15 @@ export default function App() {
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
               <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
-                <div className="grid grid-cols-4 gap-2">
-                  <ToggleButton className="px-2 text-center text-base" active={screen === "account"} onClick={goAccount} title="Account" aria-label="Account">{profileButtonLabel}</ToggleButton>
-                  <ToggleButton className={navButtonClass} active={isMemberProgramScreen} onClick={goMemberPrograms}>My Programs</ToggleButton>
+                <div className="flex flex-wrap gap-2">
+                  <ToggleButton className="h-9 w-10 shrink-0 px-0 text-center text-sm leading-none" active={screen === "account"} onClick={goAccount} title="Account" aria-label="Account">{profileButtonLabel}</ToggleButton>
                   {canUseTrainerWorkspace ? (
                     <ToggleButton className={navButtonClass} active={isClientListScreen} onClick={goAdminMembers}>Client List</ToggleButton>
                   ) : null}
                   {canUseTrainerWorkspace ? (
                     <ToggleButton className={navButtonClass} active={isTrainerDashScreen} onClick={goAdminInput}>Trainer Dash</ToggleButton>
                   ) : null}
+                  <ToggleButton className={navButtonClass} active={isMemberProgramScreen} onClick={goMemberPrograms}>My Programs</ToggleButton>
                   <ToggleButton className={navButtonClass} active={isTrackerScreen} onClick={goGymTracker}>Gym Tracker</ToggleButton>
                 </div>
               </div>
@@ -15603,34 +15626,34 @@ export default function App() {
                           <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                             <div className="flex items-center justify-between gap-2">
                               <div>
-                                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Profile Roles</div>
-                                <div className="mt-1 text-xs text-zinc-500">Assign roles to signed-in profiles. Full client linking comes later.</div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Profile Role</div>
+                                <div className="mt-1 text-xs text-zinc-500">Set this member's signed-in profile role when an account is linked.</div>
                               </div>
                               <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading} className="px-2 py-1 text-xs">Refresh</SmallButton>
                             </div>
                             {profilesBridgeMessage ? <div className="mt-2 text-xs text-zinc-500">{profilesBridgeMessage}</div> : null}
-                            <div className="mt-3 space-y-2">
-                              {dbProfiles.length ? dbProfiles.map((profile) => (
-                                <div key={profile.id} className="rounded-xl border border-zinc-200 bg-white p-3">
-                                  <div className="text-sm font-semibold text-zinc-900">{profile.display_name || profile.email || "Unnamed profile"}</div>
-                                  <div className="mt-1 text-xs text-zinc-500">{profile.email || "No email"} • {profile.member_plan || "basic"} • current role: {profile.role}</div>
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
-                                      <SmallButton
-                                        key={profileRole}
-                                        onClick={() => updateProfileRoleById(profile.id, profileRole)}
-                                        disabled={dbProfilesLoading || profile.role === profileRole}
-                                        className="px-2 py-1 text-xs"
-                                      >
-                                        Set {profileRole}
-                                      </SmallButton>
-                                    ))}
-                                  </div>
+                            {selectedMemberProfile ? (
+                              <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3">
+                                <div className="text-sm font-semibold text-zinc-900">{selectedMemberProfile.display_name || selectedMemberProfile.email || selectedMember.name}</div>
+                                <div className="mt-1 text-xs text-zinc-500">{selectedMemberProfile.email || selectedMember.inviteEmail || "No email"} • current role: {selectedMemberProfile.role}</div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
+                                    <SmallButton
+                                      key={profileRole}
+                                      onClick={() => updateProfileRoleById(selectedMemberProfile.id, profileRole)}
+                                      disabled={dbProfilesLoading || selectedMemberProfile.role === profileRole}
+                                      className="px-2 py-1 text-xs"
+                                    >
+                                      Set {profileRole}
+                                    </SmallButton>
+                                  ))}
                                 </div>
-                              )) : (
-                                <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs text-zinc-500">No profiles loaded yet.</div>
-                              )}
-                            </div>
+                              </div>
+                            ) : (
+                              <div className="mt-3 rounded-xl border border-dashed border-zinc-300 bg-white p-3 text-xs text-zinc-500">
+                                No signed-in profile is linked to this member yet. Add or confirm the member's invite/login email, then have them create an account.
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="mt-4 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-500">Account details are read-only for trainers.</div>
