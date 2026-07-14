@@ -12,7 +12,7 @@ import appBanner from "./assets/appbanner1.png";
 
 // ===== TYPES =====
 
-type Role = "admin" | "trainer" | "member";
+type Role = "admin" | "member";
 type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
@@ -11211,8 +11211,6 @@ export default function App() {
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
   const [role, setRole] = useState<Role>("admin");
-  const canUseTrainerWorkspace = role === "admin" || role === "trainer";
-  const profileButtonLabel = role === "admin" ? "A" : role === "trainer" ? "T" : "M";
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
@@ -11836,10 +11834,10 @@ export default function App() {
   const selectedProgram = useMemo(
     () =>
       programs.find((program) => program.id === selectedProgramId) ||
-      (canUseTrainerWorkspace && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
+      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
         ? adminSortedPrograms[0] || null
         : sortedPrograms[0] || null),
-    [programs, selectedProgramId, canUseTrainerWorkspace, screen, adminSortedPrograms, sortedPrograms]
+    [programs, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
   );
 
   const selectedRoutine = useMemo(
@@ -13442,20 +13440,23 @@ export default function App() {
   };
 
   const goAdminMembers = () => {
+    setRole("admin");
     setScreen("members");
   };
 
   const openMemberOverview = (memberId: string) => {
     setSelectedMemberId(memberId);
+    setRole("admin");
     setScreen("memberOverview");
   };
 
   const goAdminPrograms = () => {
+    setRole("admin");
     setScreen("adminPrograms");
   };
 
   const goBack = () => {
-    if (canUseTrainerWorkspace) {
+    if (role === "admin") {
       if (screen === "memberOverview") {
         goAdminMembers();
         return;
@@ -13517,7 +13518,7 @@ export default function App() {
   };
 
   const backLabel = useMemo(() => {
-    if (canUseTrainerWorkspace) {
+    if (role === "admin") {
       if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
       if (screen === "programView") return "Back to All Programs";
@@ -13535,7 +13536,7 @@ export default function App() {
     if (screen === "memberInput") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     if (screen === "graph") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     return "";
-  }, [canUseTrainerWorkspace, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
+  }, [role, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
 
   const addMember = () => {
     const nextMemberNumber = members.length + 1;
@@ -13583,6 +13584,7 @@ export default function App() {
   };
 
   const goAdminInput = () => {
+    setRole("admin");
     setScreen("adminDash");
   };
 
@@ -13591,21 +13593,11 @@ export default function App() {
     setScreen("memberHome");
   };
 
-  const goGymTracker = () => {
-    setRole("member");
-    setScreen("openTracker");
-  };
-
-  const previewRole = (nextRole: Role) => {
-    setRole(nextRole);
-    setScreen(nextRole === "member" ? "memberHome" : "members");
-  };
-
   const openProgram = (programId: string) => {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen(canUseTrainerWorkspace ? "programView" : "routines");
+    setScreen(role === "admin" ? "programView" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -14018,23 +14010,23 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
-    if (canUseTrainerWorkspace && screen === "members") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
+    if (role === "admin" && screen === "members") {
+      return [{ label: "Admin" }, { label: "Client List" }];
     }
-    if (canUseTrainerWorkspace && screen === "memberOverview") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+    if (role === "admin" && screen === "memberOverview") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
-    if (canUseTrainerWorkspace && screen === "adminPrograms") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+    if (role === "admin" && screen === "adminPrograms") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
-    if (canUseTrainerWorkspace && screen === "programView") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+    if (role === "admin" && screen === "programView") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (canUseTrainerWorkspace && screen === "builder") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "admin" && screen === "builder") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")) {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "admin" && (screen === "adminDash" || screen === "input")) {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Admin Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "member" && screen === "memberHome") {
       return [{ label: "Member" }, { label: "Member View" }];
@@ -14067,7 +14059,7 @@ export default function App() {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
     }
     return [];
-  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout, canUseTrainerWorkspace]);
+  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout]);
 
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
@@ -14083,41 +14075,17 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
-              <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
-                <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                  <ToggleButton
-                    className="h-9 w-9 shrink-0 rounded-full px-0 text-center text-xs"
-                    active={false}
-                    disabled
-                    title="Account page arrives in UI Layer 2"
-                  >
-                    {profileButtonLabel}
-                  </ToggleButton>
+              <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
+                  </div>
 
-                  {canUseTrainerWorkspace ? (
-                    <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder"} onClick={goAdminMembers}>Client List</ToggleButton>
-                  ) : null}
-
-                  {canUseTrainerWorkspace ? (
-                    <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "adminDash" || screen === "input"} onClick={goAdminInput}>Trainer Dash</ToggleButton>
-                  ) : null}
-
-                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph")} onClick={goMemberPrograms}>My Programs</ToggleButton>
-                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={role === "member" && (screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder")} onClick={goGymTracker}>Gym Tracker</ToggleButton>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-100 pt-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">Local role preview</div>
-                  <select
-                    value={role}
-                    onChange={(event) => previewRole(event.target.value as Role)}
-                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700"
-                    aria-label="Preview app role"
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="trainer">Trainer</option>
-                    <option value="member">Member</option>
-                  </select>
+                  <div className="flex flex-nowrap gap-2">
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                  </div>
                 </div>
               </div>
 
@@ -14130,7 +14098,7 @@ export default function App() {
                 ) : null}
               </div>
 
-              {canUseTrainerWorkspace && screen === "members" && (
+              {role === "admin" && screen === "members" && (
                 <SectionCard title="Client List" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
@@ -14192,7 +14160,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {canUseTrainerWorkspace && screen === "memberOverview" && selectedMember && (
+              {role === "admin" && screen === "memberOverview" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
@@ -14334,7 +14302,7 @@ export default function App() {
                 </div>
               )}
 
-              {canUseTrainerWorkspace && screen === "adminPrograms" && selectedMember && (
+              {role === "admin" && screen === "adminPrograms" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="All Programs" collapsible>
                     <div className="space-y-3">
@@ -14443,7 +14411,7 @@ export default function App() {
               )}
 
 
-              {canUseTrainerWorkspace && screen === "programView" && selectedProgram && (
+              {role === "admin" && screen === "programView" && selectedProgram && (
                 <div className="space-y-6">
                   <SectionCard title="Program Summary" collapsible>
                     <div className="space-y-4">
@@ -14489,7 +14457,7 @@ export default function App() {
                             setScreen("adminDash");
                           }}
                         >
-                          Open Trainer Dash
+                          Open Admin Dash
                         </SmallButton>
                       </div>
                     </div>
@@ -14501,7 +14469,7 @@ export default function App() {
                 </div>
               )}
 
-              {canUseTrainerWorkspace && screen === "builder" && (
+              {role === "admin" && screen === "builder" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Builder Workspace</div>
@@ -14748,8 +14716,8 @@ export default function App() {
                 </div>
               )}
 
-              {canUseTrainerWorkspace && (screen === "adminDash" || screen === "input") && (
-                <SectionCard title="Trainer Dash" collapsible>
+              {role === "admin" && (screen === "adminDash" || screen === "input") && (
+                <SectionCard title="Admin Dash" collapsible>
                   <div className="space-y-4">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
                       Choose a client, program, routine, and session. Leave Routine or Session on All to review the broader scope; choose a session to open the fast data-entry form.
