@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { createClient, type AuthChangeEvent, type Session, type User } from "@supabase/supabase-js";
 import {
   CartesianGrid,
   Line,
@@ -13,8 +12,8 @@ import appBanner from "./assets/appbanner1.png";
 
 // ===== TYPES =====
 
-type Role = "admin" | "trainer" | "member";
-type Screen = "account" | "business" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
+type Role = "admin" | "member";
+type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
 type ProgramInputMode = "trainerInput" | "memberInput";
@@ -64,7 +63,6 @@ type Program = {
   memberId?: string;
   programLength?: number;
   inputMode?: ProgramInputMode;
-  legacyAppId?: string;
 };
 
 type Member = {
@@ -74,112 +72,7 @@ type Member = {
   programClosed?: boolean;
   archived?: boolean;
   memberPlan?: MemberPlan;
-  inviteEmail?: string;
 };
-
-type AuthProfile = {
-  id: string;
-  email: string | null;
-  display_name: string | null;
-  role: Role;
-  member_plan: MemberPlan;
-  client_id: string | null;
-  linked_company_client_id: string | null;
-  client_link_status: string;
-  location_id: string | null;
-};
-
-type AuthMember = {
-  id: string;
-  profile_id: string | null;
-  client_id: string;
-  name: string;
-  member_plan: MemberPlan;
-  archived: boolean;
-  location_id: string | null;
-  invite_email?: string | null;
-};
-
-type DbProfileRow = {
-  id: string;
-  email: string | null;
-  display_name: string | null;
-  role: Role;
-  member_plan: MemberPlan;
-  client_id: string | null;
-  linked_company_client_id: string | null;
-  client_link_status: string;
-  location_id: string | null;
-};
-
-
-type DbBlockRow = {
-  id: string;
-  routine_id: string;
-  block_type: string;
-  title: string;
-  duration: string | null;
-  notes: string | null;
-  interaction_mode: string | null;
-  sort_order: number | null;
-  context_flags?: string[] | null;
-  exercises: Exercise[] | null;
-  legacy_app_id?: string | null;
-};
-
-type DbRoutineRow = {
-  id: string;
-  program_id: string;
-  label: string;
-  sort_order: number | null;
-  legacy_app_id?: string | null;
-  blocks?: DbBlockRow[] | null;
-};
-
-type DbProgramRow = {
-  id: string;
-  member_id: string;
-  name: string;
-  started_at: string | null;
-  status: string;
-  notes: string | null;
-  program_length: number | null;
-  input_mode: string | null;
-  legacy_app_id?: string | null;
-  routines?: DbRoutineRow[] | null;
-};
-
-type DbSessionEntryRow = {
-  id: string;
-  session_id: string;
-  block_id: string | null;
-  exercise_id: string | null;
-  exercise_name: string;
-  slot: number | null;
-  weight: string | null;
-  performance: string | null;
-  sets_completed: string | null;
-  target: string | null;
-  metric: string | null;
-  support_metrics: Record<string, string> | null;
-  context_flags: string[] | null;
-  scoring_direction: SessionScoringDirection | null;
-  legacy_app_id?: string | null;
-};
-
-type DbSessionRow = {
-  id: string;
-  program_id: string;
-  routine_id: string;
-  member_id: string;
-  session_number: number | null;
-  session_date: string | null;
-  context_flags: string[] | null;
-  created_at: string | null;
-  legacy_app_id?: string | null;
-  session_entries?: DbSessionEntryRow[] | null;
-};
-
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
 type TrackerMetric = string;
@@ -373,16 +266,6 @@ type PositionedSeries = GraphSeries & {
   points: ChartPoint[];
 };
 
-
-const SUPABASE_URL =
-  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_URL) ||
-  "https://hgvqosprkdbvmbmticbi.supabase.co";
-
-const SUPABASE_ANON_KEY =
-  (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhndnFvc3Bya2Ridm1ibXRpY2JpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0MzE3OTgsImV4cCI6MjA5ODAwNzc5OH0.2Gm6rXIekV1xT_8rEWRCiRUbKZ7YA2ucIlGb_v4RUBM";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const WEIGHT_COLOR_BANDS = [
   ["#2563eb", "#06b6d4", "#22c55e", "#eab308", "#f97316", "#ef4444"],
@@ -1492,7 +1375,6 @@ const getMemberPlanLabel = (plan: MemberPlan | undefined) => {
 const normalizeMember = (member: Member): Member => ({
   ...member,
   memberPlan: member.memberPlan || "direct",
-  inviteEmail: member.inviteEmail || "",
 });
 
 const normalizeProgram = (program: Program): Program => ({
@@ -11321,10 +11203,6 @@ export default function App() {
     const stored = window.localStorage.getItem(STORAGE_KEYS.members);
     return stored ? (JSON.parse(stored) as Member[]).map(normalizeMember) : [normalizeMember({ id: "member-1", clientId: "100001", name: "Test Subject" })];
   });
-  const [dbMembers, setDbMembers] = useState<Member[]>([]);
-  const [dbMembersLoaded, setDbMembersLoaded] = useState(false);
-  const [dbMembersLoading, setDbMembersLoading] = useState(false);
-  const [membersBridgeMessage, setMembersBridgeMessage] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
@@ -11332,32 +11210,13 @@ export default function App() {
   const [isEditingMember, setIsEditingMember] = useState(false);
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
-  const [editedMemberInviteEmail, setEditedMemberInviteEmail] = useState("");
   const [role, setRole] = useState<Role>("admin");
-  const [authSession, setAuthSession] = useState<Session | null>(null);
-  const [authProfile, setAuthProfile] = useState<AuthProfile | null>(null);
-  const [authMember, setAuthMember] = useState<AuthMember | null>(null);
-  const [, setAuthBootstrapMessage] = useState("");
-  const [authLoading, setAuthLoading] = useState(true);
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authDisplayName, setAuthDisplayName] = useState("");
-  const [authMessage, setAuthMessage] = useState("");
-  const [authSubmitting, setAuthSubmitting] = useState(false);
-  const [dbProfiles, setDbProfiles] = useState<AuthProfile[]>([]);
-  const [dbProfilesLoading, setDbProfilesLoading] = useState(false);
-  const [profilesBridgeMessage, setProfilesBridgeMessage] = useState("");
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
     const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
     return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms().map(normalizeProgram);
   });
-  const [dbPrograms, setDbPrograms] = useState<Program[]>([]);
-  const [dbProgramsLoaded, setDbProgramsLoaded] = useState(false);
-  const [dbProgramsLoading, setDbProgramsLoading] = useState(false);
-  const [programsBridgeMessage, setProgramsBridgeMessage] = useState("");
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
   const [builderSource, setBuilderSource] = useState<BuilderSource>("adminPrograms");
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
@@ -11373,11 +11232,6 @@ export default function App() {
     const stored = window.localStorage.getItem(STORAGE_KEYS.savedSessions);
     return stored ? JSON.parse(stored) : [];
   });
-  const [dbSavedSessions, setDbSavedSessions] = useState<SavedSession[]>([]);
-  const [dbSessionsLoaded, setDbSessionsLoaded] = useState(false);
-  const [dbSessionsLoading, setDbSessionsLoading] = useState(false);
-  const [sessionsBridgeMessage, setSessionsBridgeMessage] = useState("");
-  const [importDiagnosticsLog, setImportDiagnosticsLog] = useState<string[]>([]);
   const [importText, setImportText] = useState(PROGRAM_1_IMPORT_TEMPLATE);
 
   const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(() => {
@@ -11442,1111 +11296,23 @@ export default function App() {
     return window.localStorage.getItem(STORAGE_KEYS.trackerTutorialDismissed) === "true";
   });
 
-  const displayedMembers = useMemo(
-    () => (dbMembersLoaded && dbMembers.length ? dbMembers : members),
-    [dbMembers, dbMembersLoaded, members]
-  );
-  const memberSourceLabel = dbMembersLoaded && dbMembers.length ? "Supabase" : "Local fallback";
-  const programSourceLabel = dbProgramsLoaded && dbPrograms.length ? "Supabase" : "Local fallback";
-  const isAdminRole = role === "admin";
-  const isTrainerRole = role === "trainer";
-  const canUseTrainerWorkspace = role === "admin" || role === "trainer";
-  const canManageBusiness = isAdminRole;
-  const canManageMembers = isAdminRole;
-  const canEditMemberIdentity = isAdminRole;
-  const canArchiveMembers = isAdminRole;
-  const canDeleteMembers = isAdminRole;
-  const canImportExportMembers = isAdminRole;
-  const canEditMemberPlan = isAdminRole;
-  const canEditPrograms = isAdminRole || isTrainerRole;
-  const isMemberProgramScreen = screen === "memberHome" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph" || screen === "trainerSupport";
-  const isTrackerScreen = screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder";
-  const isClientListScreen = screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder";
-  const isTrainerDashScreen = screen === "adminDash" || screen === "input";
-  const navButtonClass = "h-9 shrink-0 whitespace-nowrap px-3 text-center text-xs";
-  const profileButtonLabel = "👤";
-
-  const displayedPrograms = useMemo(() => {
-    if (!dbProgramsLoaded || !dbPrograms.length) return programs;
-
-    const dbLegacyIds = new Set(dbPrograms.map((program) => program.legacyAppId || program.id).filter(Boolean));
-    const dbSignatures = new Set(dbPrograms.map((program) => `${program.memberId || ""}::${program.name}`.toLowerCase()));
-
-    const localOnlyPrograms = programs.filter((program) => {
-      const localMember = members.find((member) => member.id === program.memberId) || members[0] || null;
-      const bridgedMemberId = localMember ? dbMembers.find((member) => member.clientId === localMember.clientId)?.id || program.memberId || "" : program.memberId || "";
-      const signature = `${bridgedMemberId || ""}::${program.name}`.toLowerCase();
-      return !dbLegacyIds.has(program.id) && !dbSignatures.has(signature);
-    });
-
-    return [...dbPrograms, ...localOnlyPrograms];
-  }, [dbMembers, dbPrograms, dbProgramsLoaded, members, programs]);
-
-  const activeSavedSessions = dbSessionsLoaded && dbSavedSessions.length ? dbSavedSessions : savedSessions;
-  const sessionSourceLabel = dbSessionsLoaded && dbSavedSessions.length ? "Supabase" : "Local fallback";
-
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
-    const scopedMembers = displayedMembers.filter((member) => (canArchiveMembers && viewArchivedMembers ? Boolean(member.archived) : !member.archived));
+    const scopedMembers = members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived));
 
     if (!query) return showAllMembers ? scopedMembers : scopedMembers.slice(0, 10);
     return scopedMembers.filter((member) =>
-      member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query) || (member.inviteEmail || "").toLowerCase().includes(query)
+      member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query)
     );
-  }, [displayedMembers, memberSearch, viewArchivedMembers, showAllMembers, canArchiveMembers]);
+  }, [members, memberSearch, viewArchivedMembers, showAllMembers]);
 
   const selectedMember = useMemo(
-    () => displayedMembers.find((member) => member.id === selectedMemberId) || displayedMembers[0] || null,
-    [displayedMembers, selectedMemberId]
+    () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
+    [members, selectedMemberId]
   );
 
-  const selectedMemberProfile = useMemo(() => {
-    if (!selectedMember || !dbProfiles.length) return null;
-    const selectedClientId = String(selectedMember.clientId || "").trim().toLowerCase();
-    const selectedInviteEmail = String(selectedMember.inviteEmail || "").trim().toLowerCase();
-
-    return dbProfiles.find((profile) => {
-      const profileEmail = String(profile.email || "").trim().toLowerCase();
-      const profileClientId = String(profile.client_id || "").trim().toLowerCase();
-      const linkedClientId = String(profile.linked_company_client_id || "").trim().toLowerCase();
-
-      return (selectedClientId && (profileClientId === selectedClientId || linkedClientId === selectedClientId)) ||
-        (selectedInviteEmail && profileEmail === selectedInviteEmail);
-    }) || null;
-  }, [dbProfiles, selectedMember?.clientId, selectedMember?.inviteEmail]);
-
-  const normalizeAuthProfile = (profile: any, fallbackEmail?: string | null): AuthProfile => ({
-    id: String(profile.id),
-    email: profile.email || fallbackEmail || null,
-    display_name: profile.display_name || null,
-    role: profile.role === "admin" || profile.role === "trainer" ? profile.role : "member",
-    member_plan: ["basic", "direct", "premium"].includes(profile.member_plan) ? profile.member_plan : "basic",
-    client_id: profile.client_id || null,
-    linked_company_client_id: profile.linked_company_client_id || null,
-    client_link_status: profile.client_link_status || "unlinked",
-    location_id: profile.location_id || null,
-  });
-
-  const normalizeAuthMember = (member: any): AuthMember => ({
-    id: String(member.id),
-    profile_id: member.profile_id || null,
-    client_id: String(member.client_id || ""),
-    name: String(member.name || "Member"),
-    member_plan: ["basic", "direct", "premium"].includes(member.member_plan) ? member.member_plan : "basic",
-    archived: Boolean(member.archived),
-    location_id: member.location_id || null,
-    invite_email: member.invite_email || null,
-  });
-
-  const mapDbMemberToAppMember = (member: any): Member =>
-    normalizeMember({
-      id: String(member.id),
-      clientId: String(member.client_id || ""),
-      name: String(member.name || "Member"),
-      archived: Boolean(member.archived),
-      memberPlan: ["basic", "direct", "premium"].includes(member.member_plan) ? member.member_plan : "basic",
-      inviteEmail: member.invite_email || "",
-    });
-
-
-  const loadSupabaseProfiles = async () => {
-    if (!authProfile || authProfile.role !== "admin") {
-      setDbProfiles([]);
-      return [];
-    }
-
-    setDbProfilesLoading(true);
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .order("created_at", { ascending: true });
-    setDbProfilesLoading(false);
-
-    if (error) {
-      setProfilesBridgeMessage(error.message || "Unable to load profiles.");
-      return [];
-    }
-
-    const mappedProfiles = ((data || []) as DbProfileRow[]).map((profile) => normalizeAuthProfile(profile));
-    setDbProfiles(mappedProfiles);
-    setProfilesBridgeMessage(`Loaded ${mappedProfiles.length} profile${mappedProfiles.length === 1 ? "" : "s"}.`);
-    return mappedProfiles;
-  };
-
-  const updateProfileRoleById = async (profileId: string, nextRole: Role) => {
-    if (!authProfile || authProfile.role !== "admin") {
-      setProfilesBridgeMessage("Only admins can manage user roles.");
-      return;
-    }
-
-    setDbProfilesLoading(true);
-    const { data, error } = await supabase
-      .from("profiles")
-      .update({ role: nextRole })
-      .eq("id", profileId)
-      .select("*")
-      .maybeSingle();
-    setDbProfilesLoading(false);
-
-    if (error) {
-      setProfilesBridgeMessage(error.message || "Unable to update role.");
-      return;
-    }
-
-    const normalizedProfile = normalizeAuthProfile(data);
-    setDbProfiles((prev) => prev.map((profile) => (profile.id === normalizedProfile.id ? normalizedProfile : profile)));
-
-    if (authProfile.id === normalizedProfile.id) {
-      setAuthProfile(normalizedProfile);
-      setRole(normalizedProfile.role);
-      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "programs");
-    }
-
-    setProfilesBridgeMessage(`Updated ${normalizedProfile.email || normalizedProfile.display_name || "profile"} to ${normalizedProfile.role}.`);
-  };
-
-  const loadSupabaseMembers = async () => {
-    if (!authProfile || !["admin", "trainer"].includes(authProfile.role)) {
-      setDbMembers([]);
-      setDbMembersLoaded(false);
-      return [];
-    }
-
-    setDbMembersLoading(true);
-    const { data, error } = await supabase
-      .from("members")
-      .select("*")
-      .order("created_at", { ascending: true });
-    setDbMembersLoading(false);
-
-    if (error) {
-      setMembersBridgeMessage(error.message || "Unable to load Supabase members.");
-      setDbMembersLoaded(false);
-      return [];
-    }
-
-    const mappedMembers = (data || []).map(mapDbMemberToAppMember);
-    setDbMembers(mappedMembers);
-    setDbMembersLoaded(true);
-    setMembersBridgeMessage(`Loaded ${mappedMembers.length} member${mappedMembers.length === 1 ? "" : "s"} from Supabase.`);
-    if (mappedMembers.length && !mappedMembers.some((member) => member.id === selectedMemberId)) {
-      setSelectedMemberId(mappedMembers[0].id);
-    }
-    return mappedMembers;
-  };
-
-  const insertSupabaseMember = async (member: Member) => {
-    const { data, error } = await supabase
-      .from("members")
-      .insert({
-        client_id: member.clientId,
-        name: member.name,
-        member_plan: member.memberPlan || "direct",
-        archived: Boolean(member.archived),
-        invite_email: member.inviteEmail || null,
-      })
-      .select("*")
-      .maybeSingle();
-
-    if (error) throw error;
-    return mapDbMemberToAppMember(data);
-  };
-
-  const importLocalMembersToSupabase = async () => {
-    if (!authProfile || authProfile.role !== "admin") {
-      setMembersBridgeMessage("Only admins can import local members.");
-      return;
-    }
-
-    setDbMembersLoading(true);
-    try {
-      const existing = await loadSupabaseMembers();
-      const existingClientIds = new Set(existing.map((member) => member.clientId));
-      const membersToImport = members.filter((member) => member.clientId && !existingClientIds.has(member.clientId));
-
-      if (!membersToImport.length) {
-        setMembersBridgeMessage("No new local members to import.");
-        return;
-      }
-
-      const payload = membersToImport.map((member) => ({
-        client_id: member.clientId,
-        name: member.name,
-        member_plan: member.memberPlan || "direct",
-        archived: Boolean(member.archived),
-        invite_email: member.inviteEmail || null,
-      }));
-
-      const { error } = await supabase.from("members").insert(payload);
-      if (error) throw error;
-
-      setMembersBridgeMessage(`Imported ${membersToImport.length} local member${membersToImport.length === 1 ? "" : "s"} to Supabase.`);
-      await loadSupabaseMembers();
-    } catch (error: any) {
-      setMembersBridgeMessage(error?.message || "Unable to import local members.");
-    } finally {
-      setDbMembersLoading(false);
-    }
-  };
-
-
-  const normalizeDbDateForInput = (value: string | null | undefined) => {
-    if (!value) return "";
-    const dateOnly = String(value).slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return String(value);
-    const [year, month, day] = dateOnly.split("-");
-    const date = new Date(Number(year), Number(month) - 1, Number(day));
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  };
-
-  const formatDateForSupabase = (value: string) => {
-    const raw = String(value || "").trim();
-    if (!raw) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.toISOString().slice(0, 10);
-  };
-
-  const formatImportError = (error: any) => {
-    if (!error) return "Unknown error";
-    const parts = [error.message, error.details, error.hint, error.code].filter(Boolean);
-    return parts.length ? parts.join(" | ") : String(error);
-  };
-
-  const pushImportDiagnostic = (line: string) => {
-    setImportDiagnosticsLog((prev) => [...prev, `${new Date().toLocaleTimeString()} — ${line}`].slice(-80));
-  };
-
-  const resetImportDiagnostics = (title: string) => {
-    setImportDiagnosticsLog([`${new Date().toLocaleTimeString()} — ${title}`]);
-  };
-
-  const getLocalSessionImportCandidates = () => {
-    const candidateMap = new Map<string, SavedSession>();
-    savedSessions.forEach((session) => candidateMap.set(session.id, session));
-
-    const ownerMemberId = members[0]?.id || selectedMember?.id || "";
-    const programOne = programs.find((program) => program.id === "program-1");
-    const programTwo = programs.find((program) => program.id === "program-2");
-    const programThree = programs.find((program) => program.id === "program-3");
-    const programFour = programs.find((program) => program.id === "program-4");
-
-    const seededSessions = [
-      ...(programOne && ownerMemberId ? parseImportedSessions(PROGRAM_1_IMPORT_TEMPLATE, programOne, ownerMemberId) : []),
-      ...(programTwo && ownerMemberId ? parseRelayImportedSessions(PROGRAM_2_RELAY_TEMPLATE, programTwo, ownerMemberId) : []),
-      ...(programThree && ownerMemberId ? parseRelayImportedSessions(PROGRAM_3_RELAY_TEMPLATE, programThree, ownerMemberId) : []),
-      ...(programFour && ownerMemberId ? buildProgramFourSeedSessions(ownerMemberId) : []),
-    ];
-
-    seededSessions.forEach((session) => {
-      if (!candidateMap.has(session.id)) candidateMap.set(session.id, session);
-    });
-
-    return [...candidateMap.values()].sort((a, b) => Number(a.sessionNumber || 0) - Number(b.sessionNumber || 0));
-  };
-
-  const getImportExpectedCounts = () => {
-    const localSessions = getLocalSessionImportCandidates();
-    return {
-      members: members.length,
-      programs: programs.length,
-      routines: programs.reduce((total, program) => total + program.routines.length, 0),
-      blocks: programs.reduce((programTotal, program) => programTotal + program.routines.reduce((routineTotal, routine) => routineTotal + routine.blocks.length, 0), 0),
-      sessions: localSessions.length,
-      sessionEntries: localSessions.reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0),
-    };
-  };
-
-  const mapDbProgramToAppProgram = (program: DbProgramRow): Program =>
-    normalizeProgram({
-      id: String(program.id),
-      legacyAppId: program.legacy_app_id || undefined,
-      name: String(program.name || "Program"),
-      startedAt: normalizeDbDateForInput(program.started_at),
-      status: program.status === "paused" || program.status === "closed" ? program.status : "active",
-      notes: program.notes || "",
-      programLength: Number(program.program_length || DEFAULT_PROGRAM_LENGTH),
-      inputMode: program.input_mode === "memberInput" ? "memberInput" : "trainerInput",
-      memberId: String(program.member_id || ""),
-      routines: [...(program.routines || [])]
-        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-        .map((routine) => ({
-          id: String(routine.id),
-          label: String(routine.label || "Routine"),
-          blocks: [...(routine.blocks || [])]
-            .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
-            .map((block) => ({
-              id: String(block.id),
-              type: block.block_type === "single" ? "single" : "paired",
-              title: String(block.title || ""),
-              duration: String(block.duration || ""),
-              notes: String(block.notes || ""),
-              interactionMode: block.interaction_mode === "alternating" ? "alternating" : block.interaction_mode === "na" ? "na" : undefined,
-              exercises: Array.isArray(block.exercises) ? block.exercises : [],
-            })),
-        })),
-    });
-
-  const loadSupabasePrograms = async () => {
-    if (!authProfile || !canUseTrainerWorkspace) {
-      setDbPrograms([]);
-      setDbProgramsLoaded(false);
-      return [];
-    }
-
-    setDbProgramsLoading(true);
-    const { data, error } = await supabase
-      .from("programs")
-      .select("*, routines(*, blocks(*))")
-      .order("created_at", { ascending: true });
-    setDbProgramsLoading(false);
-
-    if (error) {
-      setProgramsBridgeMessage(error.message || "Unable to load Supabase programs.");
-      setDbProgramsLoaded(false);
-      return [];
-    }
-
-    const mappedPrograms = ((data || []) as DbProgramRow[]).map(mapDbProgramToAppProgram);
-    setDbPrograms(mappedPrograms);
-    setDbProgramsLoaded(true);
-    setProgramsBridgeMessage(`Loaded ${mappedPrograms.length} program${mappedPrograms.length === 1 ? "" : "s"} from Supabase.`);
-    if (mappedPrograms.length && selectedProgramId && !mappedPrograms.some((program) => program.id === selectedProgramId)) {
-      setSelectedProgramId(mappedPrograms[0].id);
-    }
-    return mappedPrograms;
-  };
-
-  const getDbMemberIdForLocalProgram = (program: Program, memberRows = dbMembers) => {
-    if (memberRows.some((member) => member.id === program.memberId)) return program.memberId || null;
-
-    const localMember = members.find((member) => member.id === program.memberId) || members[0] || null;
-    if (!localMember) return selectedMember?.id || null;
-
-    return memberRows.find((member) => member.clientId === localMember.clientId)?.id || selectedMember?.id || null;
-  };
-
-  const insertSupabaseProgramBlueprint = async (program: Program, memberId: string) => {
-    const normalized = normalizeProgram(program);
-    const { data: insertedProgram, error: programError } = await supabase
-      .from("programs")
-      .insert({
-        member_id: memberId,
-        name: normalized.name,
-        started_at: formatDateForSupabase(normalized.startedAt),
-        status: normalized.status,
-        notes: normalized.notes || null,
-        program_length: normalized.programLength || DEFAULT_PROGRAM_LENGTH,
-        input_mode: normalized.inputMode || "trainerInput",
-        legacy_app_id: normalized.id,
-      })
-      .select("*")
-      .single();
-
-    if (programError) throw programError;
-
-    const routineIdMap = new Map<string, string>();
-    for (const [routineIndex, routine] of normalized.routines.entries()) {
-      const { data: insertedRoutine, error: routineError } = await supabase
-        .from("routines")
-        .insert({
-          program_id: insertedProgram.id,
-          label: routine.label,
-          sort_order: routineIndex,
-          legacy_app_id: routine.id,
-        })
-        .select("*")
-        .single();
-
-      if (routineError) throw routineError;
-      routineIdMap.set(routine.id, insertedRoutine.id);
-
-      const blockPayload = routine.blocks.map((block, blockIndex) => ({
-        routine_id: insertedRoutine.id,
-        block_type: block.type,
-        title: block.title,
-        duration: block.duration || null,
-        notes: block.notes || null,
-        interaction_mode: block.interactionMode || null,
-        sort_order: blockIndex,
-        context_flags: [],
-        exercises: block.exercises || [],
-        legacy_app_id: block.id,
-      }));
-
-      if (blockPayload.length) {
-        const { error: blockError } = await supabase.from("blocks").insert(blockPayload);
-        if (blockError) throw blockError;
-      }
-    }
-
-    return insertedProgram.id as string;
-  };
-
-  const updateSupabaseProgramStatus = async (programId: string, status: Program["status"]) => {
-    if (!dbProgramsLoaded || !dbPrograms.some((program) => program.id === programId)) return false;
-
-    const { error } = await supabase.from("programs").update({ status }).eq("id", programId);
-    if (error) {
-      setProgramsBridgeMessage(error.message || "Unable to update Supabase program status.");
-      return false;
-    }
-
-    setDbPrograms((prev) => prev.map((program) => (program.id === programId ? { ...program, status } : program)));
-    return true;
-  };
-
-  const deleteSupabaseProgram = async (programId: string) => {
-    if (!dbProgramsLoaded || !dbPrograms.some((program) => program.id === programId)) return false;
-
-    const { error } = await supabase.from("programs").delete().eq("id", programId);
-    if (error) {
-      setProgramsBridgeMessage(error.message || "Unable to delete Supabase program.");
-      return false;
-    }
-
-    setDbPrograms((prev) => prev.filter((program) => program.id !== programId));
-    return true;
-  };
-
-  const importLocalProgramsToSupabase = async (options?: { appendDiagnostics?: boolean }) => {
-    if (!options?.appendDiagnostics) resetImportDiagnostics("Program blueprint import started.");
-
-    if (!canManageBusiness) {
-      const message = "Only admins can import local programs.";
-      setProgramsBridgeMessage(message);
-      pushImportDiagnostic(`STOP: ${message}`);
-      return false;
-    }
-
-    let availableDbMembers = dbMembers;
-    if (!dbMembersLoaded || !availableDbMembers.length) {
-      pushImportDiagnostic("DB members not loaded; refreshing members before program import.");
-      availableDbMembers = await loadSupabaseMembers();
-    }
-
-    if (!availableDbMembers.length) {
-      const message = "No Supabase members found. Import local members or create member rows before importing programs.";
-      setProgramsBridgeMessage(message);
-      pushImportDiagnostic(`STOP: ${message}`);
-      return false;
-    }
-
-    setDbProgramsLoading(true);
-    try {
-      const expected = getImportExpectedCounts();
-      pushImportDiagnostic(`Expected local blueprints: ${expected.programs} programs, ${expected.routines} routines, ${expected.blocks} blocks.`);
-      pushImportDiagnostic(`DB members available: ${availableDbMembers.length}. Local members available: ${members.length}.`);
-
-      const { data: existingRows, error: existingError } = await supabase
-        .from("programs")
-        .select("id, member_id, name, legacy_app_id");
-
-      if (existingError) throw existingError;
-
-      const existingLegacyIds = new Set((existingRows || []).map((program: any) => String(program.legacy_app_id || "")).filter(Boolean));
-      const existingSignatures = new Set((existingRows || []).map((program: any) => `${program.member_id}::${program.name}`.toLowerCase()));
-      pushImportDiagnostic(`Existing DB programs found before import: ${(existingRows || []).length}.`);
-
-      let importedCount = 0;
-      let skippedCount = 0;
-      let routineCount = 0;
-      let blockCount = 0;
-
-      for (const localProgram of programs) {
-        const memberId = getDbMemberIdForLocalProgram(localProgram, availableDbMembers);
-        const localMember = members.find((member) => member.id === localProgram.memberId) || members[0] || null;
-        const diagnosticName = `${localProgram.name} (${localProgram.id})`;
-
-        if (!memberId) {
-          skippedCount += 1;
-          pushImportDiagnostic(`SKIP ${diagnosticName}: no DB member match. Local member: ${localMember?.name || "none"} / ${localMember?.clientId || "no client ID"}.`);
-          continue;
-        }
-
-        const signature = `${memberId}::${localProgram.name}`.toLowerCase();
-        if (existingLegacyIds.has(localProgram.id) || existingSignatures.has(signature)) {
-          skippedCount += 1;
-          pushImportDiagnostic(`SKIP ${diagnosticName}: already exists in DB.`);
-          continue;
-        }
-
-        pushImportDiagnostic(`INSERT ${diagnosticName}: member_id ${memberId}, ${localProgram.routines.length} routines.`);
-        await insertSupabaseProgramBlueprint(localProgram, memberId);
-        importedCount += 1;
-        routineCount += localProgram.routines.length;
-        blockCount += localProgram.routines.reduce((total, routine) => total + routine.blocks.length, 0);
-        existingLegacyIds.add(localProgram.id);
-        existingSignatures.add(signature);
-      }
-
-      const message = importedCount
-        ? `Imported ${importedCount} local program blueprint${importedCount === 1 ? "" : "s"} to Supabase.`
-        : `No new local program blueprints to import. Skipped ${skippedCount}.`;
-
-      setProgramsBridgeMessage(message);
-      pushImportDiagnostic(`RESULT programs: inserted ${importedCount}, skipped ${skippedCount}, routines attempted ${routineCount}, blocks attempted ${blockCount}.`);
-      await loadSupabasePrograms();
-      return true;
-    } catch (error: any) {
-      const message = formatImportError(error);
-      setProgramsBridgeMessage(message || "Unable to import local programs.");
-      pushImportDiagnostic(`ERROR program import stopped: ${message}`);
-      return false;
-    } finally {
-      setDbProgramsLoading(false);
-    }
-  };
-
-
-
-  const buildDbProgramStructureMaps = async () => {
-    const { data, error } = await supabase
-      .from("programs")
-      .select("id, member_id, legacy_app_id, routines(id, legacy_app_id, blocks(id, legacy_app_id))");
-
-    if (error) throw error;
-
-    const programByLegacy = new Map<string, string>();
-    const routineByLegacy = new Map<string, string>();
-    const blockByLegacy = new Map<string, string>();
-
-    ((data || []) as any[]).forEach((programRow) => {
-      const programLegacy = String(programRow.legacy_app_id || "");
-      if (programLegacy) programByLegacy.set(programLegacy, String(programRow.id));
-
-      (programRow.routines || []).forEach((routineRow: any) => {
-        const routineLegacy = String(routineRow.legacy_app_id || "");
-        if (programLegacy && routineLegacy) {
-          routineByLegacy.set(`${programLegacy}::${routineLegacy}`, String(routineRow.id));
-        }
-
-        (routineRow.blocks || []).forEach((blockRow: any) => {
-          const blockLegacy = String(blockRow.legacy_app_id || "");
-          if (programLegacy && routineLegacy && blockLegacy) {
-            blockByLegacy.set(`${programLegacy}::${routineLegacy}::${blockLegacy}`, String(blockRow.id));
-          }
-        });
-      });
-    });
-
-    return { programByLegacy, routineByLegacy, blockByLegacy };
-  };
-
-  const mapDbSessionToAppSession = (session: DbSessionRow): SavedSession => {
-    const program = dbPrograms.find((item) => item.id === String(session.program_id));
-    const routine = program?.routines.find((item) => item.id === String(session.routine_id));
-    const blocksById = new Map((routine?.blocks || []).map((block) => [block.id, block]));
-
-    const groupedBlocks = new Map<string, SessionBlockInput>();
-    [...(session.session_entries || [])]
-      .sort((a, b) => Number(a.slot || 0) - Number(b.slot || 0))
-      .forEach((entry) => {
-        const blockId = String(entry.block_id || "unassigned-block");
-        const block = blocksById.get(blockId);
-        const currentBlock = groupedBlocks.get(blockId) || {
-          blockId,
-          blockTitle: block?.title || "Block",
-          entries: [],
-          contextFlags: [],
-        };
-
-        currentBlock.entries.push({
-          exerciseId: String(entry.exercise_id || entry.id),
-          exerciseName: String(entry.exercise_name || "Exercise"),
-          weight: String(entry.weight || ""),
-          performance: String(entry.performance || ""),
-          setsCompleted: String(entry.sets_completed || ""),
-          target: String(entry.target || ""),
-          metric: String(entry.metric || ""),
-          supportMetrics: entry.support_metrics || {},
-          contextFlags: entry.context_flags || [],
-          scoringDirection: entry.scoring_direction || "higherIsBetter",
-        });
-
-        groupedBlocks.set(blockId, currentBlock);
-      });
-
-    return {
-      id: String(session.id),
-      programId: String(session.program_id),
-      routineId: String(session.routine_id),
-      memberId: String(session.member_id),
-      date: normalizeDbDateForInput(session.session_date),
-      sessionNumber: String(session.session_number || ""),
-      contextFlags: session.context_flags || [],
-      createdAt: session.created_at || new Date().toISOString(),
-      blocks: [...groupedBlocks.values()],
-    };
-  };
-
-  const loadSupabaseSessions = async () => {
-    if (!authProfile || !canUseTrainerWorkspace) {
-      setDbSavedSessions([]);
-      setDbSessionsLoaded(false);
-      return [];
-    }
-
-    setDbSessionsLoading(true);
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("*, session_entries(*)")
-      .order("session_number", { ascending: true });
-    setDbSessionsLoading(false);
-
-    if (error) {
-      setSessionsBridgeMessage(error.message || "Unable to load Supabase sessions.");
-      setDbSessionsLoaded(false);
-      return [];
-    }
-
-    const mappedSessions = ((data || []) as DbSessionRow[]).map(mapDbSessionToAppSession);
-    setDbSavedSessions(mappedSessions);
-    setDbSessionsLoaded(true);
-    setSessionsBridgeMessage(`Loaded ${mappedSessions.length} session${mappedSessions.length === 1 ? "" : "s"} from Supabase.`);
-    return mappedSessions;
-  };
-
-  const importLocalSessionsToSupabase = async (options?: { appendDiagnostics?: boolean }) => {
-    if (!options?.appendDiagnostics) resetImportDiagnostics("Session import started.");
-
-    if (!canManageBusiness) {
-      const message = "Only admins can import local sessions.";
-      setSessionsBridgeMessage(message);
-      pushImportDiagnostic(`STOP: ${message}`);
-      return false;
-    }
-
-    let availableDbMembers = dbMembers;
-    if (!dbMembersLoaded || !availableDbMembers.length) {
-      pushImportDiagnostic("DB members not loaded; refreshing members before session import.");
-      availableDbMembers = await loadSupabaseMembers();
-    }
-
-    if (!availableDbMembers.length) {
-      const message = "No Supabase members found. Import local members or create member rows before importing sessions.";
-      setSessionsBridgeMessage(message);
-      pushImportDiagnostic(`STOP: ${message}`);
-      return false;
-    }
-
-    setDbSessionsLoading(true);
-    try {
-      let availableDbPrograms = dbPrograms;
-      if (!dbProgramsLoaded || !dbPrograms.length) {
-        pushImportDiagnostic("DB programs not loaded; refreshing programs before session import.");
-        availableDbPrograms = await loadSupabasePrograms();
-      }
-
-      if (!availableDbPrograms.length) {
-        const message = "No Supabase programs found. Import program blueprints before importing sessions.";
-        setSessionsBridgeMessage(message);
-        pushImportDiagnostic(`STOP: ${message}`);
-        return false;
-      }
-
-      const localSessionsForImport = getLocalSessionImportCandidates();
-      const expectedEntries = localSessionsForImport.reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0);
-      pushImportDiagnostic(`Local session candidates: ${localSessionsForImport.length}. Saved localStorage sessions: ${savedSessions.length}. Expected entries: ${expectedEntries}.`);
-
-      if (!localSessionsForImport.length) {
-        const message = "No local or embedded seed sessions found to import.";
-        setSessionsBridgeMessage(message);
-        pushImportDiagnostic(`STOP: ${message}`);
-        return false;
-      }
-
-      const { programByLegacy, routineByLegacy, blockByLegacy } = await buildDbProgramStructureMaps();
-      pushImportDiagnostic(`Structure maps: ${programByLegacy.size} programs, ${routineByLegacy.size} routines, ${blockByLegacy.size} blocks.`);
-
-      const { data: existingRows, error: existingError } = await supabase
-        .from("sessions")
-        .select("id, program_id, session_number, legacy_app_id");
-
-      if (existingError) throw existingError;
-
-      const existingLegacyIds = new Set((existingRows || []).map((session: any) => String(session.legacy_app_id || "")).filter(Boolean));
-      const existingSignatures = new Set((existingRows || []).map((session: any) => `${session.program_id}::${session.session_number}`));
-      pushImportDiagnostic(`Existing DB sessions found before import: ${(existingRows || []).length}.`);
-
-      let importedCount = 0;
-      let skippedCount = 0;
-      let insertedEntryCount = 0;
-
-      for (const localSession of localSessionsForImport) {
-        const dbProgramId = programByLegacy.get(localSession.programId) || (availableDbPrograms.some((program) => program.id === localSession.programId) ? localSession.programId : "");
-        const localMember = members.find((member) => member.id === localSession.memberId);
-        const dbMemberId =
-          (availableDbMembers.some((member) => member.id === localSession.memberId) ? localSession.memberId : "") ||
-          (localMember ? availableDbMembers.find((member) => member.clientId === localMember.clientId)?.id || "" : "");
-        const dbRoutineId = routineByLegacy.get(`${localSession.programId}::${localSession.routineId}`) || localSession.routineId;
-        const sessionNumber = Number.parseInt(String(localSession.sessionNumber || "0"), 10);
-        const diagnosticName = `${localSession.id} / program ${localSession.programId} / session ${localSession.sessionNumber}`;
-
-        if (!dbProgramId || !dbMemberId || !dbRoutineId || !Number.isFinite(sessionNumber) || sessionNumber <= 0) {
-          skippedCount += 1;
-          pushImportDiagnostic(`SKIP ${diagnosticName}: missing mapping. dbProgram=${dbProgramId || "none"}, dbMember=${dbMemberId || "none"}, dbRoutine=${dbRoutineId || "none"}, sessionNumber=${localSession.sessionNumber || "none"}.`);
-          continue;
-        }
-
-        if (existingLegacyIds.has(localSession.id) || existingSignatures.has(`${dbProgramId}::${sessionNumber}`)) {
-          skippedCount += 1;
-          pushImportDiagnostic(`SKIP ${diagnosticName}: already exists in DB.`);
-          continue;
-        }
-
-        const { data: insertedSession, error: sessionError } = await supabase
-          .from("sessions")
-          .insert({
-            program_id: dbProgramId,
-            routine_id: dbRoutineId,
-            member_id: dbMemberId,
-            session_number: sessionNumber,
-            session_date: formatDateForSupabase(localSession.date),
-            context_flags: localSession.contextFlags || [],
-            legacy_app_id: localSession.id,
-          })
-          .select("*")
-          .single();
-
-        if (sessionError) throw sessionError;
-
-        const entryPayload = localSession.blocks.flatMap((block) =>
-          block.entries.map((entry, entryIndex) => ({
-            session_id: insertedSession.id,
-            block_id: blockByLegacy.get(`${localSession.programId}::${localSession.routineId}::${block.blockId}`) || null,
-            exercise_id: entry.exerciseId || null,
-            exercise_name: entry.exerciseName || "Exercise",
-            slot: entryIndex + 1,
-            weight: entry.weight || null,
-            performance: entry.performance || null,
-            sets_completed: entry.setsCompleted || null,
-            target: entry.target || null,
-            metric: entry.metric || null,
-            support_metrics: entry.supportMetrics || {},
-            context_flags: entry.contextFlags || [],
-            scoring_direction: entry.scoringDirection || "higherIsBetter",
-            legacy_app_id: `${localSession.id}:${block.blockId}:${entry.exerciseId || entryIndex}`,
-          }))
-        );
-
-        if (entryPayload.length) {
-          const { error: entriesError } = await supabase.from("session_entries").insert(entryPayload);
-          if (entriesError) throw entriesError;
-          insertedEntryCount += entryPayload.length;
-        }
-
-        importedCount += 1;
-        existingLegacyIds.add(localSession.id);
-        existingSignatures.add(`${dbProgramId}::${sessionNumber}`);
-      }
-
-      const message = importedCount
-        ? `Imported ${importedCount} local session${importedCount === 1 ? "" : "s"} and ${insertedEntryCount} entries to Supabase. Skipped ${skippedCount}.`
-        : `No new local sessions to import. Skipped ${skippedCount}.`;
-
-      setSessionsBridgeMessage(message);
-      pushImportDiagnostic(`RESULT sessions: inserted ${importedCount}, skipped ${skippedCount}, entries inserted ${insertedEntryCount}/${expectedEntries}.`);
-      await loadSupabaseSessions();
-      return true;
-    } catch (error: any) {
-      const message = formatImportError(error);
-      setSessionsBridgeMessage(message || "Unable to import local sessions.");
-      pushImportDiagnostic(`ERROR session import stopped: ${message}`);
-      return false;
-    } finally {
-      setDbSessionsLoading(false);
-    }
-  };
-
-  const runFullImportDiagnostic = async () => {
-    resetImportDiagnostics("Full import diagnostic started.");
-    const expected = getImportExpectedCounts();
-    pushImportDiagnostic(`Expected local totals: ${expected.programs} programs, ${expected.routines} routines, ${expected.blocks} blocks, ${expected.sessions} sessions, ${expected.sessionEntries} entries.`);
-    pushImportDiagnostic("Step 1: checking Supabase members.");
-    const loadedMembers = dbMembersLoaded && dbMembers.length ? dbMembers : await loadSupabaseMembers();
-    pushImportDiagnostic(`Supabase members available to importer: ${loadedMembers.length}.`);
-    const programsOk = await importLocalProgramsToSupabase({ appendDiagnostics: true });
-    if (!programsOk) {
-      pushImportDiagnostic("Full import stopped before sessions because program import did not complete.");
-      return;
-    }
-    pushImportDiagnostic("Step 2: importing sessions and session entries.");
-    await importLocalSessionsToSupabase({ appendDiagnostics: true });
-    pushImportDiagnostic("Full import diagnostic completed. Verify Supabase table counts next.");
-  };
-
-
-  const buildDefaultClientIdForUser = (user: User) => `PR-${String(user.id).slice(0, 8).toUpperCase()}`;
-
-  const ensureProfileForUser = async (user: User) => {
-    const email = String(user.email || "").trim() || null;
-
-    const { data: existingProfile, error: profileReadError } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileReadError) {
-      throw profileReadError;
-    }
-
-    if (existingProfile) {
-      return normalizeAuthProfile(existingProfile, email);
-    }
-
-    const generatedClientId = buildDefaultClientIdForUser(user);
-    const { data: insertedProfile, error: profileInsertError } = await supabase
-      .from("profiles")
-      .insert({
-        id: user.id,
-        email,
-        display_name: user.user_metadata?.display_name || email?.split("@")[0] || "Member",
-        role: "member",
-        member_plan: "basic",
-        client_id: generatedClientId,
-        client_link_status: "unlinked",
-      })
-      .select("*")
-      .maybeSingle();
-
-    if (profileInsertError) {
-      throw profileInsertError;
-    }
-
-    return normalizeAuthProfile(insertedProfile, email);
-  };
-
-  const ensureMemberForProfile = async (profile: AuthProfile) => {
-    const email = String(profile.email || "").trim().toLowerCase();
-
-    const { data: existingMember, error: memberReadError } = await supabase
-      .from("members")
-      .select("*")
-      .eq("profile_id", profile.id)
-      .maybeSingle();
-
-    if (memberReadError) {
-      throw memberReadError;
-    }
-
-    if (existingMember) {
-      return normalizeAuthMember(existingMember);
-    }
-
-    if (email) {
-      const { data: invitedMember, error: inviteReadError } = await supabase
-        .from("members")
-        .select("*")
-        .is("profile_id", null)
-        .ilike("invite_email", email)
-        .maybeSingle();
-
-      if (inviteReadError) {
-        throw inviteReadError;
-      }
-
-      if (invitedMember) {
-        const { data: claimedMember, error: claimError } = await supabase
-          .from("members")
-          .update({
-            profile_id: profile.id,
-            member_plan: invitedMember.member_plan || profile.member_plan,
-          })
-          .eq("id", invitedMember.id)
-          .select("*")
-          .maybeSingle();
-
-        if (claimError) {
-          throw claimError;
-        }
-
-        return normalizeAuthMember(claimedMember);
-      }
-    }
-
-    const clientId = profile.client_id || `PR-${String(profile.id).slice(0, 8).toUpperCase()}`;
-    const { data: insertedMember, error: memberInsertError } = await supabase
-      .from("members")
-      .insert({
-        profile_id: profile.id,
-        client_id: clientId,
-        name: profile.display_name || profile.email?.split("@")[0] || "Member",
-        member_plan: profile.member_plan,
-        location_id: profile.location_id,
-        invite_email: profile.email || null,
-      })
-      .select("*")
-      .maybeSingle();
-
-    if (memberInsertError) {
-      throw memberInsertError;
-    }
-
-    return normalizeAuthMember(insertedMember);
-  };
-
-  const hydrateAuthProfile = async (user: User) => {
-    if (!user?.id) {
-      setAuthProfile(null);
-      setAuthMember(null);
-      setRole("member");
-      return null;
-    }
-
-    try {
-      const normalizedProfile = await ensureProfileForUser(user);
-      const normalizedMember = await ensureMemberForProfile(normalizedProfile);
-
-      setAuthProfile(normalizedProfile);
-      setAuthMember(normalizedMember);
-      setRole(normalizedProfile.role);
-      setAuthBootstrapMessage(`Profile linked to member ${normalizedMember.client_id}.`);
-      setScreen(["admin", "trainer"].includes(normalizedProfile.role) ? "members" : "programs");
-      return normalizedProfile;
-    } catch (error: any) {
-      setAuthMessage(error?.message || "Unable to complete account bootstrap.");
-      setAuthBootstrapMessage(error?.message || "Unable to complete account bootstrap.");
-      setAuthProfile(null);
-      setAuthMember(null);
-      setRole("member");
-      return null;
-    }
-  };
-
   useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(async ({ data }: { data: { session: Session | null } }) => {
-      if (!isMounted) return;
-      const session = data.session || null;
-      setAuthSession(session);
-      if (session?.user) {
-        await hydrateAuthProfile(session.user);
-      } else {
-        setAuthProfile(null);
-        setAuthMember(null);
-        setRole("member");
-      }
-      setAuthLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
-      setAuthSession(session);
-
-      // Do not re-hydrate or move screens during passive Supabase token refreshes.
-      // This prevents the app from feeling like it "refreshes" when the tab is minimized, refocused, or backgrounded.
-      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
-        setAuthLoading(false);
-        return;
-      }
-
-      if (session?.user) {
-        hydrateAuthProfile(session.user);
-      } else {
-        setAuthProfile(null);
-        setAuthMember(null);
-        setRole("member");
-        setScreen("programs");
-      }
-      setAuthLoading(false);
-    });
-
-    return () => {
-      isMounted = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authProfile && ["admin", "trainer"].includes(authProfile.role)) {
-      loadSupabaseMembers();
-    } else {
-      setDbMembers([]);
-      setDbMembersLoaded(false);
-    }
-  }, [authProfile?.id, authProfile?.role]);
-
-  useEffect(() => {
-    if (authProfile?.role === "admin") {
-      loadSupabaseProfiles();
-    } else {
-      setDbProfiles([]);
-      setProfilesBridgeMessage("");
-    }
-  }, [authProfile?.id, authProfile?.role]);
-
-  useEffect(() => {
-    if (authProfile && canUseTrainerWorkspace) {
-      loadSupabasePrograms();
-    } else {
-      setDbPrograms([]);
-      setDbProgramsLoaded(false);
-    }
-  }, [authProfile?.id, authProfile?.role]);
-
-  useEffect(() => {
-    if (authProfile && canUseTrainerWorkspace && dbProgramsLoaded) {
-      loadSupabaseSessions();
-    } else {
-      setDbSavedSessions([]);
-      setDbSessionsLoaded(false);
-    }
-  }, [authProfile?.id, authProfile?.role, dbProgramsLoaded, dbPrograms.length]);
-
-  const handleAuthSubmit = async () => {
-    const email = authEmail.trim();
-    const password = authPassword;
-
-    if (!email || !password) {
-      setAuthMessage("Enter an email and password.");
-      return;
-    }
-
-    setAuthSubmitting(true);
-    setAuthMessage("");
-
-    const authResult =
-      authMode === "signup"
-        ? await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              data: {
-                display_name: authDisplayName.trim() || email.split("@")[0],
-              },
-            },
-          })
-        : await supabase.auth.signInWithPassword({ email, password });
-
-    setAuthSubmitting(false);
-
-    if (authResult.error) {
-      setAuthMessage(authResult.error.message);
-      return;
-    }
-
-    if (authMode === "signup") {
-      setAuthMessage("Account created. You are signed in.");
-    } else {
-      setAuthMessage("Logged in.");
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setAuthSession(null);
-    setAuthProfile(null);
-    setAuthMember(null);
-    setAuthBootstrapMessage("");
-    setRole("member");
-    setScreen("programs");
-  };
-
-  useEffect(() => {
-    if (screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
+    if (role === "member" && screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
       setTrackerTutorialStepIndex(0);
       setShowTrackerTutorial(true);
     }
@@ -13042,34 +11808,18 @@ export default function App() {
 
     setEditedMemberName(selectedMember.name);
     setEditedMemberClientId(selectedMember.clientId);
-    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
     setIsEditingMember(false);
   }, [selectedMember?.id]);
 
   const sortedPrograms = useMemo(
-    () => [...displayedPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
-    [displayedPrograms]
+    () => [...programs].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
+    [programs]
   );
 
   const adminPrograms = useMemo(() => {
     if (!selectedMember) return [];
-    return displayedPrograms.filter((program) => {
-      const programMemberId = program.memberId || displayedMembers[0]?.id || null;
-      if (programMemberId === selectedMember.id) return true;
-
-      const dbMember = dbMembers.find((member) => member.id === programMemberId);
-      if (dbMember?.clientId === selectedMember.clientId) return true;
-
-      const localMember = members.find((member) => member.id === programMemberId);
-      if (localMember?.clientId === selectedMember.clientId) return true;
-
-      const localOwnerMember = members[0] || null;
-      const selectedLooksLikeOwner = selectedMember.clientId === authMember?.client_id || selectedMember.clientId === authProfile?.client_id;
-      if (selectedLooksLikeOwner && localOwnerMember && programMemberId === localOwnerMember.id) return true;
-
-      return false;
-    });
-  }, [displayedPrograms, selectedMember, displayedMembers, members, dbMembers, authMember?.client_id, authProfile?.client_id]);
+    return programs.filter((program) => (program.memberId || members[0]?.id || null) === selectedMember.id);
+  }, [programs, selectedMember, members]);
 
   const adminSortedPrograms = useMemo(
     () => [...adminPrograms].sort((a, b) => getSafeDateTime(b.startedAt) - getSafeDateTime(a.startedAt)),
@@ -13083,11 +11833,11 @@ export default function App() {
 
   const selectedProgram = useMemo(
     () =>
-      displayedPrograms.find((program) => program.id === selectedProgramId) ||
-      (canUseTrainerWorkspace && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
+      programs.find((program) => program.id === selectedProgramId) ||
+      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
         ? adminSortedPrograms[0] || null
         : sortedPrograms[0] || null),
-    [displayedPrograms, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
+    [programs, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
   );
 
   const selectedRoutine = useMemo(
@@ -13125,7 +11875,7 @@ export default function App() {
   };
 
   const selectedProgramPlannedTotal = selectedProgram ? getProgramPlannedSessionTotal(selectedProgram) : 0;
-  const selectedProgramCompletedTotal = selectedProgram ? getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember?.id) : 0;
+  const selectedProgramCompletedTotal = selectedProgram ? getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id) : 0;
   const selectedProgramIsComplete = selectedProgramPlannedTotal > 0 && selectedProgramCompletedTotal >= selectedProgramPlannedTotal;
 
   const nextRoutineId = useMemo(() => {
@@ -13133,7 +11883,7 @@ export default function App() {
     if ((selectedMember.memberPlan || "direct") === "basic") return null;
     if (selectedProgramIsComplete) return null;
 
-    const memberProgramSessions = activeSavedSessions
+    const memberProgramSessions = savedSessions
       .filter((session) => session.programId === selectedProgram.id && session.memberId === selectedMember.id)
       .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a));
 
@@ -13144,12 +11894,12 @@ export default function App() {
     if (latestRoutineIndex < 0) return selectedProgram.routines[0]?.id || null;
 
     return selectedProgram.routines[(latestRoutineIndex + 1) % selectedProgram.routines.length]?.id || null;
-  }, [activeSavedSessions, selectedMember, selectedProgram, selectedProgramIsComplete]);
+  }, [savedSessions, selectedMember, selectedProgram, selectedProgramIsComplete]);
 
   const latestSelectedRoutineSession = useMemo(() => {
     if (!premiumProgramInputActive || !selectedProgram || !selectedRoutine || !selectedMember) return null;
 
-    return activeSavedSessions
+    return savedSessions
       .filter(
         (session) =>
           session.programId === selectedProgram.id &&
@@ -13157,7 +11907,7 @@ export default function App() {
           session.memberId === selectedMember.id
       )
       .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a))[0] || null;
-  }, [premiumProgramInputActive, activeSavedSessions, selectedMember, selectedProgram, selectedRoutine]);
+  }, [premiumProgramInputActive, savedSessions, selectedMember, selectedProgram, selectedRoutine]);
 
   const premiumNextBlockId = useMemo(() => {
     if (!premiumProgramInputActive || !selectedRoutine || !selectedRoutine.blocks.length) return null;
@@ -13172,7 +11922,7 @@ export default function App() {
     const seriesMap: Record<string, GraphSeries> = {};
     const exerciseLookup = new Map(selectedBlock.exercises.map((exercise) => [exercise.id, exercise]));
 
-    const scopedSessions = activeSavedSessions.filter(
+    const scopedSessions = savedSessions.filter(
       (session) =>
         session.programId === selectedProgram.id &&
         session.routineId === selectedRoutine.id &&
@@ -13231,7 +11981,7 @@ export default function App() {
         return a.sessionNumber - b.sessionNumber;
       }),
     }));
-  }, [activeSavedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
+  }, [savedSessions, selectedBlock, selectedRoutine, selectedProgram, selectedMember, graphAxis]);
 
   const generatedWorkoutSummaryInsight = useMemo(
     () => generateWorkoutSummaryInsightFromGraphData(graphData, selectedBlock?.type),
@@ -13583,11 +12333,6 @@ export default function App() {
   }, [selectedProgram?.id, selectedRoutine?.id, selectedMember?.id]);
 
   const updatePrograms = (updater: (current: Program[]) => Program[]) => {
-    if (dbProgramsLoaded && dbPrograms.length) {
-      setDbPrograms((prev) => updater(prev));
-      return;
-    }
-
     setPrograms((prev) => updater(prev));
   };
 
@@ -14694,29 +13439,24 @@ export default function App() {
     );
   };
 
-  const goAccount = () => {
-    setScreen("account");
-  };
-
-  const goGymTracker = () => {
-    setScreen("openTracker");
-  };
-
   const goAdminMembers = () => {
+    setRole("admin");
     setScreen("members");
   };
 
   const openMemberOverview = (memberId: string) => {
     setSelectedMemberId(memberId);
+    setRole("admin");
     setScreen("memberOverview");
   };
 
   const goAdminPrograms = () => {
+    setRole("admin");
     setScreen("adminPrograms");
   };
 
   const goBack = () => {
-    if (canUseTrainerWorkspace) {
+    if (role === "admin") {
       if (screen === "memberOverview") {
         goAdminMembers();
         return;
@@ -14778,8 +13518,7 @@ export default function App() {
   };
 
   const backLabel = useMemo(() => {
-    if (screen === "account" || screen === "business") return "";
-    if (canUseTrainerWorkspace) {
+    if (role === "admin") {
       if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
       if (screen === "programView") return "Back to All Programs";
@@ -14787,153 +13526,78 @@ export default function App() {
       if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Client List";
       return "";
     }
-    if (screen === "programs") return "";
-    if (screen === "openTracker") return "";
+    if (screen === "programs") return "Back to Member View";
+    if (screen === "openTracker") return "Back to Member View";
     if (screen === "trackerWorkouts") return "Back to Gym Tracker";
     if (screen === "trackerWorkoutBuilder") return trackerWorkoutReturnCycleId ? "Back to Cycle" : "Back to Workouts";
-    if (screen === "trainerSupport") return "";
+    if (screen === "trainerSupport") return "Back to Member View";
     if (screen === "routines") return "Back to My Programs";
     if (screen === "routine") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to My Programs";
     if (screen === "memberInput") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     if (screen === "graph") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     return "";
-  }, [canUseTrainerWorkspace, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
+  }, [role, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
 
-  const addMember = async () => {
-    if (!canManageMembers) {
-      setMembersBridgeMessage("Only admins can add clients.");
-      return;
-    }
-
-    const nextMemberNumber = displayedMembers.length + 1;
-    const defaultClientId = String(100000 + nextMemberNumber);
-    const name = window.prompt("Client name", `New Member ${nextMemberNumber}`)?.trim();
-    if (!name) return;
-
-    const clientId = window.prompt("Client ID", defaultClientId)?.trim() || defaultClientId;
-    const inviteEmail = window.prompt("Invite/login email (optional)", "")?.trim().toLowerCase() || "";
-    const planInput = window.prompt("Member plan: basic, premium, or direct", "direct")?.trim().toLowerCase() || "direct";
-    const memberPlan: MemberPlan = planInput === "basic" || planInput === "premium" || planInput === "direct" ? planInput : "direct";
-
+  const addMember = () => {
+    const nextMemberNumber = members.length + 1;
     const newMember: Member = {
       id: uid(),
-      clientId,
-      name,
+      clientId: String(100000 + nextMemberNumber),
+      name: `New Member ${nextMemberNumber}`,
       programClosed: false,
       archived: false,
-      memberPlan,
-      inviteEmail,
+      memberPlan: "direct",
     };
 
-    if (authProfile?.role === "admin") {
-      setMembersBridgeMessage("Creating Supabase member...");
-      try {
-        const insertedMember = await insertSupabaseMember(newMember);
-        setDbMembers((prev) => [...prev, insertedMember]);
-        setDbMembersLoaded(true);
-        setSelectedMemberId(insertedMember.id);
-        setMembersBridgeMessage(`Created Supabase member ${insertedMember.clientId}.`);
-      } catch (error: any) {
-        setMembersBridgeMessage(error?.message || "Unable to create Supabase member. Added locally instead.");
-        setMembers((prev) => [...prev, newMember]);
-        setSelectedMemberId(newMember.id);
-      }
-    } else {
-      setMembers((prev) => [...prev, newMember]);
-      setSelectedMemberId(newMember.id);
-    }
-
+    setMembers((prev) => [...prev, newMember]);
+    setSelectedMemberId(newMember.id);
     setMemberSearch("");
     setViewArchivedMembers(false);
     setShowAllMembers(false);
   };
 
-  const removeMember = async (memberId: string) => {
-    if (!canDeleteMembers) return;
-
+  const removeMember = (memberId: string) => {
     const confirmDelete = window.confirm("Are you sure? This action cannot be undone.");
     if (!confirmDelete) return;
-
-    if (dbMembersLoaded && dbMembers.some((member) => member.id === memberId) && authProfile?.role === "admin") {
-      const { error } = await supabase.from("members").delete().eq("id", memberId);
-      if (error) {
-        setMembersBridgeMessage(error.message || "Unable to delete Supabase member.");
-        return;
-      }
-      setDbMembers((prev) => prev.filter((member) => member.id !== memberId));
-    } else {
-      setMembers((prev) => prev.filter((member) => member.id !== memberId));
-    }
-
+    setMembers((prev) => prev.filter((member) => member.id !== memberId));
     if (selectedMemberId === memberId) {
       setSelectedMemberId(null);
       setScreen("members");
     }
   };
 
-  const archiveMember = async (memberId: string) => {
-    if (!canArchiveMembers) return;
-
-    if (dbMembersLoaded && dbMembers.some((member) => member.id === memberId) && authProfile?.role === "admin") {
-      const { error } = await supabase.from("members").update({ archived: true }).eq("id", memberId);
-      if (error) {
-        setMembersBridgeMessage(error.message || "Unable to archive Supabase member.");
-        return;
-      }
-      setDbMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
-    } else {
-      setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
-    }
-
+  const archiveMember = (memberId: string) => {
+    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: true } : member)));
     if (selectedMemberId === memberId) {
       setSelectedMemberId(null);
       setScreen("members");
     }
   };
 
-  const restoreMember = async (memberId: string) => {
-    if (!canArchiveMembers) return;
-
-    if (dbMembersLoaded && dbMembers.some((member) => member.id === memberId) && authProfile?.role === "admin") {
-      const { error } = await supabase.from("members").update({ archived: false }).eq("id", memberId);
-      if (error) {
-        setMembersBridgeMessage(error.message || "Unable to restore Supabase member.");
-        return;
-      }
-      setDbMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
-    } else {
-      setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
-    }
+  const restoreMember = (memberId: string) => {
+    setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
   };
 
-  const updateSelectedMemberPlan = async (plan: MemberPlan) => {
-    if (!selectedMember || !canEditMemberPlan) return;
-
-    if (dbMembersLoaded && dbMembers.some((member) => member.id === selectedMember.id) && authProfile?.role === "admin") {
-      const { error } = await supabase.from("members").update({ member_plan: plan }).eq("id", selectedMember.id);
-      if (error) {
-        setMembersBridgeMessage(error.message || "Unable to update Supabase member plan.");
-        return;
-      }
-      setDbMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
-    } else {
-      setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
-    }
+  const updateSelectedMemberPlan = (plan: MemberPlan) => {
+    if (!selectedMember) return;
+    setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
   };
 
   const goAdminInput = () => {
+    setRole("admin");
     setScreen("adminDash");
   };
 
   const goMemberPrograms = () => {
-    setScreen("programs");
+    setRole("member");
+    setScreen("memberHome");
   };
 
   const openProgram = (programId: string) => {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen("routines");
+    setScreen(role === "admin" ? "programView" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -15033,7 +13697,7 @@ export default function App() {
       };
     }
 
-    const nextSessionNumber = String(getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember.id) + 1);
+    const nextSessionNumber = String(getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember.id) + 1);
     const draft = createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id);
     return {
       ...draft,
@@ -15047,7 +13711,7 @@ export default function App() {
     const sessionNumber = String(draft.sessionNumber || "").trim();
     if (!sessionNumber) return null;
 
-    return activeSavedSessions.find(
+    return savedSessions.find(
       (session) =>
         session.memberId === selectedMember.id &&
         session.programId === selectedProgram.id &&
@@ -15250,7 +13914,7 @@ export default function App() {
   const getAdminDashSessionNumbersForRoutine = (program: Program, routine: Routine | null | undefined) => {
     if (!routine) return [];
     const planned = getRoutinePlannedSessionNumbers(program, routine);
-    const saved = activeSavedSessions
+    const saved = savedSessions
       .filter((session) => session.programId === program.id && session.routineId === routine.id && (!selectedMember || session.memberId === selectedMember.id))
       .map((session) => String(session.sessionNumber || "").trim())
       .filter(Boolean);
@@ -15268,11 +13932,11 @@ export default function App() {
     if (!selectedProgram || adminDashRoutineFilter === "all") return [];
     const routine = selectedProgram.routines.find((item) => item.id === adminDashRoutineFilter) || null;
     return getAdminDashSessionNumbersForRoutine(selectedProgram, routine);
-  }, [adminDashRoutineFilter, activeSavedSessions, selectedMember, selectedProgram]);
+  }, [adminDashRoutineFilter, savedSessions, selectedMember, selectedProgram]);
 
   const loadAdminDashSession = (routine: Routine, sessionNumber: string) => {
     if (!selectedProgram || !selectedMember) return;
-    const existingSession = activeSavedSessions.find(
+    const existingSession = savedSessions.find(
       (session) =>
         session.programId === selectedProgram.id &&
         session.routineId === routine.id &&
@@ -15321,7 +13985,7 @@ export default function App() {
     const trimmedSessionNumber = sessionDraft.sessionNumber.trim();
     if (!trimmedDate || !trimmedSessionNumber) return;
 
-    const existingSession = activeSavedSessions.find(
+    const existingSession = savedSessions.find(
       (session) =>
         session.programId === selectedProgram.id &&
         session.routineId === selectedRoutine.id &&
@@ -15346,150 +14010,56 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
-    if (screen === "account") {
-      return [{ label: "Account" }];
+    if (role === "admin" && screen === "members") {
+      return [{ label: "Admin" }, { label: "Client List" }];
     }
-    if (canUseTrainerWorkspace && screen === "members") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
+    if (role === "admin" && screen === "memberOverview") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
-    if (canUseTrainerWorkspace && screen === "memberOverview") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+    if (role === "admin" && screen === "adminPrograms") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
-    if (canUseTrainerWorkspace && screen === "adminPrograms") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+    if (role === "admin" && screen === "programView") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (canUseTrainerWorkspace && screen === "programView") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+    if (role === "admin" && screen === "builder") {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (canUseTrainerWorkspace && screen === "builder") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "admin" && (screen === "adminDash" || screen === "input")) {
+      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Admin Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")) {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "member" && screen === "memberHome") {
+      return [{ label: "Member" }, { label: "Member View" }];
     }
-    if (screen === "memberHome") {
-      return [{ label: "My Programs" }];
+    if (role === "member" && screen === "openTracker") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker" }];
     }
-    if (screen === "openTracker") {
-      return [{ label: "Gym Tracker" }];
+    if (role === "member" && screen === "trackerWorkouts") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
     }
-    if (screen === "trackerWorkouts") {
-      return [{ label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
+    if (role === "member" && screen === "trackerWorkoutBuilder") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
     }
-    if (screen === "trackerWorkoutBuilder") {
-      return [{ label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
+    if (role === "member" && screen === "trainerSupport") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Trainer Support" }];
     }
-    if (screen === "trainerSupport") {
-      return [{ label: "My Programs", onClick: goMemberPrograms }, { label: "Trainer Support" }];
+    if (role === "member" && screen === "programs") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs" }];
     }
-    if (screen === "programs") {
-      return [{ label: "My Programs" }];
+    if (role === "member" && screen === "routines") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (screen === "routines") {
-      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+    if (role === "member" && screen === "routine") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (screen === "routine") {
-      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (role === "member" && screen === "memberInput") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), { label: "Enter Results" }];
     }
-    if (screen === "memberInput") {
-      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), { label: "Enter Results" }];
-    }
-    if (screen === "graph") {
-      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
+    if (role === "member" && screen === "graph") {
+      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
     }
     return [];
-  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout, canUseTrainerWorkspace]);
-
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-zinc-100 text-zinc-900 flex items-center justify-center px-4">
-        <div className="w-full max-w-[430px] rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
-          <div className="text-sm font-semibold text-zinc-900">Loading Pratt Report...</div>
-          <div className="mt-2 text-xs text-zinc-500">Checking your session.</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!authSession) {
-    return (
-      <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
-        <div className="relative z-0 bg-black">
-          <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-center justify-center overflow-visible">
-            <img
-              src={appBanner}
-              alt="Pratt Report banner"
-              className="w-[58%] max-w-[220px] translate-y-[-20px] object-contain"
-            />
-          </div>
-        </div>
-
-        <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
-          <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Account</div>
-            <h1 className="mt-2 text-2xl font-bold text-zinc-950">{authMode === "login" ? "Login" : "Sign Up"}</h1>
-            <p className="mt-2 text-sm text-zinc-600">
-              {authMode === "login"
-                ? "Log in to access your member workspace."
-                : "Create an account. New users start as Basic Members."}
-            </p>
-
-            <div className="mt-5 flex gap-2">
-              <ToggleButton className="flex-1" active={authMode === "login"} onClick={() => { setAuthMode("login"); setAuthMessage(""); }}>Login</ToggleButton>
-              <ToggleButton className="flex-1" active={authMode === "signup"} onClick={() => { setAuthMode("signup"); setAuthMessage(""); }}>Sign Up</ToggleButton>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {authMode === "signup" ? (
-                <label className="block">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Name</span>
-                  <input
-                    value={authDisplayName}
-                    onChange={(event) => setAuthDisplayName(event.target.value)}
-                    className="mt-1 w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm"
-                    placeholder="Your name"
-                  />
-                </label>
-              ) : null}
-
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Email</span>
-                <input
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  className="mt-1 w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm"
-                  placeholder="you@example.com"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Password</span>
-                <input
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  className="mt-1 w-full rounded-2xl border border-zinc-200 px-3 py-2 text-sm"
-                  placeholder="Password"
-                  type="password"
-                  autoComplete={authMode === "login" ? "current-password" : "new-password"}
-                />
-              </label>
-
-              {authMessage ? (
-                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">{authMessage}</div>
-              ) : null}
-
-              <PrimaryButton onClick={handleAuthSubmit} disabled={authSubmitting} className="w-full">
-                {authSubmitting ? "Working..." : authMode === "login" ? "Login" : "Create Account"}
-              </PrimaryButton>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout]);
 
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
@@ -15505,17 +14075,17 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
-              <div className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap gap-2">
-                  <ToggleButton className="h-9 w-10 shrink-0 px-0 text-center text-sm leading-none" active={screen === "account"} onClick={goAccount} title="Account" aria-label="Account">{profileButtonLabel}</ToggleButton>
-                  {canUseTrainerWorkspace ? (
-                    <ToggleButton className={navButtonClass} active={isClientListScreen} onClick={goAdminMembers}>Client List</ToggleButton>
-                  ) : null}
-                  {canUseTrainerWorkspace ? (
-                    <ToggleButton className={navButtonClass} active={isTrainerDashScreen} onClick={goAdminInput}>Trainer Dash</ToggleButton>
-                  ) : null}
-                  <ToggleButton className={navButtonClass} active={isMemberProgramScreen} onClick={goMemberPrograms}>My Programs</ToggleButton>
-                  <ToggleButton className={navButtonClass} active={isTrackerScreen} onClick={goGymTracker}>Gym Tracker</ToggleButton>
+              <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
+                  </div>
+
+                  <div className="flex flex-nowrap gap-2">
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
+                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
+                  </div>
                 </div>
               </div>
 
@@ -15528,39 +14098,7 @@ export default function App() {
                 ) : null}
               </div>
 
-              {screen === "account" && (
-                <SectionCard title="My Profile">
-                  <div className="space-y-4">
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                      <div className="text-lg font-semibold text-zinc-900">{authProfile?.display_name || authSession?.user?.email || "Signed in"}</div>
-                      <div className="mt-1 text-xs text-zinc-500">{authProfile?.email || authSession?.user?.email || "No email"} • {role} • {authProfile?.member_plan || "basic"}</div>
-                    </div>
-
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm">
-                      <div className="grid gap-2">
-                        <div><span className="font-semibold text-zinc-900">Email:</span> {authProfile?.email || authSession?.user?.email || "—"}</div>
-                        <div><span className="font-semibold text-zinc-900">Role:</span> {role}</div>
-                        <div><span className="font-semibold text-zinc-900">Member Plan:</span> {authProfile?.member_plan || authMember?.member_plan || "basic"}</div>
-                        <div><span className="font-semibold text-zinc-900">Client ID:</span> {authMember?.client_id || authProfile?.client_id || "—"}</div>
-                        <div><span className="font-semibold text-zinc-900">Linked Member:</span> {authMember ? `${authMember.name} (${authMember.client_id})` : "Not linked"}</div>
-                        <div><span className="font-semibold text-zinc-900">Link Status:</span> {authProfile?.client_link_status || "unlinked"}</div>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <SmallButton disabled className="px-2 py-1 text-xs">Link Member Status Coming Soon</SmallButton>
-                        <SmallButton disabled className="px-2 py-1 text-xs">Upgrade Plan Coming Soon</SmallButton>
-                        <SmallButton disabled className="px-2 py-1 text-xs">Change Email Coming Soon</SmallButton>
-                      </div>
-
-                      <div className="mt-5 border-t border-zinc-200 pt-4">
-                        <SmallButton onClick={handleLogout} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Logout</SmallButton>
-                      </div>
-                    </div>
-                  </div>
-                </SectionCard>
-              )}
-
-              {canUseTrainerWorkspace && screen === "members" && (
+              {role === "admin" && screen === "members" && (
                 <SectionCard title="Client List" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
@@ -15578,38 +14116,20 @@ export default function App() {
                         >
                           Active
                         </button>
-                        {canArchiveMembers ? (
-                          <button
-                            onClick={() => {
-                              setViewArchivedMembers(true);
-                              setShowAllMembers(false);
-                            }}
-                            className={`rounded-full border px-3 py-1 ${viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
-                          >
-                            Archived
-                          </button>
-                        ) : null}
+                        <button
+                          onClick={() => {
+                            setViewArchivedMembers(true);
+                            setShowAllMembers(false);
+                          }}
+                          className={`rounded-full border px-3 py-1 ${viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+                        >
+                          Archived
+                        </button>
                       </div>
                     </div>
-                    {canManageMembers ? (
-                      <div className="self-end flex gap-2">
-                        <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                    <div className="font-semibold text-zinc-900">Member Source: {memberSourceLabel}</div>
-                    <div className="mt-1">
-                      DB Members Loaded: {dbMembersLoaded ? dbMembers.length : "not loaded"} • Local Members Available: {members.length}
+                    <div className="self-end flex gap-2">
+                      <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
                     </div>
-                    {membersBridgeMessage ? <div className="mt-1 text-zinc-500">{membersBridgeMessage}</div> : null}
-                    {canImportExportMembers ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <SmallButton onClick={loadSupabaseMembers} disabled={dbMembersLoading}>Refresh DB Members</SmallButton>
-                        <SmallButton onClick={importLocalMembersToSupabase} disabled={dbMembersLoading}>Import Local Members</SmallButton>
-                      </div>
-                    ) : null}
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -15618,23 +14138,21 @@ export default function App() {
                         <button onClick={() => openMemberOverview(member.id)} className="w-full text-left">
                           <div className="font-semibold text-zinc-900">{member.name}</div>
                         </button>
-                        {canManageMembers ? (
-                          <div className="mt-3 flex gap-2">
-                            {member.archived ? (
-                              <SmallButton onClick={() => restoreMember(member.id)}>Restore</SmallButton>
-                            ) : (
-                              <>
-                                {canArchiveMembers ? <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton> : null}
-                                {canDeleteMembers ? <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton> : null}
-                              </>
-                            )}
-                          </div>
-                        ) : null}
+                        <div className="mt-3 flex gap-2">
+                          {member.archived ? (
+                            <SmallButton onClick={() => restoreMember(member.id)}>Restore</SmallButton>
+                          ) : (
+                            <>
+                              <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton>
+                              <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
 
-                  {!memberSearch.trim() && !showAllMembers && displayedMembers.filter((member) => (canArchiveMembers && viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
+                  {!memberSearch.trim() && !showAllMembers && members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
                     <div className="mt-4">
                       <SmallButton onClick={() => setShowAllMembers(true)}>Show All Clients</SmallButton>
                     </div>
@@ -15642,7 +14160,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {canUseTrainerWorkspace && screen === "memberOverview" && selectedMember && (
+              {role === "admin" && screen === "memberOverview" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
@@ -15667,21 +14185,11 @@ export default function App() {
                                     className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                                   />
                                 </div>
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite/Login Email</div>
-                                  <input
-                                    value={editedMemberInviteEmail}
-                                    onChange={(event) => setEditedMemberInviteEmail(event.target.value)}
-                                    placeholder="optional"
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                  />
-                                </div>
                               </>
                             ) : (
                               <>
                                 <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
                                 <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
-                                {selectedMember.inviteEmail ? <div className="text-xs text-zinc-500">Invite Email {selectedMember.inviteEmail}</div> : null}
                               </>
                             )}
                           </div>
@@ -15690,44 +14198,18 @@ export default function App() {
                             {isEditingMember ? (
                               <>
                                 <SmallButton
-                                  onClick={async () => {
+                                  onClick={() => {
                                     const nextName = editedMemberName.trim();
                                     const nextClientId = editedMemberClientId.trim();
-                                    const nextInviteEmail = editedMemberInviteEmail.trim().toLowerCase();
                                     if (!nextName || !nextClientId) return;
 
-                                    if (dbMembersLoaded && dbMembers.some((member) => member.id === selectedMember.id) && authProfile?.role === "admin") {
-                                      const { error } = await supabase
-                                        .from("members")
-                                        .update({
-                                          name: nextName,
-                                          client_id: nextClientId,
-                                          invite_email: nextInviteEmail || null,
-                                        })
-                                        .eq("id", selectedMember.id);
-
-                                      if (error) {
-                                        setMembersBridgeMessage(error.message || "Unable to update Supabase member.");
-                                        return;
-                                      }
-
-                                      setDbMembers((current) =>
-                                        current.map((member) =>
-                                          member.id === selectedMember.id
-                                            ? { ...member, name: nextName, clientId: nextClientId, inviteEmail: nextInviteEmail }
-                                            : member
-                                        )
-                                      );
-                                    } else {
-                                      setMembers((current) =>
-                                        current.map((member) =>
-                                          member.id === selectedMember.id
-                                            ? { ...member, name: nextName, clientId: nextClientId, inviteEmail: nextInviteEmail }
-                                            : member
-                                        )
-                                      );
-                                    }
-
+                                    setMembers((current) =>
+                                      current.map((member) =>
+                                        member.id === selectedMember.id
+                                          ? { ...member, name: nextName, clientId: nextClientId }
+                                          : member
+                                      )
+                                    );
                                     setIsEditingMember(false);
                                   }}
                                 >
@@ -15737,114 +14219,31 @@ export default function App() {
                                   onClick={() => {
                                     setEditedMemberName(selectedMember.name);
                                     setEditedMemberClientId(selectedMember.clientId);
-                                    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
                                     setIsEditingMember(false);
                                   }}
                                 >
                                   Cancel
                                 </SmallButton>
                               </>
-                            ) : canEditMemberIdentity ? (
-                              <SmallButton onClick={() => {
-                                setEditedMemberName(selectedMember.name);
-                                setEditedMemberClientId(selectedMember.clientId);
-                                setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
-                                setIsEditingMember(true);
-                              }}>Edit</SmallButton>
-                            ) : null}
+                            ) : (
+                              <SmallButton onClick={() => setIsEditingMember(true)}>Edit</SmallButton>
+                            )}
                           </div>
                         </div>
                       </div>
 
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Status</div>
-                        <div className="mb-3 text-xs text-zinc-500">
-                          {canEditMemberPlan ? "Controls what this member can access in Member View." : "Visible for trainer context. Admins manage member type and account details."}
+                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Type</div>
+                        <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
+                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
+                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
                         </div>
-                        {canEditMemberPlan ? (
-                          <div className="grid gap-2 sm:grid-cols-3">
-                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
-                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
-                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
-                          </div>
-                        ) : null}
                         <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                           Current: {getMemberPlanLabel(selectedMember.memberPlan)}
                         </div>
                       </div>
-
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Account Management</div>
-                        <div className="space-y-1 text-xs text-zinc-600">
-                          <div><span className="font-semibold text-zinc-900">Client ID:</span> {selectedMember.clientId}</div>
-                          <div><span className="font-semibold text-zinc-900">Invite/Login Email:</span> {selectedMember.inviteEmail || "Not set"}</div>
-                          <div><span className="font-semibold text-zinc-900">Member Status:</span> {getMemberPlanLabel(selectedMember.memberPlan)}</div>
-                          <div><span className="font-semibold text-zinc-900">Archived:</span> {selectedMember.archived ? "Yes" : "No"}</div>
-                        </div>
-
-                        {canManageBusiness ? (
-                          <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <div>
-                                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Profile Role</div>
-                                <div className="mt-1 text-xs text-zinc-500">Set this member's signed-in profile role when an account is linked.</div>
-                              </div>
-                              <SmallButton onClick={loadSupabaseProfiles} disabled={dbProfilesLoading} className="px-2 py-1 text-xs">Refresh</SmallButton>
-                            </div>
-                            {profilesBridgeMessage ? <div className="mt-2 text-xs text-zinc-500">{profilesBridgeMessage}</div> : null}
-                            {selectedMemberProfile ? (
-                              <div className="mt-3 rounded-xl border border-zinc-200 bg-white p-3">
-                                <div className="text-sm font-semibold text-zinc-900">{selectedMemberProfile.display_name || selectedMemberProfile.email || selectedMember.name}</div>
-                                <div className="mt-1 text-xs text-zinc-500">{selectedMemberProfile.email || selectedMember.inviteEmail || "No email"} • current role: {selectedMemberProfile.role}</div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  {(["admin", "trainer", "member"] as Role[]).map((profileRole) => (
-                                    <SmallButton
-                                      key={profileRole}
-                                      onClick={() => updateProfileRoleById(selectedMemberProfile.id, profileRole)}
-                                      disabled={dbProfilesLoading || selectedMemberProfile.role === profileRole}
-                                      className="px-2 py-1 text-xs"
-                                    >
-                                      Set {profileRole}
-                                    </SmallButton>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mt-3 rounded-xl border border-dashed border-zinc-300 bg-white p-3 text-xs text-zinc-500">
-                                No signed-in profile is linked to this member yet. Add or confirm the member's invite/login email, then have them create an account.
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="mt-4 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-500">Account details are read-only for trainers.</div>
-                        )}
-                      </div>
-
-                      {canImportExportMembers ? (
-                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                          <div className="text-sm font-semibold text-amber-950">Migration Diagnostics</div>
-                          <div className="mt-1 text-xs text-amber-800">
-                            Use this from Client Overview before testing program/session ownership. It imports members/program blueprints/sessions in order and prints the exact stopping point if Supabase rejects anything.
-                          </div>
-                          <div className="mt-3 grid gap-2 text-xs text-amber-900 sm:grid-cols-2">
-                            <div className="rounded-xl bg-white/70 px-3 py-2">Expected: {getImportExpectedCounts().programs} programs • {getImportExpectedCounts().sessions} sessions • {getImportExpectedCounts().sessionEntries} entries</div>
-                            <div className="rounded-xl bg-white/70 px-3 py-2">DB Loaded: {dbProgramsLoaded ? dbPrograms.length : "programs not loaded"} programs • {dbSessionsLoaded ? dbSavedSessions.length : "sessions not loaded"} sessions</div>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <SmallButton onClick={loadSupabaseMembers} disabled={dbMembersLoading}>Refresh Members</SmallButton>
-                            <SmallButton onClick={loadSupabasePrograms} disabled={dbProgramsLoading}>Refresh Programs</SmallButton>
-                            <SmallButton onClick={loadSupabaseSessions} disabled={dbSessionsLoading || !dbProgramsLoaded}>Refresh Sessions</SmallButton>
-                            <SmallButton onClick={runFullImportDiagnostic} disabled={dbMembersLoading || dbProgramsLoading || dbSessionsLoading}>Run Full Import Diagnostic</SmallButton>
-                          </div>
-                          {importDiagnosticsLog.length ? (
-                            <div className="mt-3 max-h-56 overflow-auto rounded-xl border border-amber-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-zinc-700">
-                              {importDiagnosticsLog.map((line, index) => (
-                                <div key={`${line}-${index}`}>{line}</div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
 
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -15866,7 +14265,7 @@ export default function App() {
                                   <div>Sessions / Routine</div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(activeSavedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
+                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
                                   <div>Total Sessions</div>
                                 </div>
                               </div>
@@ -15903,15 +14302,13 @@ export default function App() {
                 </div>
               )}
 
-              {canUseTrainerWorkspace && screen === "adminPrograms" && selectedMember && (
+              {role === "admin" && screen === "adminPrograms" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="All Programs" collapsible>
                     <div className="space-y-3">
                       <PrimaryButton
-                        onClick={async () => {
-                          if (!canEditPrograms) return;
-
-                          const nextProgramIndex = displayedPrograms.length + 1;
+                        onClick={() => {
+                          const nextProgramIndex = programs.length + 1;
                           const newProgram: Program = {
                             id: uid(),
                             name: `Program ${nextProgramIndex}`,
@@ -15923,23 +14320,8 @@ export default function App() {
                             inputMode: getDefaultProgramInputModeForMember(selectedMember),
                             memberId: selectedMember?.id,
                           };
-
-                          if (dbProgramsLoaded && dbMembersLoaded && dbMembers.some((member) => member.id === selectedMember.id)) {
-                            try {
-                              const insertedProgramId = await insertSupabaseProgramBlueprint(newProgram, selectedMember.id);
-                              await loadSupabasePrograms();
-                              setSelectedProgramId(insertedProgramId);
-                              setProgramsBridgeMessage("Created Supabase program blueprint.");
-                            } catch (error: any) {
-                              setProgramsBridgeMessage(error?.message || "Unable to create Supabase program. Added locally instead.");
-                              setPrograms((prev) => [...prev, newProgram]);
-                              setSelectedProgramId(newProgram.id);
-                            }
-                          } else {
-                            setPrograms((prev) => [...prev, newProgram]);
-                            setSelectedProgramId(newProgram.id);
-                          }
-
+                          setPrograms((prev) => [...prev, newProgram]);
+                          setSelectedProgramId(newProgram.id);
                           setSelectedRoutineId(newProgram.routines[0]?.id || null);
                           setSelectedBlockId(newProgram.routines[0]?.blocks[0]?.id || null);
                           setBuilderSource("adminPrograms");
@@ -15949,50 +14331,6 @@ export default function App() {
                       >
                         + New Program
                       </PrimaryButton>
-
-                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                        <div className="font-semibold text-zinc-900">Session Source: {sessionSourceLabel}</div>
-                        <div className="mt-1">
-                          DB Sessions Loaded: {dbSessionsLoaded ? dbSavedSessions.length : "not loaded"} • Local Sessions Available: {savedSessions.length} • Active: {activeSavedSessions.length}
-                        </div>
-                        {sessionsBridgeMessage ? <div className="mt-1 text-zinc-500">{sessionsBridgeMessage}</div> : null}
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <SmallButton onClick={loadSupabaseSessions} disabled={dbSessionsLoading || !dbProgramsLoaded}>Refresh DB Sessions</SmallButton>
-                          {canImportExportMembers ? (
-                            <>
-                              <SmallButton onClick={() => { void importLocalSessionsToSupabase(); }} disabled={dbSessionsLoading}>Import Local Sessions</SmallButton>
-                              <SmallButton onClick={runFullImportDiagnostic} disabled={dbSessionsLoading || dbProgramsLoading}>Run Full Import Diagnostic</SmallButton>
-                            </>
-                          ) : null}
-                        </div>
-                        {importDiagnosticsLog.length ? (
-                          <div className="mt-3 max-h-48 overflow-auto rounded-xl border border-zinc-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-zinc-700">
-                            {importDiagnosticsLog.map((line, index) => (
-                              <div key={`${line}-${index}`}>{line}</div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-
-                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-                        <div className="font-semibold text-zinc-900">Program Source: {programSourceLabel}</div>
-                        <div className="mt-1">
-                          DB Programs Loaded: {dbProgramsLoaded ? dbPrograms.length : "not loaded"} • Local Programs Available: {programs.length} • Displayed: {displayedPrograms.length}
-                        </div>
-                        <div className="mt-1">
-                          Expected Import: {getImportExpectedCounts().programs} programs • {getImportExpectedCounts().routines} routines • {getImportExpectedCounts().blocks} blocks • {getImportExpectedCounts().sessions} sessions • {getImportExpectedCounts().sessionEntries} entries
-                        </div>
-                        {dbProgramsLoaded && dbPrograms.length && displayedPrograms.length > dbPrograms.length ? (
-                          <div className="mt-1 text-amber-700">Some local-only programs are still being shown until their Supabase import is complete.</div>
-                        ) : null}
-                        {programsBridgeMessage ? <div className="mt-1 text-zinc-500">{programsBridgeMessage}</div> : null}
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <SmallButton onClick={loadSupabasePrograms} disabled={dbProgramsLoading}>Refresh DB Programs</SmallButton>
-                          {canImportExportMembers ? (
-                            <SmallButton onClick={() => { void importLocalProgramsToSupabase(); }} disabled={dbProgramsLoading}>Import Local Programs</SmallButton>
-                          ) : null}
-                        </div>
-                      </div>
 
                       {adminSortedPrograms.map((program) => (
                         <div key={program.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -16009,7 +14347,7 @@ export default function App() {
                             >
                               <div className="font-semibold text-zinc-900">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(activeSavedSessions, program.id, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </button>
                             <div className={`text-xs font-semibold uppercase tracking-wide ${
                               program.status === "active"
@@ -16024,17 +14362,11 @@ export default function App() {
                           <div className="mt-3 flex gap-2">
                             {program.status !== "closed" ? (
                               <SmallButton
-                                onClick={async () => {
-                                  const nextStatus = program.status === "paused" ? "active" : "paused";
-                                  if (dbProgramsLoaded && dbPrograms.some((item) => item.id === program.id)) {
-                                    const updated = await updateSupabaseProgramStatus(program.id, nextStatus);
-                                    if (updated) return;
-                                  }
-
-                                  updatePrograms((prev) =>
+                                onClick={() => {
+                                  setPrograms((prev) =>
                                     prev.map((item) =>
                                       item.id === program.id
-                                        ? { ...item, status: nextStatus }
+                                        ? { ...item, status: item.status === "paused" ? "active" : "paused" }
                                         : item
                                     )
                                   );
@@ -16046,16 +14378,10 @@ export default function App() {
 
                             {program.status === "active" ? (
                               <SmallButton
-                                onClick={async () => {
+                                onClick={() => {
                                   const confirmClose = window.confirm("Are you sure you want to close this program? This action cannot be undone.");
                                   if (!confirmClose) return;
-
-                                  if (dbProgramsLoaded && dbPrograms.some((item) => item.id === program.id)) {
-                                    const updated = await updateSupabaseProgramStatus(program.id, "closed");
-                                    if (updated) return;
-                                  }
-
-                                  updatePrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
+                                  setPrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
                                 }}
                                 className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                               >
@@ -16063,19 +14389,10 @@ export default function App() {
                               </SmallButton>
                             ) : (
                               <SmallButton
-                                onClick={async () => {
+                                onClick={() => {
                                   const confirmDelete = window.confirm("Are you sure you want to delete this program? This action cannot be undone.");
                                   if (!confirmDelete) return;
-
-                                  if (dbProgramsLoaded && dbPrograms.some((item) => item.id === program.id)) {
-                                    const deleted = await deleteSupabaseProgram(program.id);
-                                    if (deleted) {
-                                      if (selectedProgramId === program.id) setSelectedProgramId(null);
-                                      return;
-                                    }
-                                  }
-
-                                  updatePrograms((prev) => prev.filter((item) => item.id !== program.id));
+                                  setPrograms((prev) => prev.filter((item) => item.id !== program.id));
                                   if (selectedProgramId === program.id) {
                                     setSelectedProgramId(null);
                                   }
@@ -16094,7 +14411,7 @@ export default function App() {
               )}
 
 
-              {canUseTrainerWorkspace && screen === "programView" && selectedProgram && (
+              {role === "admin" && screen === "programView" && selectedProgram && (
                 <div className="space-y-6">
                   <SectionCard title="Program Summary" collapsible>
                     <div className="space-y-4">
@@ -16116,7 +14433,7 @@ export default function App() {
                           <div>Sessions / Routine</div>
                         </div>
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
+                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
                           <div>Total Sessions</div>
                         </div>
                       </div>
@@ -16140,7 +14457,7 @@ export default function App() {
                             setScreen("adminDash");
                           }}
                         >
-                          Open Trainer Dash
+                          Open Admin Dash
                         </SmallButton>
                       </div>
                     </div>
@@ -16152,7 +14469,7 @@ export default function App() {
                 </div>
               )}
 
-              {canUseTrainerWorkspace && screen === "builder" && (
+              {role === "admin" && screen === "builder" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Builder Workspace</div>
@@ -16399,8 +14716,8 @@ export default function App() {
                 </div>
               )}
 
-              {canUseTrainerWorkspace && (screen === "adminDash" || screen === "input") && (
-                <SectionCard title="Trainer Dash" collapsible>
+              {role === "admin" && (screen === "adminDash" || screen === "input") && (
+                <SectionCard title="Admin Dash" collapsible>
                   <div className="space-y-4">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
                       Choose a client, program, routine, and session. Leave Routine or Session on All to review the broader scope; choose a session to open the fast data-entry form.
@@ -16518,7 +14835,7 @@ export default function App() {
                                 {renderReadOnlyProgramDesign({ ...selectedProgram, routines: [routine] })}
                                 <div className="mt-3 flex flex-wrap gap-2">
                                   {routineSessions.map((sessionNumber) => {
-                                    const hasSavedSession = activeSavedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
+                                    const hasSavedSession = savedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
                                     return (
                                       <button
                                         key={sessionNumber}
@@ -16550,7 +14867,7 @@ export default function App() {
                                 {renderReadOnlyProgramDesign({ ...selectedProgram, routines: [routine] })}
                                 <div className="mt-3 grid grid-cols-4 gap-2">
                                   {routineSessions.map((sessionNumber) => {
-                                    const hasSavedSession = activeSavedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
+                                    const hasSavedSession = savedSessions.some((session) => session.programId === selectedProgram.id && session.routineId === routine.id && session.memberId === selectedMember?.id && String(session.sessionNumber || "").trim() === sessionNumber);
                                     return (
                                       <button
                                         key={sessionNumber}
@@ -16654,7 +14971,7 @@ export default function App() {
               )}
 
 
-              {screen === "memberHome" && selectedMember && (
+              {role === "member" && screen === "memberHome" && selectedMember && (
                 <SectionCard title="Member View" collapsible>
                   <div className="space-y-3">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -16693,7 +15010,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "openTracker" && (
+              {role === "member" && screen === "openTracker" && (
                 <SectionCard
                   title="Gym Tracker"
                   collapsible
@@ -17067,7 +15384,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "trackerWorkouts" && (
+              {role === "member" && screen === "trackerWorkouts" && (
                 <SectionCard title="Workouts" collapsible>
                   <div className="space-y-5">
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -17116,7 +15433,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
+              {role === "member" && screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
                 <>
                   <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2">
                     <button onClick={() => { setScreen("openTracker"); setTrackerTab("exercises"); }} className="rounded-xl bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-600 transition">My Exercises</button>
@@ -17277,7 +15594,7 @@ export default function App() {
                 </>
               )}
 
-              {screen === "trainerSupport" && (
+              {role === "member" && screen === "trainerSupport" && (
                 <SectionCard title="Trainer Support" collapsible>
                   <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-600">
                     Remote trainer support shell is installed. Messaging, trainer notes, and support requests will be connected in a later pass.
@@ -17642,7 +15959,7 @@ export default function App() {
                 </div>
               )}
 
-              {screen === "programs" && (
+              {role === "member" && screen === "programs" && (
                 <SectionCard title="My Programs" collapsible>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members start here and open the most recent program first.</div>
@@ -17653,7 +15970,7 @@ export default function App() {
                             <div>
                               <div className="text-lg font-semibold">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(activeSavedSessions, program.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -17667,12 +15984,12 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "routines" && selectedProgram && (
+              {role === "member" && screen === "routines" && selectedProgram && (
                 <SectionCard title={`${selectedProgram.name} Routines`}>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(activeSavedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
+                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
                     </div>
                     {selectedProgramIsComplete ? (
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">Program Complete</div>
@@ -17693,7 +16010,7 @@ export default function App() {
                                   {isNextRoutine ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                 </div>
                                 <div className="text-sm text-zinc-500">{routine.blocks.length} blocks</div>
-                                <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(activeSavedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
+                                <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(savedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
                               </div>
                               <div className="flex flex-col items-end gap-1">
                                 <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -17708,7 +16025,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "routine" && selectedRoutine && (
+              {role === "member" && screen === "routine" && selectedRoutine && (
                 <SectionCard title={selectedRoutine.label}>
                   <div className="space-y-3">
                     {selectedRoutine.blocks.map((block) =>
@@ -17760,7 +16077,7 @@ export default function App() {
               )}
 
 
-              {screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
+              {role === "member" && screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
                 <SectionCard title={`${selectedRoutine.label} Results`}>
                   <div className="space-y-4">
                     <div className="grid grid-cols-[minmax(0,2fr)_minmax(80px,1fr)] gap-3">
@@ -17851,7 +16168,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "graph" && selectedRoutine && selectedBlock && (
+              {role === "member" && screen === "graph" && selectedRoutine && selectedBlock && (
                 <SectionCard title={`${selectedRoutine.label} • ${selectedBlock.title}`}>
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
