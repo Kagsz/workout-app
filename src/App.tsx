@@ -11222,7 +11222,7 @@ export default function App() {
   const profileButtonLabel = role === "admin" ? "A" : role === "trainer" ? "T" : "M";
   const accountRoleLabel = role === "admin" ? "Admin" : role === "trainer" ? "Trainer" : "Member";
   const accountEmailPlaceholder = "Email will appear after account connection";
-  const [screen, setScreen] = useState<Screen>("members");
+  const [screen, setScreen] = useState<Screen>("memberHome");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
     const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
@@ -13456,6 +13456,10 @@ export default function App() {
     );
   };
 
+  const goHome = () => {
+    setScreen("memberHome");
+  };
+
   const goAccount = () => {
     setScreen("account");
   };
@@ -13537,18 +13541,18 @@ export default function App() {
 
   const backLabel = useMemo(() => {
     if (canUseTrainerWorkspace) {
-      if (screen === "memberOverview") return "Back to Client List";
+      if (screen === "memberOverview") return "Back to Members";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
       if (screen === "programView") return "Back to All Programs";
       if (screen === "builder") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to All Programs";
-      if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Client List";
+      if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Members";
       return "";
     }
     if (screen === "programs") return "";
     if (screen === "openTracker") return "";
     if (screen === "trackerWorkouts") return "Back to Gym Tracker";
     if (screen === "trackerWorkoutBuilder") return trackerWorkoutReturnCycleId ? "Back to Cycle" : "Back to Workouts";
-    if (screen === "trainerSupport") return "Back to Member View";
+    if (screen === "trainerSupport") return "Back to My Overview";
     if (screen === "routines") return "Back to My Programs";
     if (screen === "routine") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to My Programs";
     if (screen === "memberInput") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
@@ -13656,7 +13660,7 @@ export default function App() {
 
   const previewRole = (nextRole: Role) => {
     setRole(nextRole);
-    setScreen(nextRole === "member" ? "memberHome" : "members");
+    setScreen("memberHome");
   };
 
   const openProgram = (programId: string) => {
@@ -14096,59 +14100,107 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
+    if (screen === "memberHome") {
+      return [{ label: "My Overview" }];
+    }
     if (screen === "account") {
       return [{ label: "My Account" }];
     }
     if (canUseTrainerWorkspace && screen === "members") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
+      return [{ label: "Trainer Dash" }, { label: "Members" }];
     }
     if (canUseTrainerWorkspace && screen === "memberOverview") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+      return [
+        { label: "Trainer Dash", onClick: goAdminMembers },
+        { label: "Members", onClick: goAdminMembers },
+        ...(selectedMember ? [{ label: selectedMember.name }] : []),
+      ];
     }
     if (canUseTrainerWorkspace && screen === "adminPrograms") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+      return [
+        { label: "Trainer Dash", onClick: goAdminMembers },
+        { label: "Members", onClick: goAdminMembers },
+        ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []),
+        { label: "Programs" },
+      ];
     }
     if (canUseTrainerWorkspace && screen === "programView") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+      return [
+        { label: "Trainer Dash", onClick: goAdminMembers },
+        { label: "Members", onClick: goAdminMembers },
+        ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []),
+        { label: "Programs", onClick: goAdminPrograms },
+        ...(selectedProgram ? [{ label: selectedProgram.name }] : []),
+      ];
     }
     if (canUseTrainerWorkspace && screen === "builder") {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [
+        { label: "Trainer Dash", onClick: goAdminMembers },
+        { label: "Members", onClick: goAdminMembers },
+        ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []),
+        ...(selectedProgram
+          ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }]
+          : [{ label: "New Program" }]),
+        { label: "Edit" },
+        ...(selectedRoutine ? [{ label: selectedRoutine.label }] : []),
+      ];
     }
     if (canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")) {
-      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
-    }
-    if (role === "member" && screen === "memberHome") {
-      return [{ label: "Member" }, { label: "Member View" }];
+      return [
+        { label: "Trainer Dash", onClick: goAdminMembers },
+        { label: "Sessions" },
+        ...(selectedMember ? [{ label: selectedMember.name }] : []),
+        ...(selectedProgram ? [{ label: selectedProgram.name }] : []),
+        ...(selectedRoutine ? [{ label: selectedRoutine.label }] : []),
+      ];
     }
     if (screen === "openTracker") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker" }];
+      return [{ label: "Gym Tracker" }];
     }
     if (screen === "trackerWorkouts") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
+      return [{ label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
     }
     if (screen === "trackerWorkoutBuilder") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
+      return [
+        { label: "Gym Tracker", onClick: () => setScreen("openTracker") },
+        { label: "Workouts", onClick: () => setScreen("trackerWorkouts") },
+        ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : []),
+      ];
     }
-    if (role === "member" && screen === "trainerSupport") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "Trainer Support" }];
+    if (screen === "trainerSupport") {
+      return [{ label: "My Overview", onClick: goHome }, { label: "Trainer Support" }];
     }
     if (screen === "programs") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs" }];
+      return [{ label: "My Programs" }];
     }
     if (screen === "routines") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+      return [{ label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
     if (screen === "routine") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+      return [
+        { label: "My Programs", onClick: goMemberPrograms },
+        ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []),
+        ...(selectedRoutine ? [{ label: selectedRoutine.label }] : []),
+      ];
     }
     if (screen === "memberInput") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), { label: "Enter Results" }];
+      return [
+        { label: "My Programs", onClick: goMemberPrograms },
+        ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []),
+        ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []),
+        { label: "Enter Results" },
+      ];
     }
     if (screen === "graph") {
-      return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
+      return [
+        { label: "My Programs", onClick: goMemberPrograms },
+        ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []),
+        ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []),
+        ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : []),
+      ];
     }
     return [];
-  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout, canUseTrainerWorkspace]);
+  }, [screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout, canUseTrainerWorkspace]);
 
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
@@ -14167,6 +14219,48 @@ export default function App() {
               <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <ToggleButton
+                    className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                    active={screen === "memberHome"}
+                    onClick={goHome}
+                  >
+                    My Overview
+                  </ToggleButton>
+
+                  {canUseTrainerWorkspace ? (
+                    <ToggleButton
+                      className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                      active={
+                        screen === "members" ||
+                        screen === "memberOverview" ||
+                        screen === "adminPrograms" ||
+                        screen === "programView" ||
+                        screen === "builder" ||
+                        screen === "adminDash" ||
+                        screen === "input"
+                      }
+                      onClick={goAdminMembers}
+                    >
+                      Trainer Dash
+                    </ToggleButton>
+                  ) : null}
+
+                  <ToggleButton
+                    className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                    active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"}
+                    onClick={goMemberPrograms}
+                  >
+                    My Programs
+                  </ToggleButton>
+
+                  <ToggleButton
+                    className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                    active={screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder"}
+                    onClick={goGymTracker}
+                  >
+                    Gym Tracker
+                  </ToggleButton>
+
+                  <ToggleButton
                     className="h-9 w-9 shrink-0 rounded-full px-0 text-center text-xs"
                     active={screen === "account"}
                     onClick={goAccount}
@@ -14175,17 +14269,6 @@ export default function App() {
                   >
                     {profileButtonLabel}
                   </ToggleButton>
-
-                  {canUseTrainerWorkspace ? (
-                    <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder"} onClick={goAdminMembers}>Client List</ToggleButton>
-                  ) : null}
-
-                  {canUseTrainerWorkspace ? (
-                    <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "adminDash" || screen === "input"} onClick={goAdminInput}>Trainer Dash</ToggleButton>
-                  ) : null}
-
-                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"} onClick={goMemberPrograms}>My Programs</ToggleButton>
-                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder"} onClick={goGymTracker}>Gym Tracker</ToggleButton>
                 </div>
 
                 <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-100 pt-3">
@@ -14267,11 +14350,11 @@ export default function App() {
               )}
 
               {canUseTrainerWorkspace && screen === "members" && (
-                <SectionCard title="Client List" collapsible>
+                <SectionCard title="Members" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
                       <div>
-                        <Label>Search Client List</Label>
+                        <Label>Search Members</Label>
                         <TextInput value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search by name or ID" />
                       </div>
                       <div className="flex gap-2 text-sm">
@@ -14786,7 +14869,8 @@ export default function App() {
                     </div>
                   </SectionCard>
 
-                  <div id="selected-routine-builder" className="scroll-mt-4">\n                  <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible>
+                  <div id="selected-routine-builder" className="scroll-mt-4">
+                  <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible>
                     {selectedRoutine ? (
                       <div className="space-y-5">
                         <div className="grid gap-3 md:grid-cols-[1fr_auto]">
@@ -15174,43 +15258,129 @@ export default function App() {
               )}
 
 
-              {role === "member" && screen === "memberHome" && selectedMember && (
-                <SectionCard title="Member View" collapsible>
-                  <div className="space-y-3">
-                    <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
-                      {getMemberPlanLabel(selectedMember.memberPlan)}
+              {screen === "memberHome" && selectedMember && (
+                <div className="space-y-4">
+                  <SectionCard title="My Overview" collapsible>
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Welcome back</div>
+                            <div className="mt-1 text-xl font-semibold text-zinc-900">{selectedMember.name}</div>
+                            <div className="mt-1 text-sm text-zinc-500">{getMemberPlanLabel(selectedMember.memberPlan)}</div>
+                          </div>
+                          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-900 text-sm font-bold text-white">
+                            {selectedMember.name.trim().charAt(0).toUpperCase() || profileButtonLabel}
+                          </div>
+                        </div>
+                      </div>
+
+                      {activeAdminProgram ? (
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Current Program</div>
+                              <div className="mt-1 text-lg font-semibold text-zinc-900">{activeAdminProgram.name}</div>
+                              <div className="mt-1 text-sm text-zinc-500">
+                                {getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)} sessions complete
+                              </div>
+                            </div>
+                            <div className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
+                              {activeAdminProgram.status}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100">
+                            <div
+                              className="h-full rounded-full bg-zinc-900"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Math.round(
+                                    (getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id) /
+                                      Math.max(1, getProgramPlannedSessionTotal(activeAdminProgram))) *
+                                      100
+                                  )
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <PrimaryButton
+                              onClick={() => {
+                                setSelectedProgramId(activeAdminProgram.id);
+                                const nextRoutine = activeAdminProgram.routines.find((routine) => routine.id === nextRoutineId) || activeAdminProgram.routines[0];
+                                setSelectedRoutineId(nextRoutine?.id || null);
+                                setScreen(nextRoutine ? "routine" : "routines");
+                              }}
+                            >
+                              Continue Program
+                            </PrimaryButton>
+                            <SmallButton onClick={goMemberPrograms}>View My Programs</SmallButton>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-4">
+                          <div className="text-sm font-semibold text-zinc-900">No active structured program</div>
+                          <div className="mt-1 text-sm text-zinc-500">Your assigned program will appear here when one is active.</div>
+                        </div>
+                      )}
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Next Workout</div>
+                          <div className="mt-2 text-base font-semibold text-zinc-900">
+                            {activeAdminProgram
+                              ? activeAdminProgram.routines.find((routine) => routine.id === nextRoutineId)?.label ||
+                                activeAdminProgram.routines[0]?.label ||
+                                "Program routine"
+                              : "No program workout scheduled"}
+                          </div>
+                          <div className="mt-1 text-sm text-zinc-500">
+                            {activeAdminProgram ? "Continue from your current program progress." : "Use Gym Tracker for open training."}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Recent Gym Tracker Activity</div>
+                          <div className="mt-2 text-base font-semibold text-zinc-900">
+                            {trackerExercises
+                              .filter((exercise) => exercise.memberId === selectedMember.id)
+                              .reduce((total, exercise) => total + (exercise.entries?.length || 0), 0) +
+                              trackerWorkouts
+                                .filter((workout) => workout.memberId === selectedMember.id)
+                                .reduce(
+                                  (total, workout) =>
+                                    total +
+                                    (workout.exerciseSlots || []).reduce(
+                                      (slotTotal, slot) => slotTotal + (slot.entries?.length || 0),
+                                      0
+                                    ),
+                                  0
+                                )} logged entries
+                          </div>
+                          <div className="mt-1 text-sm text-zinc-500">Your open-workout activity is summarized here.</div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Quick Action</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <PrimaryButton
+                            onClick={() => {
+                              setTrackerTab("exercises");
+                              setScreen("openTracker");
+                            }}
+                          >
+                            Open Gym Tracker
+                          </PrimaryButton>
+                          <SmallButton onClick={goAccount}>My Account</SmallButton>
+                        </div>
+                      </div>
                     </div>
-
-                    <button onClick={() => { setTrackerTab("exercises"); setScreen("openTracker"); }} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
-                      <div className="text-lg font-semibold text-zinc-900">Gym Tracker</div>
-                      <div className="mt-1 text-sm text-zinc-500">Track custom workouts and exercise metrics.</div>
-                    </button>
-
-                    {(selectedMember.memberPlan || "direct") === "basic" ? (
-                      <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-100 p-4 text-left text-zinc-400">
-                        <div className="text-lg font-semibold">🔒 My Programs</div>
-                        <div className="mt-1 text-sm">Upgrade to Premium to unlock structured programs.</div>
-                      </div>
-                    ) : (
-                      <button onClick={() => setScreen("programs")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
-                        <div className="text-lg font-semibold text-zinc-900">My Programs</div>
-                        <div className="mt-1 text-sm text-zinc-500">View assigned structured programs.</div>
-                      </button>
-                    )}
-
-                    {(selectedMember.memberPlan || "direct") === "basic" ? (
-                      <div className="w-full rounded-2xl border border-zinc-200 bg-zinc-100 p-4 text-left text-zinc-400">
-                        <div className="text-lg font-semibold">🔒 Trainer Support</div>
-                        <div className="mt-1 text-sm">Upgrade to Premium to unlock remote trainer support.</div>
-                      </div>
-                    ) : (selectedMember.memberPlan || "direct") === "premium" ? (
-                      <button onClick={() => setScreen("trainerSupport")} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
-                        <div className="text-lg font-semibold text-zinc-900">Trainer Support</div>
-                        <div className="mt-1 text-sm text-zinc-500">Remote trainer support placeholder.</div>
-                      </button>
-                    ) : null}
-                  </div>
-                </SectionCard>
+                  </SectionCard>
+                </div>
               )}
 
               {screen === "openTracker" && (
