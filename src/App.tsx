@@ -13938,13 +13938,32 @@ export default function App() {
     });
   };
 
-  const renderReadOnlyProgramDesign = (program: Program) => (
+  const renderReadOnlyProgramDesign = (program: Program, allowRoutineEdit = false) => (
     <div className="space-y-4">
       {program.routines.map((routine) => (
         <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-zinc-900">{routine.label}</div>
-            <div className="text-xs text-zinc-500">{routine.blocks.length} blocks</div>
+            <div>
+              <div className="text-sm font-semibold text-zinc-900">{routine.label}</div>
+              <div className="mt-0.5 text-xs text-zinc-500">{routine.blocks.length} blocks</div>
+            </div>
+            {allowRoutineEdit ? (
+              <SmallButton
+                onClick={() => {
+                  setBuilderSource("adminPrograms");
+                  setSelectedProgramId(program.id);
+                  setSelectedRoutineId(routine.id);
+                  setScreen("builder");
+                  window.setTimeout(() => {
+                    document.getElementById("selected-routine-builder")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }, 0);
+                }}
+              >
+                Edit
+              </SmallButton>
+            ) : (
+              <div className="text-xs text-zinc-500">{routine.blocks.length} blocks</div>
+            )}
           </div>
           <div className="space-y-4">
             {getProgramDesignBlockRows(routine).map(({ block, prefix, label }) => (
@@ -14636,22 +14655,15 @@ export default function App() {
                   </SectionCard>
 
                   <SectionCard title="Program Design" collapsible>
-                    {renderReadOnlyProgramDesign(selectedProgram)}
+                    {renderReadOnlyProgramDesign(selectedProgram, true)}
                   </SectionCard>
                 </div>
               )}
 
               {canUseTrainerWorkspace && screen === "builder" && (
                 <div className="space-y-6">
-                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Builder Workspace</div>
-                    <div className="mt-2 text-lg font-semibold text-zinc-900">{selectedProgram?.name || "New Program"}</div>
-                    <div className="mt-1 text-sm text-zinc-500">Use these sections only when creating or editing program design.</div>
-                  </div>
-
-                  <SectionCard title="Build a Program" collapsible>
+                  <SectionCard title="Program Design" collapsible>
                     <div className="space-y-3">
-                      <div className="rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-600">Program Structure creates and manages routines. Routine Builder organizes block order. Program Details holds the overall program info and notes.</div>
                       {selectedProgram ? (
                         <div className="grid gap-3">
                           <div>
@@ -14737,26 +14749,44 @@ export default function App() {
                     </div>
                   </SectionCard>
 
-                  <SectionCard title="Program Structure" collapsible defaultOpen={false}>
+                  <SectionCard title="Program Structure" collapsible>
                     <div className="space-y-3">
-                      <PrimaryButton onClick={addRoutine} className="w-full">+ Routine</PrimaryButton>
-                      <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-zinc-50 p-2 sm:flex sm:flex-wrap">
                         {selectedProgram?.routines.map((routine) => (
-                          <div key={routine.id} className="rounded-2xl border border-zinc-200 bg-white p-2">
-                            <button onClick={() => setSelectedRoutineId(routine.id)} className={`w-full rounded-xl px-3 py-3 text-left transition ${selectedRoutine?.id === routine.id ? "bg-zinc-900 text-white" : "bg-white text-zinc-900 hover:bg-zinc-50"}`}>
-                              <div className="font-semibold">{routine.label}</div>
-                              <div className={`text-xs ${selectedRoutine?.id === routine.id ? "text-zinc-300" : "text-zinc-500"}`}>{routine.blocks.length} blocks</div>
-                            </button>
-                            <div className="mt-2 flex justify-end">
-                              <SmallButton onClick={() => deleteRoutine(routine.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete Routine</SmallButton>
-                            </div>
-                          </div>
+                          <button
+                            key={routine.id}
+                            type="button"
+                            onClick={() => setSelectedRoutineId(routine.id)}
+                            className={`min-w-0 flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                              selectedRoutine?.id === routine.id
+                                ? "bg-zinc-900 text-white"
+                                : "bg-white text-zinc-700 hover:bg-zinc-100"
+                            }`}
+                          >
+                            <span className="block truncate">{routine.label}</span>
+                          </button>
                         ))}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs text-zinc-500">
+                          {selectedRoutine ? `${selectedRoutine.label} • ${selectedRoutine.blocks.length} blocks` : "Select a routine"}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <SmallButton onClick={addRoutine}>+ Routine</SmallButton>
+                          {selectedRoutine ? (
+                            <SmallButton
+                              onClick={() => deleteRoutine(selectedRoutine.id)}
+                              className="border-red-200 bg-red-600 text-white hover:bg-red-700"
+                            >
+                              Delete Routine
+                            </SmallButton>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </SectionCard>
 
-                  <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible defaultOpen={false}>
+                  <div id="selected-routine-builder" className="scroll-mt-4">\n                  <SectionCard title={selectedRoutine ? `${selectedRoutine.label} Builder` : "Routine Builder"} collapsible>
                     {selectedRoutine ? (
                       <div className="space-y-5">
                         <div className="grid gap-3 md:grid-cols-[1fr_auto]">
@@ -14885,6 +14915,7 @@ export default function App() {
                       <div className="text-sm text-zinc-500">Select a routine to begin editing.</div>
                     )}
                   </SectionCard>
+                  </div>
                 </div>
               )}
 
