@@ -13,7 +13,7 @@ import appBanner from "./assets/appbanner1.png";
 // ===== TYPES =====
 
 type Role = "admin" | "trainer" | "member";
-type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
+type Screen = "account" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
 type ProgramInputMode = "trainerInput" | "memberInput";
@@ -11213,6 +11213,8 @@ export default function App() {
   const [role, setRole] = useState<Role>("admin");
   const canUseTrainerWorkspace = role === "admin" || role === "trainer";
   const profileButtonLabel = role === "admin" ? "A" : role === "trainer" ? "T" : "M";
+  const accountRoleLabel = role === "admin" ? "Admin" : role === "trainer" ? "Trainer" : "Member";
+  const accountEmailPlaceholder = "Email will appear after account connection";
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
@@ -13441,6 +13443,10 @@ export default function App() {
     );
   };
 
+  const goAccount = () => {
+    setScreen("account");
+  };
+
   const goAdminMembers = () => {
     setScreen("members");
   };
@@ -14018,6 +14024,9 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
+    if (screen === "account") {
+      return [{ label: "My Account" }];
+    }
     if (canUseTrainerWorkspace && screen === "members") {
       return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
     }
@@ -14087,9 +14096,10 @@ export default function App() {
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <ToggleButton
                     className="h-9 w-9 shrink-0 rounded-full px-0 text-center text-xs"
-                    active={false}
-                    disabled
-                    title="Account page arrives in UI Layer 2"
+                    active={screen === "account"}
+                    onClick={goAccount}
+                    title="My Account"
+                    aria-label="Open My Account"
                   >
                     {profileButtonLabel}
                   </ToggleButton>
@@ -14129,6 +14139,60 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+
+              {screen === "account" && (
+                <SectionCard title="My Account">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-base font-bold text-white">
+                        {profileButtonLabel}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-semibold text-zinc-900">{selectedMember?.name || "Account Holder"}</div>
+                        <div className="mt-0.5 text-sm text-zinc-500">{accountRoleLabel}</div>
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+                      <div className="p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Name</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.name || "Not connected"}</div>
+                      </div>
+                      <div className="p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Email</div>
+                        <div className="mt-1 text-sm text-zinc-600">{accountEmailPlaceholder}</div>
+                      </div>
+                      <div className="grid grid-cols-2 divide-x divide-zinc-100">
+                        <div className="p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Role</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900">{accountRoleLabel}</div>
+                        </div>
+                        <div className="p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Member Plan</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember ? getMemberPlanLabel(selectedMember.memberPlan) : "Not connected"}</div>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Client ID</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.clientId || "Not connected"}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
+                      Account details are read-only during the frontend rebuild. Email, password, and authenticated profile actions will connect during the backend phases.
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full cursor-not-allowed rounded-2xl border border-zinc-200 bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-400"
+                      title="Logout becomes available when authentication is connected"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                </SectionCard>
+              )}
 
               {canUseTrainerWorkspace && screen === "members" && (
                 <SectionCard title="Client List" collapsible>
