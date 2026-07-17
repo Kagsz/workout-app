@@ -12,8 +12,8 @@ import appBanner from "./assets/appbanner1.png";
 
 // ===== TYPES =====
 
-type Role = "admin" | "member";
-type Screen = "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
+type Role = "admin" | "trainer" | "member";
+type Screen = "account" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
 type ProgramInputMode = "trainerInput" | "memberInput";
@@ -72,6 +72,8 @@ type Member = {
   programClosed?: boolean;
   archived?: boolean;
   memberPlan?: MemberPlan;
+  inviteEmail?: string;
+  accountRole?: Role;
 };
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
@@ -1375,6 +1377,8 @@ const getMemberPlanLabel = (plan: MemberPlan | undefined) => {
 const normalizeMember = (member: Member): Member => ({
   ...member,
   memberPlan: member.memberPlan || "direct",
+  inviteEmail: member.inviteEmail || "",
+  accountRole: member.accountRole || "member",
 });
 
 const normalizeProgram = (program: Program): Program => ({
@@ -11210,7 +11214,14 @@ export default function App() {
   const [isEditingMember, setIsEditingMember] = useState(false);
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
+  const [editedMemberInviteEmail, setEditedMemberInviteEmail] = useState("");
+  const [editedMemberRole, setEditedMemberRole] = useState<Role>("member");
+  const [editedMemberPlan, setEditedMemberPlan] = useState<MemberPlan>("direct");
   const [role, setRole] = useState<Role>("admin");
+  const canUseTrainerWorkspace = role === "admin" || role === "trainer";
+  const profileButtonLabel = role === "admin" ? "A" : role === "trainer" ? "T" : "M";
+  const accountRoleLabel = role === "admin" ? "Admin" : role === "trainer" ? "Trainer" : "Member";
+  const accountEmailPlaceholder = "Email will appear after account connection";
   const [screen, setScreen] = useState<Screen>("members");
   const [programs, setPrograms] = useState<Program[]>(() => {
     if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
@@ -11803,11 +11814,17 @@ export default function App() {
       setIsEditingMember(false);
       setEditedMemberName("");
       setEditedMemberClientId("");
+      setEditedMemberInviteEmail("");
+      setEditedMemberRole("member");
+      setEditedMemberPlan("direct");
       return;
     }
 
     setEditedMemberName(selectedMember.name);
     setEditedMemberClientId(selectedMember.clientId);
+    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+    setEditedMemberRole(selectedMember.accountRole || "member");
+    setEditedMemberPlan(selectedMember.memberPlan || "direct");
     setIsEditingMember(false);
   }, [selectedMember?.id]);
 
@@ -11834,10 +11851,10 @@ export default function App() {
   const selectedProgram = useMemo(
     () =>
       programs.find((program) => program.id === selectedProgramId) ||
-      (role === "admin" && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
+      (canUseTrainerWorkspace && (screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder" || screen === "adminDash" || screen === "input")
         ? adminSortedPrograms[0] || null
         : sortedPrograms[0] || null),
-    [programs, selectedProgramId, role, screen, adminSortedPrograms, sortedPrograms]
+    [programs, selectedProgramId, canUseTrainerWorkspace, screen, adminSortedPrograms, sortedPrograms]
   );
 
   const selectedRoutine = useMemo(
@@ -13439,24 +13456,25 @@ export default function App() {
     );
   };
 
+  const goAccount = () => {
+    setScreen("account");
+  };
+
   const goAdminMembers = () => {
-    setRole("admin");
     setScreen("members");
   };
 
   const openMemberOverview = (memberId: string) => {
     setSelectedMemberId(memberId);
-    setRole("admin");
     setScreen("memberOverview");
   };
 
   const goAdminPrograms = () => {
-    setRole("admin");
     setScreen("adminPrograms");
   };
 
   const goBack = () => {
-    if (role === "admin") {
+    if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") {
         goAdminMembers();
         return;
@@ -13518,7 +13536,7 @@ export default function App() {
   };
 
   const backLabel = useMemo(() => {
-    if (role === "admin") {
+    if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") return "Back to Client List";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
       if (screen === "programView") return "Back to All Programs";
@@ -13536,7 +13554,7 @@ export default function App() {
     if (screen === "memberInput") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     if (screen === "graph") return selectedRoutine ? `Back to ${selectedRoutine.label}` : "Back";
     return "";
-  }, [role, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
+  }, [canUseTrainerWorkspace, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
 
   const addMember = () => {
     const nextMemberNumber = members.length + 1;
@@ -13547,6 +13565,8 @@ export default function App() {
       programClosed: false,
       archived: false,
       memberPlan: "direct",
+      inviteEmail: "",
+      accountRole: "member",
     };
 
     setMembers((prev) => [...prev, newMember]);
@@ -13578,13 +13598,51 @@ export default function App() {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
   };
 
-  const updateSelectedMemberPlan = (plan: MemberPlan) => {
+  const startEditingSelectedMember = () => {
+    if (!selectedMember || role !== "admin") return;
+    setEditedMemberName(selectedMember.name);
+    setEditedMemberClientId(selectedMember.clientId);
+    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+    setEditedMemberRole(selectedMember.accountRole || "member");
+    setEditedMemberPlan(selectedMember.memberPlan || "direct");
+    setIsEditingMember(true);
+  };
+
+  const cancelEditingSelectedMember = () => {
     if (!selectedMember) return;
-    setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
+    setEditedMemberName(selectedMember.name);
+    setEditedMemberClientId(selectedMember.clientId);
+    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+    setEditedMemberRole(selectedMember.accountRole || "member");
+    setEditedMemberPlan(selectedMember.memberPlan || "direct");
+    setIsEditingMember(false);
+  };
+
+  const saveSelectedMemberAccount = () => {
+    if (!selectedMember || role !== "admin") return;
+    const nextName = editedMemberName.trim();
+    const nextClientId = editedMemberClientId.trim();
+    const nextInviteEmail = editedMemberInviteEmail.trim();
+    if (!nextName || !nextClientId) return;
+
+    setMembers((current) =>
+      current.map((member) =>
+        member.id === selectedMember.id
+          ? {
+              ...member,
+              name: nextName,
+              clientId: nextClientId,
+              inviteEmail: nextInviteEmail,
+              accountRole: editedMemberRole,
+              memberPlan: editedMemberPlan,
+            }
+          : member
+      )
+    );
+    setIsEditingMember(false);
   };
 
   const goAdminInput = () => {
-    setRole("admin");
     setScreen("adminDash");
   };
 
@@ -13593,11 +13651,21 @@ export default function App() {
     setScreen("memberHome");
   };
 
+  const goGymTracker = () => {
+    setRole("member");
+    setScreen("openTracker");
+  };
+
+  const previewRole = (nextRole: Role) => {
+    setRole(nextRole);
+    setScreen(nextRole === "member" ? "memberHome" : "members");
+  };
+
   const openProgram = (programId: string) => {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen(role === "admin" ? "programView" : "routines");
+    setScreen(canUseTrainerWorkspace ? "programView" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -14010,23 +14078,26 @@ export default function App() {
 
 
   const pathItems = useMemo(() => {
-    if (role === "admin" && screen === "members") {
-      return [{ label: "Admin" }, { label: "Client List" }];
+    if (screen === "account") {
+      return [{ label: "My Account" }];
     }
-    if (role === "admin" && screen === "memberOverview") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
+    if (canUseTrainerWorkspace && screen === "members") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin" }, { label: "Client List" }];
     }
-    if (role === "admin" && screen === "adminPrograms") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
+    if (canUseTrainerWorkspace && screen === "memberOverview") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name }] : [])];
     }
-    if (role === "admin" && screen === "programView") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
+    if (canUseTrainerWorkspace && screen === "adminPrograms") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs" }];
     }
-    if (role === "admin" && screen === "builder") {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (canUseTrainerWorkspace && screen === "programView") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), { label: "All Programs", onClick: goAdminPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (role === "admin" && (screen === "adminDash" || screen === "input")) {
-      return [{ label: "Admin", onClick: goAdminMembers }, { label: "Admin Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    if (canUseTrainerWorkspace && screen === "builder") {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Client List", onClick: goAdminMembers }, ...(selectedMember ? [{ label: selectedMember.name, onClick: () => setScreen("memberOverview") }] : []), ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("programView") }] : [{ label: "Build a Program" }]), { label: "Edit" }, ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
+    }
+    if (canUseTrainerWorkspace && (screen === "adminDash" || screen === "input")) {
+      return [{ label: role === "trainer" ? "Trainer" : "Admin", onClick: goAdminMembers }, { label: "Trainer Dash" }, ...(selectedMember ? [{ label: selectedMember.name }] : []), ...(selectedProgram ? [{ label: selectedProgram.name }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
     if (role === "member" && screen === "memberHome") {
       return [{ label: "Member" }, { label: "Member View" }];
@@ -14059,7 +14130,7 @@ export default function App() {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
     }
     return [];
-  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout]);
+  }, [role, screen, selectedMember, selectedProgram, selectedRoutine, selectedBlock, goAdminMembers, goAdminPrograms, selectedTrackerWorkout, canUseTrainerWorkspace]);
 
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
@@ -14075,17 +14146,42 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
-              <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Workspace</div>
-                  </div>
+              <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  <ToggleButton
+                    className="h-9 w-9 shrink-0 rounded-full px-0 text-center text-xs"
+                    active={screen === "account"}
+                    onClick={goAccount}
+                    title="My Account"
+                    aria-label="Open My Account"
+                  >
+                    {profileButtonLabel}
+                  </ToggleButton>
 
-                  <div className="flex flex-nowrap gap-2">
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "builder")} onClick={goAdminMembers}>Client List</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "admin" && (screen === "adminDash" || screen === "input")} onClick={goAdminInput}>Admin Dash</ToggleButton>
-                    <ToggleButton className="flex-1 whitespace-nowrap px-2 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder" || screen === "trainerSupport" || screen === "memberInput" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "graph")} onClick={goMemberPrograms}>Member View</ToggleButton>
-                  </div>
+                  {canUseTrainerWorkspace ? (
+                    <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "members" || screen === "memberOverview" || screen === "adminPrograms" || screen === "programView" || screen === "builder"} onClick={goAdminMembers}>Client List</ToggleButton>
+                  ) : null}
+
+                  {canUseTrainerWorkspace ? (
+                    <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "adminDash" || screen === "input"} onClick={goAdminInput}>Trainer Dash</ToggleButton>
+                  ) : null}
+
+                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph")} onClick={goMemberPrograms}>My Programs</ToggleButton>
+                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={role === "member" && (screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder")} onClick={goGymTracker}>Gym Tracker</ToggleButton>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-100 pt-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-400">Local role preview</div>
+                  <select
+                    value={role}
+                    onChange={(event) => previewRole(event.target.value as Role)}
+                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700"
+                    aria-label="Preview app role"
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="trainer">Trainer</option>
+                    <option value="member">Member</option>
+                  </select>
                 </div>
               </div>
 
@@ -14098,7 +14194,61 @@ export default function App() {
                 ) : null}
               </div>
 
-              {role === "admin" && screen === "members" && (
+              {screen === "account" && (
+                <SectionCard title="My Account">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-base font-bold text-white">
+                        {profileButtonLabel}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-semibold text-zinc-900">{selectedMember?.name || "Account Holder"}</div>
+                        <div className="mt-0.5 text-sm text-zinc-500">{accountRoleLabel}</div>
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+                      <div className="p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Name</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.name || "Not connected"}</div>
+                      </div>
+                      <div className="p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Email</div>
+                        <div className="mt-1 text-sm text-zinc-600">{accountEmailPlaceholder}</div>
+                      </div>
+                      <div className="grid grid-cols-2 divide-x divide-zinc-100">
+                        <div className="p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Role</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900">{accountRoleLabel}</div>
+                        </div>
+                        <div className="p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Member Plan</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember ? getMemberPlanLabel(selectedMember.memberPlan) : "Not connected"}</div>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Client ID</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.clientId || "Not connected"}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
+                      Account details are read-only during the frontend rebuild. Email, password, and authenticated profile actions will connect during the backend phases.
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full cursor-not-allowed rounded-2xl border border-zinc-200 bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-400"
+                      title="Logout becomes available when authentication is connected"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                </SectionCard>
+              )}
+
+              {canUseTrainerWorkspace && screen === "members" && (
                 <SectionCard title="Client List" collapsible>
                   <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
                     <div className="space-y-3">
@@ -14160,88 +14310,111 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "admin" && screen === "memberOverview" && selectedMember && (
+              {canUseTrainerWorkspace && screen === "memberOverview" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
-                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1 space-y-3">
-                            {isEditingMember ? (
-                              <>
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
-                                  <input
-                                    value={editedMemberName}
-                                    onChange={(event) => setEditedMemberName(event.target.value)}
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                  />
-                                </div>
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
-                                  <input
-                                    value={editedMemberClientId}
-                                    onChange={(event) => setEditedMemberClientId(event.target.value)}
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                  />
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
-                                <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
-                              </>
-                            )}
-                          </div>
-
-                          <div className="flex shrink-0 gap-2">
-                            {isEditingMember ? (
-                              <>
-                                <SmallButton
-                                  onClick={() => {
-                                    const nextName = editedMemberName.trim();
-                                    const nextClientId = editedMemberClientId.trim();
-                                    if (!nextName || !nextClientId) return;
-
-                                    setMembers((current) =>
-                                      current.map((member) =>
-                                        member.id === selectedMember.id
-                                          ? { ...member, name: nextName, clientId: nextClientId }
-                                          : member
-                                      )
-                                    );
-                                    setIsEditingMember(false);
-                                  }}
-                                >
-                                  Save
-                                </SmallButton>
-                                <SmallButton
-                                  onClick={() => {
-                                    setEditedMemberName(selectedMember.name);
-                                    setEditedMemberClientId(selectedMember.clientId);
-                                    setIsEditingMember(false);
-                                  }}
-                                >
-                                  Cancel
-                                </SmallButton>
-                              </>
-                            ) : (
-                              <SmallButton onClick={() => setIsEditingMember(true)}>Edit</SmallButton>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Type</div>
-                        <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
-                        <div className="grid gap-2 sm:grid-cols-3">
-                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
-                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
-                          <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-zinc-900">Client Account</div>
+                            <div className="mt-1 text-xs text-zinc-500">Identity, account access, and member access level.</div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
+                              {selectedMember.inviteEmail?.trim() ? "Email on file" : "Not connected"}
+                            </div>
+                            {role === "admin" ? (
+                              isEditingMember ? (
+                                <>
+                                  <SmallButton onClick={saveSelectedMemberAccount}>Save</SmallButton>
+                                  <SmallButton onClick={cancelEditingSelectedMember}>Cancel</SmallButton>
+                                </>
+                              ) : (
+                                <SmallButton onClick={startEditingSelectedMember}>Edit</SmallButton>
+                              )
+                            ) : (
+                              <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-500">Read only</div>
+                            )}
+                          </div>
                         </div>
-                        <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-                          Current: {getMemberPlanLabel(selectedMember.memberPlan)}
+
+                        <div className="mt-4 space-y-4">
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
+                              {isEditingMember && role === "admin" ? (
+                                <input
+                                  value={editedMemberName}
+                                  onChange={(event) => setEditedMemberName(event.target.value)}
+                                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                />
+                              ) : (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
+                              {isEditingMember && role === "admin" ? (
+                                <input
+                                  value={editedMemberClientId}
+                                  onChange={(event) => setEditedMemberClientId(event.target.value)}
+                                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                />
+                              ) : (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">{selectedMember.clientId}</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite / Login Email</div>
+                            {isEditingMember && role === "admin" ? (
+                              <input
+                                type="email"
+                                value={editedMemberInviteEmail}
+                                onChange={(event) => setEditedMemberInviteEmail(event.target.value)}
+                                placeholder="member@example.com"
+                                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                              />
+                            ) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                                {selectedMember.inviteEmail?.trim() || "No login email on file"}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Account Role</div>
+                            {isEditingMember && role === "admin" ? (
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <ToggleButton active={editedMemberRole === "member"} onClick={() => setEditedMemberRole("member")}>Member</ToggleButton>
+                                <ToggleButton active={editedMemberRole === "trainer"} onClick={() => setEditedMemberRole("trainer")}>Trainer</ToggleButton>
+                                <ToggleButton active={editedMemberRole === "admin"} onClick={() => setEditedMemberRole("admin")}>Admin</ToggleButton>
+                              </div>
+                            ) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
+                                {(selectedMember.accountRole || "member").replace(/^./, (value) => value.toUpperCase())}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Member Type</div>
+                            <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
+                            {isEditingMember && role === "admin" ? (
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <ToggleButton active={editedMemberPlan === "basic"} onClick={() => setEditedMemberPlan("basic")}>Basic Member</ToggleButton>
+                                <ToggleButton active={editedMemberPlan === "direct"} onClick={() => setEditedMemberPlan("direct")}>Direct Member</ToggleButton>
+                                <ToggleButton active={editedMemberPlan === "premium"} onClick={() => setEditedMemberPlan("premium")}>Premium Member</ToggleButton>
+                              </div>
+                            ) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
+                                {getMemberPlanLabel(selectedMember.memberPlan)}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -14302,7 +14475,7 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && screen === "adminPrograms" && selectedMember && (
+              {canUseTrainerWorkspace && screen === "adminPrograms" && selectedMember && (
                 <div className="space-y-6">
                   <SectionCard title="All Programs" collapsible>
                     <div className="space-y-3">
@@ -14411,7 +14584,7 @@ export default function App() {
               )}
 
 
-              {role === "admin" && screen === "programView" && selectedProgram && (
+              {canUseTrainerWorkspace && screen === "programView" && selectedProgram && (
                 <div className="space-y-6">
                   <SectionCard title="Program Summary" collapsible>
                     <div className="space-y-4">
@@ -14457,7 +14630,7 @@ export default function App() {
                             setScreen("adminDash");
                           }}
                         >
-                          Open Admin Dash
+                          Open Trainer Dash
                         </SmallButton>
                       </div>
                     </div>
@@ -14469,7 +14642,7 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && screen === "builder" && (
+              {canUseTrainerWorkspace && screen === "builder" && (
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Program Builder Workspace</div>
@@ -14716,8 +14889,8 @@ export default function App() {
                 </div>
               )}
 
-              {role === "admin" && (screen === "adminDash" || screen === "input") && (
-                <SectionCard title="Admin Dash" collapsible>
+              {canUseTrainerWorkspace && (screen === "adminDash" || screen === "input") && (
+                <SectionCard title="Trainer Dash" collapsible>
                   <div className="space-y-4">
                     <div className="rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
                       Choose a client, program, routine, and session. Leave Routine or Session on All to review the broader scope; choose a session to open the fast data-entry form.

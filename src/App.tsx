@@ -11323,7 +11323,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (role === "member" && screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
+    if (screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
       setTrackerTutorialStepIndex(0);
       setShowTrackerTutorial(true);
     }
@@ -13499,8 +13499,8 @@ export default function App() {
       return;
     }
 
-    if (screen === "programs" || screen === "openTracker" || screen === "trainerSupport") {
-      goMemberPrograms();
+    if (screen === "trainerSupport") {
+      setScreen("memberHome");
       return;
     }
     if (screen === "trackerWorkouts") {
@@ -13544,8 +13544,8 @@ export default function App() {
       if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Client List";
       return "";
     }
-    if (screen === "programs") return "Back to Member View";
-    if (screen === "openTracker") return "Back to Member View";
+    if (screen === "programs") return "";
+    if (screen === "openTracker") return "";
     if (screen === "trackerWorkouts") return "Back to Gym Tracker";
     if (screen === "trackerWorkoutBuilder") return trackerWorkoutReturnCycleId ? "Back to Cycle" : "Back to Workouts";
     if (screen === "trainerSupport") return "Back to Member View";
@@ -13647,12 +13647,10 @@ export default function App() {
   };
 
   const goMemberPrograms = () => {
-    setRole("member");
-    setScreen("memberHome");
+    setScreen("programs");
   };
 
   const goGymTracker = () => {
-    setRole("member");
     setScreen("openTracker");
   };
 
@@ -13665,7 +13663,8 @@ export default function App() {
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
-    setScreen(canUseTrainerWorkspace ? "programView" : "routines");
+    const isPersonalProgramRoute = ["programs", "routines", "routine", "memberInput", "graph"].includes(screen);
+    setScreen(isPersonalProgramRoute ? "routines" : canUseTrainerWorkspace ? "programView" : "routines");
   };
 
   const openRoutine = (routineId: string) => {
@@ -14102,31 +14101,31 @@ export default function App() {
     if (role === "member" && screen === "memberHome") {
       return [{ label: "Member" }, { label: "Member View" }];
     }
-    if (role === "member" && screen === "openTracker") {
+    if (screen === "openTracker") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker" }];
     }
-    if (role === "member" && screen === "trackerWorkouts") {
+    if (screen === "trackerWorkouts") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts" }];
     }
-    if (role === "member" && screen === "trackerWorkoutBuilder") {
+    if (screen === "trackerWorkoutBuilder") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "Gym Tracker", onClick: () => setScreen("openTracker") }, { label: "Workouts", onClick: () => setScreen("trackerWorkouts") }, ...(selectedTrackerWorkout ? [{ label: selectedTrackerWorkout.name }] : [])];
     }
     if (role === "member" && screen === "trainerSupport") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "Trainer Support" }];
     }
-    if (role === "member" && screen === "programs") {
+    if (screen === "programs") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs" }];
     }
-    if (role === "member" && screen === "routines") {
+    if (screen === "routines") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name }] : [])];
     }
-    if (role === "member" && screen === "routine") {
+    if (screen === "routine") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label }] : [])];
     }
-    if (role === "member" && screen === "memberInput") {
+    if (screen === "memberInput") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), { label: "Enter Results" }];
     }
-    if (role === "member" && screen === "graph") {
+    if (screen === "graph") {
       return [{ label: "Member", onClick: goMemberPrograms }, { label: "My Programs", onClick: goMemberPrograms }, ...(selectedProgram ? [{ label: selectedProgram.name, onClick: () => setScreen("routines") }] : []), ...(selectedRoutine ? [{ label: selectedRoutine.label, onClick: () => setScreen("routine") }] : []), ...(selectedBlock ? [{ label: selectedBlock.title || "Graph" }] : [])];
     }
     return [];
@@ -14166,8 +14165,8 @@ export default function App() {
                     <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "adminDash" || screen === "input"} onClick={goAdminInput}>Trainer Dash</ToggleButton>
                   ) : null}
 
-                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={role === "member" && (screen === "memberHome" || screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph")} onClick={goMemberPrograms}>My Programs</ToggleButton>
-                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={role === "member" && (screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder")} onClick={goGymTracker}>Gym Tracker</ToggleButton>
+                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"} onClick={goMemberPrograms}>My Programs</ToggleButton>
+                  <ToggleButton className="shrink-0 whitespace-nowrap px-3 text-center text-xs" active={screen === "openTracker" || screen === "trackerWorkouts" || screen === "trackerWorkoutBuilder"} onClick={goGymTracker}>Gym Tracker</ToggleButton>
                 </div>
 
                 <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-100 pt-3">
@@ -15183,7 +15182,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "openTracker" && (
+              {screen === "openTracker" && (
                 <SectionCard
                   title="Gym Tracker"
                   collapsible
@@ -15557,7 +15556,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "trackerWorkouts" && (
+              {screen === "trackerWorkouts" && (
                 <SectionCard title="Workouts" collapsible>
                   <div className="space-y-5">
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -15606,7 +15605,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
+              {screen === "trackerWorkoutBuilder" && selectedTrackerWorkout && (
                 <>
                   <div className="grid grid-cols-3 gap-2 rounded-2xl border border-zinc-200 bg-white p-2">
                     <button onClick={() => { setScreen("openTracker"); setTrackerTab("exercises"); }} className="rounded-xl bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-600 transition">My Exercises</button>
@@ -16132,7 +16131,7 @@ export default function App() {
                 </div>
               )}
 
-              {role === "member" && screen === "programs" && (
+              {screen === "programs" && (
                 <SectionCard title="My Programs" collapsible>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members start here and open the most recent program first.</div>
@@ -16157,7 +16156,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "routines" && selectedProgram && (
+              {screen === "routines" && selectedProgram && (
                 <SectionCard title={`${selectedProgram.name} Routines`}>
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
@@ -16198,7 +16197,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "routine" && selectedRoutine && (
+              {screen === "routine" && selectedRoutine && (
                 <SectionCard title={selectedRoutine.label}>
                   <div className="space-y-3">
                     {selectedRoutine.blocks.map((block) =>
@@ -16250,7 +16249,7 @@ export default function App() {
               )}
 
 
-              {role === "member" && screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
+              {screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
                 <SectionCard title={`${selectedRoutine.label} Results`}>
                   <div className="space-y-4">
                     <div className="grid grid-cols-[minmax(0,2fr)_minmax(80px,1fr)] gap-3">
@@ -16341,7 +16340,7 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {role === "member" && screen === "graph" && selectedRoutine && selectedBlock && (
+              {screen === "graph" && selectedRoutine && selectedBlock && (
                 <SectionCard title={`${selectedRoutine.label} • ${selectedBlock.title}`}>
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
