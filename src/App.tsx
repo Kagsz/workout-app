@@ -11215,6 +11215,8 @@ export default function App() {
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
   const [editedMemberInviteEmail, setEditedMemberInviteEmail] = useState("");
+  const [editedMemberRole, setEditedMemberRole] = useState<Role>("member");
+  const [editedMemberPlan, setEditedMemberPlan] = useState<MemberPlan>("direct");
   const [role, setRole] = useState<Role>("admin");
   const canUseTrainerWorkspace = role === "admin" || role === "trainer";
   const profileButtonLabel = role === "admin" ? "A" : role === "trainer" ? "T" : "M";
@@ -11813,12 +11815,16 @@ export default function App() {
       setEditedMemberName("");
       setEditedMemberClientId("");
       setEditedMemberInviteEmail("");
+      setEditedMemberRole("member");
+      setEditedMemberPlan("direct");
       return;
     }
 
     setEditedMemberName(selectedMember.name);
     setEditedMemberClientId(selectedMember.clientId);
     setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+    setEditedMemberRole(selectedMember.accountRole || "member");
+    setEditedMemberPlan(selectedMember.memberPlan || "direct");
     setIsEditingMember(false);
   }, [selectedMember?.id]);
 
@@ -13592,14 +13598,48 @@ export default function App() {
     setMembers((prev) => prev.map((member) => (member.id === memberId ? { ...member, archived: false } : member)));
   };
 
-  const updateSelectedMemberPlan = (plan: MemberPlan) => {
+  const startEditingSelectedMember = () => {
     if (!selectedMember || role !== "admin") return;
-    setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, memberPlan: plan } : member)));
+    setEditedMemberName(selectedMember.name);
+    setEditedMemberClientId(selectedMember.clientId);
+    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+    setEditedMemberRole(selectedMember.accountRole || "member");
+    setEditedMemberPlan(selectedMember.memberPlan || "direct");
+    setIsEditingMember(true);
   };
 
-  const updateSelectedMemberRole = (accountRole: Role) => {
+  const cancelEditingSelectedMember = () => {
+    if (!selectedMember) return;
+    setEditedMemberName(selectedMember.name);
+    setEditedMemberClientId(selectedMember.clientId);
+    setEditedMemberInviteEmail(selectedMember.inviteEmail || "");
+    setEditedMemberRole(selectedMember.accountRole || "member");
+    setEditedMemberPlan(selectedMember.memberPlan || "direct");
+    setIsEditingMember(false);
+  };
+
+  const saveSelectedMemberAccount = () => {
     if (!selectedMember || role !== "admin") return;
-    setMembers((prev) => prev.map((member) => (member.id === selectedMember.id ? { ...member, accountRole } : member)));
+    const nextName = editedMemberName.trim();
+    const nextClientId = editedMemberClientId.trim();
+    const nextInviteEmail = editedMemberInviteEmail.trim();
+    if (!nextName || !nextClientId) return;
+
+    setMembers((current) =>
+      current.map((member) =>
+        member.id === selectedMember.id
+          ? {
+              ...member,
+              name: nextName,
+              clientId: nextClientId,
+              inviteEmail: nextInviteEmail,
+              accountRole: editedMemberRole,
+              memberPlan: editedMemberPlan,
+            }
+          : member
+      )
+    );
+    setIsEditingMember(false);
   };
 
   const goAdminInput = () => {
@@ -14274,155 +14314,108 @@ export default function App() {
                 <div className="space-y-6">
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-4">
-                      <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1 space-y-3">
-                            {isEditingMember && role === "admin" ? (
-                              <>
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
-                                  <input
-                                    value={editedMemberName}
-                                    onChange={(event) => setEditedMemberName(event.target.value)}
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                  />
-                                </div>
-                                <div>
-                                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
-                                  <input
-                                    value={editedMemberClientId}
-                                    onChange={(event) => setEditedMemberClientId(event.target.value)}
-                                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                                  />
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
-                                <div className="text-xs text-zinc-500">Client ID {selectedMember.clientId}</div>
-                              </>
-                            )}
-                          </div>
-
-                          {role === "admin" ? (
-                            <div className="flex shrink-0 gap-2">
-                              {isEditingMember ? (
-                                <>
-                                  <SmallButton
-                                    onClick={() => {
-                                      const nextName = editedMemberName.trim();
-                                      const nextClientId = editedMemberClientId.trim();
-                                      if (!nextName || !nextClientId) return;
-
-                                      setMembers((current) =>
-                                        current.map((member) =>
-                                          member.id === selectedMember.id
-                                            ? { ...member, name: nextName, clientId: nextClientId }
-                                            : member
-                                        )
-                                      );
-                                      setIsEditingMember(false);
-                                    }}
-                                  >
-                                    Save
-                                  </SmallButton>
-                                  <SmallButton
-                                    onClick={() => {
-                                      setEditedMemberName(selectedMember.name);
-                                      setEditedMemberClientId(selectedMember.clientId);
-                                      setIsEditingMember(false);
-                                    }}
-                                  >
-                                    Cancel
-                                  </SmallButton>
-                                </>
-                              ) : (
-                                <SmallButton onClick={() => setIsEditingMember(true)}>Edit</SmallButton>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-500">Read only</div>
-                          )}
-                        </div>
-                      </div>
-
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-sm font-semibold text-zinc-900">Account & Access</div>
-                            <div className="mt-1 text-xs text-zinc-500">Local UI fields only. Account connection will be added with authentication.</div>
+                            <div className="text-sm font-semibold text-zinc-900">Client Account</div>
+                            <div className="mt-1 text-xs text-zinc-500">Identity, account access, and member access level.</div>
                           </div>
-                          <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
-                            {selectedMember.inviteEmail?.trim() ? "Email on file" : "Not connected"}
+                          <div className="flex shrink-0 items-center gap-2">
+                            <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
+                              {selectedMember.inviteEmail?.trim() ? "Email on file" : "Not connected"}
+                            </div>
+                            {role === "admin" ? (
+                              isEditingMember ? (
+                                <>
+                                  <SmallButton onClick={saveSelectedMemberAccount}>Save</SmallButton>
+                                  <SmallButton onClick={cancelEditingSelectedMember}>Cancel</SmallButton>
+                                </>
+                              ) : (
+                                <SmallButton onClick={startEditingSelectedMember}>Edit</SmallButton>
+                              )
+                            ) : (
+                              <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-500">Read only</div>
+                            )}
                           </div>
                         </div>
 
-                        <div className="mt-4">
-                          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite / Login Email</div>
-                          {role === "admin" ? (
-                            <div className="flex flex-col gap-2 sm:flex-row">
+                        <div className="mt-4 space-y-4">
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
+                              {isEditingMember && role === "admin" ? (
+                                <input
+                                  value={editedMemberName}
+                                  onChange={(event) => setEditedMemberName(event.target.value)}
+                                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                />
+                              ) : (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
+                              )}
+                            </div>
+
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
+                              {isEditingMember && role === "admin" ? (
+                                <input
+                                  value={editedMemberClientId}
+                                  onChange={(event) => setEditedMemberClientId(event.target.value)}
+                                  className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                />
+                              ) : (
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">{selectedMember.clientId}</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite / Login Email</div>
+                            {isEditingMember && role === "admin" ? (
                               <input
                                 type="email"
                                 value={editedMemberInviteEmail}
                                 onChange={(event) => setEditedMemberInviteEmail(event.target.value)}
                                 placeholder="member@example.com"
-                                className="min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                               />
-                              <SmallButton
-                                onClick={() => {
-                                  const nextEmail = editedMemberInviteEmail.trim();
-                                  setMembers((current) =>
-                                    current.map((member) =>
-                                      member.id === selectedMember.id ? { ...member, inviteEmail: nextEmail } : member
-                                    )
-                                  );
-                                }}
-                              >
-                                Save Email
-                              </SmallButton>
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-                              {selectedMember.inviteEmail?.trim() || "No login email on file"}
-                            </div>
-                          )}
-                        </div>
+                            ) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                                {selectedMember.inviteEmail?.trim() || "No login email on file"}
+                              </div>
+                            )}
+                          </div>
 
-                        <div className="mt-4">
-                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Account Role</div>
-                          {role === "admin" ? (
-                            <div className="grid gap-2 sm:grid-cols-3">
-                              <ToggleButton active={(selectedMember.accountRole || "member") === "member"} onClick={() => updateSelectedMemberRole("member")}>Member</ToggleButton>
-                              <ToggleButton active={selectedMember.accountRole === "trainer"} onClick={() => updateSelectedMemberRole("trainer")}>Trainer</ToggleButton>
-                              <ToggleButton active={selectedMember.accountRole === "admin"} onClick={() => updateSelectedMemberRole("admin")}>Admin</ToggleButton>
-                            </div>
-                          ) : (
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
-                              {(selectedMember.accountRole || "member").replace(/^./, (value) => value.toUpperCase())}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                          <div>
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Account Role</div>
+                            {isEditingMember && role === "admin" ? (
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <ToggleButton active={editedMemberRole === "member"} onClick={() => setEditedMemberRole("member")}>Member</ToggleButton>
+                                <ToggleButton active={editedMemberRole === "trainer"} onClick={() => setEditedMemberRole("trainer")}>Trainer</ToggleButton>
+                                <ToggleButton active={editedMemberRole === "admin"} onClick={() => setEditedMemberRole("admin")}>Admin</ToggleButton>
+                              </div>
+                            ) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
+                                {(selectedMember.accountRole || "member").replace(/^./, (value) => value.toUpperCase())}
+                              </div>
+                            )}
+                          </div>
 
-                      <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="mb-2 text-sm font-semibold text-zinc-900">Member Type</div>
-                        <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
-                        {role === "admin" ? (
-                          <div className="grid gap-2 sm:grid-cols-3">
-                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "basic"} onClick={() => updateSelectedMemberPlan("basic")}>Basic Member</ToggleButton>
-                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "direct"} onClick={() => updateSelectedMemberPlan("direct")}>Direct Member</ToggleButton>
-                            <ToggleButton active={(selectedMember.memberPlan || "direct") === "premium"} onClick={() => updateSelectedMemberPlan("premium")}>Premium Member</ToggleButton>
+                          <div>
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Member Type</div>
+                            <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
+                            {isEditingMember && role === "admin" ? (
+                              <div className="grid gap-2 sm:grid-cols-3">
+                                <ToggleButton active={editedMemberPlan === "basic"} onClick={() => setEditedMemberPlan("basic")}>Basic Member</ToggleButton>
+                                <ToggleButton active={editedMemberPlan === "direct"} onClick={() => setEditedMemberPlan("direct")}>Direct Member</ToggleButton>
+                                <ToggleButton active={editedMemberPlan === "premium"} onClick={() => setEditedMemberPlan("premium")}>Premium Member</ToggleButton>
+                              </div>
+                            ) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
+                                {getMemberPlanLabel(selectedMember.memberPlan)}
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
-                            {getMemberPlanLabel(selectedMember.memberPlan)}
-                          </div>
-                        )}
-                        {role === "admin" ? (
-                          <div className="mt-3 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-                            Current: {getMemberPlanLabel(selectedMember.memberPlan)}
-                          </div>
-                        ) : null}
+                        </div>
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2">
