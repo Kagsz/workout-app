@@ -13646,10 +13646,6 @@ export default function App() {
     setIsEditingMember(false);
   };
 
-  const goAdminInput = () => {
-    setScreen("adminDash");
-  };
-
   const goMemberPrograms = () => {
     setScreen("programs");
   };
@@ -14219,11 +14215,17 @@ export default function App() {
               <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <ToggleButton
-                    className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                    className="h-9 w-9 shrink-0 rounded-full px-0 text-center"
                     active={screen === "memberHome"}
                     onClick={goHome}
+                    title="Home"
+                    aria-label="Open Home"
                   >
-                    My Overview
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="mx-auto h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 10.5 12 3l9 7.5" />
+                      <path d="M5 9.5V21h14V9.5" />
+                      <path d="M9 21v-6h6v6" />
+                    </svg>
                   </ToggleButton>
 
                   {canUseTrainerWorkspace ? (
@@ -14261,13 +14263,16 @@ export default function App() {
                   </ToggleButton>
 
                   <ToggleButton
-                    className="h-9 w-9 shrink-0 rounded-full px-0 text-center text-xs"
+                    className="h-9 w-9 shrink-0 rounded-full px-0 text-center"
                     active={screen === "account"}
                     onClick={goAccount}
                     title="My Account"
                     aria-label="Open My Account"
                   >
-                    {profileButtonLabel}
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="mx-auto h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M4 21a8 8 0 0 1 16 0" />
+                    </svg>
                   </ToggleButton>
                 </div>
 
