@@ -1493,6 +1493,100 @@ const STORAGE_KEYS = {
   seededProgram4: "workout-app-seeded-program4-v1",
 };
 
+// ===== LAYER 0: EXPLICIT DATA-SOURCE BOUNDARIES =====
+// Each runtime domain has one declared source. There is intentionally no
+// "Supabase failed, so use legacy data" fallback path.
+type RuntimeDataSource = "legacy" | "supabase";
+type RuntimeDataDomain =
+  | "members"
+  | "programs"
+  | "sessions"
+  | "trackerExercises"
+  | "trackerWorkouts"
+  | "trackerCycles";
+
+const DATA_SOURCE_BY_DOMAIN: Record<RuntimeDataDomain, RuntimeDataSource> = {
+  members: "legacy",
+  programs: "legacy",
+  sessions: "legacy",
+  trackerExercises: "legacy",
+  trackerWorkouts: "legacy",
+  trackerCycles: "legacy",
+};
+
+const LEGACY_REFERENCE_MEMBER: Member = normalizeMember({
+  id: "member-1",
+  clientId: "100001",
+  name: "Test Subject",
+});
+
+const cloneLegacyReference = <T,>(value: T): T =>
+  JSON.parse(JSON.stringify(value)) as T;
+
+const assertLegacySource = (domain: RuntimeDataDomain) => {
+  if (DATA_SOURCE_BY_DOMAIN[domain] !== "legacy") {
+    throw new Error(
+      `${domain} is configured for Supabase, but no Supabase adapter has been installed for that domain.`
+    );
+  }
+};
+
+const readLegacyJson = <T,>(key: string, fallback: T): T => {
+  if (typeof window === "undefined") return cloneLegacyReference(fallback);
+
+  const stored = window.localStorage.getItem(key);
+  if (!stored) return cloneLegacyReference(fallback);
+
+  try {
+    return JSON.parse(stored) as T;
+  } catch (error) {
+    console.error(`Unable to parse legacy storage key "${key}".`, error);
+    return cloneLegacyReference(fallback);
+  }
+};
+
+const writeLegacyJson = (domain: RuntimeDataDomain, key: string, value: unknown) => {
+  assertLegacySource(domain);
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(key, JSON.stringify(value));
+};
+
+const loadMembersFromDeclaredSource = (): Member[] => {
+  assertLegacySource("members");
+  return readLegacyJson<Member[]>(STORAGE_KEYS.members, [LEGACY_REFERENCE_MEMBER]).map(normalizeMember);
+};
+
+const loadProgramsFromDeclaredSource = (): Program[] => {
+  assertLegacySource("programs");
+  const stored = readLegacyJson<Program[] | null>(STORAGE_KEYS.programs, null);
+  return stored ? mergeProgramsWithBase(stored) : buildInitialPrograms().map(normalizeProgram);
+};
+
+const loadSessionsFromDeclaredSource = (): SavedSession[] => {
+  assertLegacySource("sessions");
+  return readLegacyJson<SavedSession[]>(STORAGE_KEYS.savedSessions, []);
+};
+
+const loadTrackerExercisesFromDeclaredSource = (): TrackerExercise[] => {
+  assertLegacySource("trackerExercises");
+  return readLegacyJson<TrackerExercise[]>(STORAGE_KEYS.trackerExercises, []).map(normalizeTrackerExercise);
+};
+
+const loadTrackerWorkoutsFromDeclaredSource = (): TrackerWorkout[] => {
+  assertLegacySource("trackerWorkouts");
+  return readLegacyJson<TrackerWorkout[]>(STORAGE_KEYS.trackerWorkouts, []).map(normalizeTrackerWorkout);
+};
+
+const loadTrackerCyclesFromDeclaredSource = (): TrackerWorkoutCycle[] => {
+  assertLegacySource("trackerCycles");
+  return readLegacyJson<TrackerWorkoutCycle[]>(STORAGE_KEYS.trackerCycles, []);
+};
+
+const getDataSourceSummary = () =>
+  Object.entries(DATA_SOURCE_BY_DOMAIN)
+    .map(([domain, source]) => `${domain}: ${source}`)
+    .join(" • ");
+
 const ROUTINE_IDS = {
   day1: "routine-day-1",
   day2: "routine-day-2",
@@ -11202,11 +11296,7 @@ function TrackerMetricChart({ series }: { series: TrackerMetricGraphSeries }) {
 }
 
 export default function App() {
-  const [members, setMembers] = useState<Member[]>(() => {
-    if (typeof window === "undefined") return [normalizeMember({ id: "member-1", clientId: "100001", name: "Test Subject" })];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.members);
-    return stored ? (JSON.parse(stored) as Member[]).map(normalizeMember) : [normalizeMember({ id: "member-1", clientId: "100001", name: "Test Subject" })];
-  });
+  const [members, setMembers] = useState<Member[]>(loadMembersFromDeclaredSource);
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
@@ -11223,11 +11313,7 @@ export default function App() {
   const accountRoleLabel = role === "admin" ? "Admin" : role === "trainer" ? "Trainer" : "Member";
   const accountEmailPlaceholder = "Email will appear after account connection";
   const [screen, setScreen] = useState<Screen>("memberHome");
-  const [programs, setPrograms] = useState<Program[]>(() => {
-    if (typeof window === "undefined") return buildInitialPrograms().map(normalizeProgram);
-    const stored = window.localStorage.getItem(STORAGE_KEYS.programs);
-    return stored ? mergeProgramsWithBase(JSON.parse(stored)) : buildInitialPrograms().map(normalizeProgram);
-  });
+  const [programs, setPrograms] = useState<Program[]>(loadProgramsFromDeclaredSource);
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>("program-1");
   const [builderSource, setBuilderSource] = useState<BuilderSource>("adminPrograms");
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(ROUTINE_IDS.day1);
@@ -11238,28 +11324,12 @@ export default function App() {
   const [sessionDraft, setSessionDraft] = useState<SessionDraft | null>(null);
   const [adminDashRoutineFilter, setAdminDashRoutineFilter] = useState<string>("all");
   const [adminDashSessionNumber, setAdminDashSessionNumber] = useState<string>("");
-  const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
-    if (typeof window === "undefined") return [];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.savedSessions);
-    return stored ? JSON.parse(stored) : [];
-  });
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>(loadSessionsFromDeclaredSource);
   const [importText, setImportText] = useState(PROGRAM_1_IMPORT_TEMPLATE);
 
-  const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(() => {
-    if (typeof window === "undefined") return [];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.trackerExercises);
-    return stored ? (JSON.parse(stored) as TrackerExercise[]).map(normalizeTrackerExercise) : [];
-  });
-  const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(() => {
-    if (typeof window === "undefined") return [];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.trackerWorkouts);
-    return stored ? (JSON.parse(stored) as TrackerWorkout[]).map(normalizeTrackerWorkout) : [];
-  });
-  const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(() => {
-    if (typeof window === "undefined") return [];
-    const stored = window.localStorage.getItem(STORAGE_KEYS.trackerCycles);
-    return stored ? JSON.parse(stored) : [];
-  });
+  const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(loadTrackerExercisesFromDeclaredSource);
+  const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(loadTrackerWorkoutsFromDeclaredSource);
+  const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
   const [newTrackerExerciseName, setNewTrackerExerciseName] = useState("");
   const [newTrackerExerciseMuscleGroup, setNewTrackerExerciseMuscleGroup] = useState<MuscleGroup>("Chest");
   const [newWorkoutName, setNewWorkoutName] = useState("");
@@ -12241,38 +12311,32 @@ export default function App() {
   const tooltipPosition = useMemo(() => getSmartTooltipPosition(lastHoveredGraphPoint, 320), [lastHoveredGraphPoint]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.members, JSON.stringify(members));
+    writeLegacyJson("members", STORAGE_KEYS.members, members);
   }, [members]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.programs, JSON.stringify(programs));
+    writeLegacyJson("programs", STORAGE_KEYS.programs, programs);
   }, [programs]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.savedSessions, JSON.stringify(savedSessions));
+    writeLegacyJson("sessions", STORAGE_KEYS.savedSessions, savedSessions);
   }, [savedSessions]);
 
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.trackerExercises, JSON.stringify(trackerExercises));
+    writeLegacyJson("trackerExercises", STORAGE_KEYS.trackerExercises, trackerExercises);
   }, [trackerExercises]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.trackerWorkouts, JSON.stringify(trackerWorkouts));
+    writeLegacyJson("trackerWorkouts", STORAGE_KEYS.trackerWorkouts, trackerWorkouts);
   }, [trackerWorkouts]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(STORAGE_KEYS.trackerCycles, JSON.stringify(trackerCycles));
+    writeLegacyJson("trackerCycles", STORAGE_KEYS.trackerCycles, trackerCycles);
   }, [trackerCycles]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
 
     const alreadySeededProgram1 = window.localStorage.getItem(STORAGE_KEYS.seeded);
     if (!alreadySeededProgram1 && members[0] && programs.find((program) => program.id === "program-1")) {
@@ -12289,7 +12353,7 @@ export default function App() {
   }, [members, programs]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
 
     const alreadySeededProgram2 = window.localStorage.getItem(STORAGE_KEYS.seededProgram2);
     if (!alreadySeededProgram2 && members[0] && programs.find((program) => program.id === "program-2")) {
@@ -12306,7 +12370,7 @@ export default function App() {
   }, [members, programs]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
 
     const alreadySeededProgram3 = window.localStorage.getItem(STORAGE_KEYS.seededProgram3);
     if (!alreadySeededProgram3 && members[0] && programs.find((program) => program.id === "program-3")) {
@@ -12323,7 +12387,7 @@ export default function App() {
   }, [members, programs]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
 
     const alreadySeededProgram4 = window.localStorage.getItem(STORAGE_KEYS.seededProgram4);
     if (!alreadySeededProgram4 && members[0] && programs.find((program) => program.id === "program-4")) {
@@ -14212,6 +14276,10 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+                Layer 0 • {getDataSourceSummary()}
+              </div>
+
               <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <ToggleButton

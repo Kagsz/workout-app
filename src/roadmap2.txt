@@ -1,0 +1,302 @@
+Here is the current **post-storage roadmap**, separating the items we deliberately deferred from the backend work itself.
+
+## 1. Finish the broader UI-polish pass
+
+We planted a flag in the larger cleanup outline instead of continuing indefinitely. After storage is stable, revisit:
+
+* spacing and vertical-density cleanup across the app
+* button and card consistency
+* typography hierarchy
+* unnecessary helper text and dead space
+* cleaner mobile layouts
+* Program Design / Program Structure consolidation
+* Program Summary compression
+* trainer workflow polish
+* member workflow polish
+* general regression checking after real data replaces local placeholders
+
+The Program Builder specifically still deserves another look because **Program Design** and **Program Structure** may be mergeable or further simplified.
+
+## 2. Responsive navigation overflow
+
+Keep the current tabs until they genuinely become crowded.
+
+Future option:
+
+* hamburger / three-horizontal-line menu
+* move lower-priority destinations into an expandable menu
+* preserve Home and Account as fast icon actions
+* avoid adding this prematurely
+
+## 3. Complete My Overview with real backend data
+
+The page shell now exists, but several parts should become genuinely data-driven once Supabase is integrated:
+
+* current program
+* accurate session progress
+* next scheduled or next incomplete workout
+* recent Gym Tracker activity
+* resume the correct program/routine
+* resume the correct tracker workout
+* personal progress snapshot
+* useful empty states
+
+Later additions:
+
+* recent AI insight
+* announcements
+* notifications
+
+## 4. Complete My Account
+
+The current Account page is intentionally a frontend shell.
+
+After backend/auth work, add:
+
+* authenticated name and email
+* real Client ID
+* membership plan and subscription status
+* change password
+* change email
+* connected-account or client-link status
+* account recovery
+* privacy and notification settings
+* future billing controls
+
+Logout should remain there.
+
+## 5. Mature the shared Trainer Dash
+
+The architectural direction is fixed:
+
+**Trainer Dash is the shared trainer/admin workspace.**
+
+After storage integration, organize it around:
+
+* Members
+* Programs
+* Sessions
+* Reports
+
+Trainer and admin should use the same underlying screens. The difference is permission scope.
+
+Trainer:
+
+* sees active members
+* opens member overviews
+* builds and edits programs
+* enters session data
+* uses reports
+
+Admin additionally:
+
+* manages roles and plans
+* archives, restores, and deletes members
+* handles account linking
+* manages locations
+* accesses import/export and future business controls
+
+Potential later polish:
+
+* a true internal Trainer Dash landing screen rather than opening directly on Members
+* better workspace summaries and outstanding-action indicators
+
+## 6. Location and trainer assignment
+
+The current temporary behavior is that trainers can see all active members.
+
+Later:
+
+* facilities or locations
+* trainer-to-location assignment
+* member-to-location assignment
+* trainer member visibility filtered by location
+* optional direct trainer assignments
+* admin override across locations
+
+## 7. Account linking and migration
+
+For users who had local beta data before authentication:
+
+* detect local legacy data after login
+* let the user claim or import it into their authenticated account
+* avoid duplicate imports
+* show a clear migration result
+* connect existing company client records to new user accounts
+* support invite/login email linking
+* resolve unlinked, pending, linked, and conflicted states
+
+## 8. Import/export tools
+
+Once the initial local-to-Supabase migration is proven:
+
+* visible import diagnostic
+* counts by table
+* validation before deleting local hardcoded data
+* retry-safe imports
+* duplicate protection using legacy IDs
+* admin import controls
+* eventual export/backup tools
+* clearer failure reporting by Programs, Routines, Blocks, Sessions, and Session Entries
+
+## 9. Program and session data polish
+
+Known areas to revisit after real storage is flowing:
+
+* verify all Program 4 single-block data
+* verify Day 2 graph values
+* confirm admin edit cards and tooltips read the same stored fields
+* ensure support metrics render consistently
+* confirm session filtering by routine
+* test pause, resume, close, archive, restore, and delete against Supabase
+* verify program progress totals
+* validate replacement-exercise graph behavior with stored data
+
+## 10. Power Plant summary engine
+
+This remains one of the major product projects after storage.
+
+Planned work:
+
+* migrate structured Program summaries to the shared Power Plant engine
+* keep Tracker and Program adapters domain-specific
+* reuse shared confidence, labeling, key-factor, and language systems
+* preserve mature Program graph interpretation
+* improve story families:
+
+  * Ceiling
+  * Floor
+  * Consistent Output
+  * Sustained
+  * Work Range
+  * Upward
+* contextual trade-off language
+* weight-increase exceptionalism
+* further label and language polish
+* remove remaining awkward repetition such as stacked “while” constructions
+* eventually surface selected insights on My Overview
+
+## 11. Graph and report polish
+
+Deferred items include:
+
+* additional contextual trade-off recognition
+* weight-key readability by exercise/plot shape
+* final graph interaction cleanup
+* consistent click/hover behavior
+* eliminate strange selection/highlight artifacts
+* validate tracker and structured-program graph parity where appropriate
+* preserve domain-specific differences where appropriate
+* more useful report-level summaries
+
+## 12. Gym Tracker future work
+
+The major Tracker feature set already exists, but later refinement can include:
+
+* stronger storage-backed workout continuity
+* more polished cycle navigation
+* better recent-workout and resume behavior
+* richer progress snapshots
+* improved summary/report integration
+* review Circuit behavior after persistent storage
+* optional additional sorting/filtering
+* bulk-action polish
+* integration into My Overview
+
+## 13. Business features
+
+Still intentionally deferred:
+
+* payments and subscriptions
+* plan upgrades
+* billing history
+* location management
+* business reporting
+* trainer management
+* administrative import/export UI
+* notification systems
+* account privacy controls
+
+These should come after the core member/program/session/tracker storage model is reliable.
+
+## 14. Authentication expansion
+
+Email-only auth remains the current direction.
+
+Possible later additions:
+
+* phone authentication
+* stronger account-recovery flow
+* invitation acceptance flow
+* verified email changes
+* session/device management
+* security settings
+* optional social login
+
+## 15. Final production-hardening pass
+
+After storage and the major deferred features:
+
+* remove remaining local-storage dependencies
+* remove hardcoded production data
+* loading, error, retry, and offline states
+* RLS permission tests for every role
+* cross-account data-isolation testing
+* mobile/browser regression pass
+* empty-state testing
+* performance review
+* accessibility pass
+* destructive-action confirmations
+* backup and recovery strategy
+
+The immediate order remains:
+
+**Backend storage → data verification → remove local hardcoded data → stabilize auth/permissions → resume Power Plant → return to the broader UI-polish outline.**
+
+
+
+
+
+
+
+
+
+I'm glad it landed the way you wanted. I think it's a solid roadmap because it's organized by architecture rather than by a chronological to-do list, so it'll still make sense months from now.
+
+I can't actually pin or index a message within the ChatGPT interface, but from my perspective **that roadmap should be treated as the project's master roadmap** going forward.
+
+The order we've converged on is:
+
+1. **Backend Storage Integration** *(current focus)*
+
+   * Supabase persistence
+   * authentication
+   * import engine
+   * validation
+   * removal of local hardcoded data
+
+2. **Stabilization**
+
+   * verify all CRUD operations
+   * permissions/RLS
+   * migration of existing beta data
+   * storage regression testing
+
+3. **Power Plant Expansion**
+
+   * unify Program and Gym Tracker AI summaries
+   * continue graph/report intelligence
+   * contextual language improvements
+
+4. **Post-Storage Feature Roadmap**
+
+   * everything listed in the roadmap (UI polish, navigation refinements, Trainer Dash maturation, location support, business features, etc.)
+
+One thing I also like about the current state is that we've finally separated **architecture** from **polish**. Earlier in the project those two tended to blur together, which made it harder to know whether we were building new foundations or just refining the experience. Now they're distinct:
+
+* **Architecture** → essentially frozen.
+* **Storage** → next major milestone.
+* **Feature expansion** → after storage.
+* **Polish** → ongoing and never-ending, but intentionally deferred.
+
+That should keep us from drifting into another long UI-refinement loop before the backend is finished. Once storage is complete, we'll return to this roadmap and work through it in a much more predictable way.
