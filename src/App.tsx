@@ -1611,11 +1611,6 @@ const writeLegacyJson = (domain: RuntimeDataDomain, key: string, value: unknown)
   window.localStorage.setItem(key, JSON.stringify(value));
 };
 
-const loadMembersFromDeclaredSource = (): Member[] => {
-  assertLegacySource("members");
-  return readLegacyJson<Member[]>(STORAGE_KEYS.members, [LEGACY_REFERENCE_MEMBER]).map(normalizeMember);
-};
-
 const loadProgramsFromDeclaredSource = (): Program[] => {
   assertLegacySource("programs");
   const stored = readLegacyJson<Program[] | null>(STORAGE_KEYS.programs, null);
@@ -13959,11 +13954,6 @@ export default function App() {
 
   const goGymTracker = () => {
     setScreen("openTracker");
-  };
-
-  const previewRole = (nextRole: Role) => {
-    setRole(nextRole);
-    setScreen("memberHome");
   };
 
   const openProgram = (programId: string) => {
