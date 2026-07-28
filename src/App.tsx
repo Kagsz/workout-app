@@ -1574,12 +1574,6 @@ const DATA_SOURCE_BY_DOMAIN: Record<RuntimeDataDomain, RuntimeDataSource> = {
   trackerCycles: "legacy",
 };
 
-const LEGACY_REFERENCE_MEMBER: Member = normalizeMember({
-  id: "member-1",
-  clientId: "100001",
-  name: "Test Subject",
-});
-
 const cloneLegacyReference = <T,>(value: T): T =>
   JSON.parse(JSON.stringify(value)) as T;
 
