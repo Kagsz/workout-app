@@ -11355,6 +11355,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authDisplayName, setAuthDisplayName] = useState("");
   const [authNewPassword, setAuthNewPassword] = useState("");
+  const [authConfirmPassword, setAuthConfirmPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
   const [profileRow, setProfileRow] = useState<PrattProfileRow | null>(null);
@@ -11594,13 +11595,23 @@ export default function App() {
           "Password recovery instructions have been sent if that email belongs to an account."
         );
       } else {
+        if (authNewPassword !== authConfirmPassword) {
+          throw new Error("The new passwords do not match.");
+        }
+
         const { error } = await supabase.auth.updateUser({
           password: authNewPassword,
         });
         if (error) throw error;
+
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) throw signOutError;
+
         setAuthNewPassword("");
-        setAuthMessage("Password updated successfully.");
+        setAuthConfirmPassword("");
+        setAuthPassword("");
         setAuthMode("signIn");
+        setAuthMessage("Password updated. Sign in with your new password.");
       }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Authentication failed.");
@@ -14506,7 +14517,7 @@ export default function App() {
     );
   }
 
-  if (!SUPABASE_CONFIGURED || !authSession) {
+  if (!SUPABASE_CONFIGURED || !authSession || authMode === "reset") {
     const isReset = authMode === "reset";
     const isForgot = authMode === "forgot";
     const isSignUp = authMode === "signUp";
@@ -14575,6 +14586,19 @@ export default function App() {
                 </div>
               ) : null}
 
+              {isReset ? (
+                <div>
+                  <Label>Confirm New Password</Label>
+                  <TextInput
+                    type="password"
+                    value={authConfirmPassword}
+                    onChange={(event) => setAuthConfirmPassword(event.target.value)}
+                    placeholder="Repeat new password"
+                    autoComplete="new-password"
+                  />
+                </div>
+              ) : null}
+
               {authError ? (
                 <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{authError}</div>
               ) : null}
@@ -14588,7 +14612,12 @@ export default function App() {
                 disabled={
                   authBusy ||
                   (!isReset && !authEmail.trim()) ||
-                  (!isForgot && (isReset ? authNewPassword.length < 6 : authPassword.length < 6))
+                  (!isForgot &&
+                    (isReset
+                      ? authNewPassword.length < 6 ||
+                        authConfirmPassword.length < 6 ||
+                        authNewPassword !== authConfirmPassword
+                      : authPassword.length < 6))
                 }
                 className="w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >

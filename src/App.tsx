@@ -14,7 +14,7 @@ import appBanner from "./assets/appbanner1.png";
 // ===== TYPES =====
 
 type Role = "admin" | "trainer" | "member";
-type Screen = "account" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
+type Screen = "account" | "diagnostics" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
 type ProgramInputMode = "trainerInput" | "memberInput";
@@ -1489,6 +1489,32 @@ type PrattProfileRow = {
   role: Role;
   created_at: string;
   updated_at: string;
+};
+
+type DiagnosticTableStatus = {
+  table: string;
+  label: string;
+  status: "ready" | "notCreated" | "blocked" | "error";
+  count: number | null;
+  detail: string;
+};
+
+type LegacyDiagnosticSnapshot = {
+  programs: number;
+  routines: number;
+  blocks: number;
+  programExercises: number;
+  savedSessions: number;
+  sessionEntries: number;
+  trackerExercises: number;
+  trackerExerciseEntries: number;
+  trackerWorkouts: number;
+  trackerWorkoutSlots: number;
+  trackerWorkoutEntries: number;
+  trackerCycles: number;
+  programOwnerIds: string[];
+  sessionOwnerIds: string[];
+  trackerOwnerIds: string[];
 };
 
 type PrattMemberRow = {
@@ -11359,6 +11385,11 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
   const [profileRow, setProfileRow] = useState<PrattProfileRow | null>(null);
+  const [authenticatedMemberId, setAuthenticatedMemberId] = useState<string | null>(null);
+  const [diagnosticTables, setDiagnosticTables] = useState<DiagnosticTableStatus[]>([]);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
+  const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
@@ -11480,6 +11511,7 @@ export default function App() {
     const ownMember = ((memberRows || []) as PrattMemberRow[]).find(
       (member) => member.profile_id === user.id
     );
+    setAuthenticatedMemberId(ownMember?.id || null);
     setSelectedMemberId((current) => {
       if (current && nextMembers.some((member) => member.id === current)) return current;
       return ownMember?.id || nextMembers[0]?.id || null;
@@ -11490,6 +11522,7 @@ export default function App() {
     setMembers([]);
     setSelectedMemberId(null);
     setProfileRow(null);
+    setAuthenticatedMemberId(null);
     setRole("member");
   };
 
@@ -11658,6 +11691,130 @@ export default function App() {
     () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
     [members, selectedMemberId]
   );
+
+  const ownMember = useMemo(
+    () => members.find((member) => member.id === authenticatedMemberId) || null,
+    [authenticatedMemberId, members]
+  );
+
+  const legacyDiagnosticSnapshot = useMemo<LegacyDiagnosticSnapshot>(() => {
+    const routineCount = programs.reduce((total, program) => total + program.routines.length, 0);
+    const blockCount = programs.reduce(
+      (total, program) => total + program.routines.reduce((routineTotal, routine) => routineTotal + routine.blocks.length, 0),
+      0
+    );
+    const programExerciseCount = programs.reduce(
+      (total, program) =>
+        total + program.routines.reduce(
+          (routineTotal, routine) =>
+            routineTotal + routine.blocks.reduce((blockTotal, block) => blockTotal + block.exercises.length, 0),
+          0
+        ),
+      0
+    );
+    const sessionEntryCount = savedSessions.reduce(
+      (total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0),
+      0
+    );
+    const trackerExerciseEntryCount = trackerExercises.reduce(
+      (total, exercise) => total + (exercise.entries?.length || 0),
+      0
+    );
+    const trackerWorkoutSlotCount = trackerWorkouts.reduce(
+      (total, workout) => total + (workout.exerciseSlots?.length || workout.exerciseIds.length),
+      0
+    );
+    const trackerWorkoutEntryCount = trackerWorkouts.reduce(
+      (total, workout) =>
+        total + (workout.exerciseSlots || []).reduce((slotTotal, slot) => slotTotal + (slot.entries?.length || 0), 0),
+      0
+    );
+    const unique = (values: Array<string | undefined>) =>
+      Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean))).sort();
+
+    return {
+      programs: programs.length,
+      routines: routineCount,
+      blocks: blockCount,
+      programExercises: programExerciseCount,
+      savedSessions: savedSessions.length,
+      sessionEntries: sessionEntryCount,
+      trackerExercises: trackerExercises.length,
+      trackerExerciseEntries: trackerExerciseEntryCount,
+      trackerWorkouts: trackerWorkouts.length,
+      trackerWorkoutSlots: trackerWorkoutSlotCount,
+      trackerWorkoutEntries: trackerWorkoutEntryCount,
+      trackerCycles: trackerCycles.length,
+      programOwnerIds: unique(programs.map((program) => program.memberId)),
+      sessionOwnerIds: unique(savedSessions.map((session) => session.memberId)),
+      trackerOwnerIds: unique([
+        ...trackerExercises.map((exercise) => exercise.memberId),
+        ...trackerWorkouts.map((workout) => workout.memberId),
+        ...trackerCycles.map((cycle) => cycle.memberId),
+      ]),
+    };
+  }, [programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+
+  const refreshDiagnostics = async () => {
+    if (!supabase || role !== "admin") return;
+
+    setDiagnosticsBusy(true);
+    setDiagnosticsError("");
+
+    const tables = [
+      ["profiles", "Profiles"],
+      ["members", "Members"],
+      ["programs", "Programs"],
+      ["routines", "Routines"],
+      ["blocks", "Blocks"],
+      ["sessions", "Sessions"],
+      ["session_entries", "Session Entries"],
+      ["tracker_exercises", "Tracker Exercises"],
+      ["tracker_workouts", "Tracker Workouts"],
+      ["tracker_entries", "Tracker Entries"],
+      ["cycles", "Tracker Cycles"],
+    ] as const;
+
+    try {
+      const results = await Promise.all(
+        tables.map(async ([table, label]): Promise<DiagnosticTableStatus> => {
+          const { count, error } = await supabase.from(table).select("*", { count: "exact", head: true });
+          if (!error) {
+            return { table, label, status: "ready", count: count ?? 0, detail: "Table reachable" };
+          }
+
+          const message = String(error.message || "Unknown database error");
+          const lower = message.toLowerCase();
+          const notCreated =
+            lower.includes("does not exist") ||
+            lower.includes("could not find the table") ||
+            lower.includes("schema cache");
+          const blocked = lower.includes("permission") || lower.includes("row-level security") || lower.includes("not allowed");
+
+          return {
+            table,
+            label,
+            status: notCreated ? "notCreated" : blocked ? "blocked" : "error",
+            count: null,
+            detail: message,
+          };
+        })
+      );
+
+      setDiagnosticTables(results);
+      setDiagnosticsCheckedAt(new Date().toISOString());
+    } catch (error) {
+      setDiagnosticsError(error instanceof Error ? error.message : "Unable to run diagnostics.");
+    } finally {
+      setDiagnosticsBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (screen === "diagnostics" && role === "admin" && !diagnosticTables.length && !diagnosticsBusy) {
+      void refreshDiagnostics();
+    }
+  }, [screen, role]);
 
   useEffect(() => {
     if (screen === "openTracker" && !trackerTutorialDismissed && !showTrackerTutorial) {
@@ -13797,6 +13954,10 @@ export default function App() {
     setScreen("account");
   };
 
+  const goDiagnostics = () => {
+    setScreen("diagnostics");
+  };
+
   const goAdminMembers = () => {
     setScreen("members");
   };
@@ -14404,6 +14565,9 @@ export default function App() {
     if (screen === "account") {
       return [{ label: "My Account" }];
     }
+    if (screen === "diagnostics") {
+      return [{ label: "Storage Diagnostics" }];
+    }
     if (canUseTrainerWorkspace && screen === "members") {
       return [{ label: "Trainer Dash" }, { label: "Members" }];
     }
@@ -14680,7 +14844,7 @@ export default function App() {
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
-                Layer 1B • {getDataSourceSummary()}
+                Layer 2 • Read-only diagnostics • {getDataSourceSummary()}
               </div>
 
               <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
@@ -14733,6 +14897,16 @@ export default function App() {
                     Gym Tracker
                   </ToggleButton>
 
+                  {role === "admin" ? (
+                    <ToggleButton
+                      className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                      active={screen === "diagnostics"}
+                      onClick={goDiagnostics}
+                    >
+                      Diagnostics
+                    </ToggleButton>
+                  ) : null}
+
                   <ToggleButton
                     className="h-9 w-9 shrink-0 rounded-full px-0 text-center"
                     active={screen === "account"}
@@ -14763,6 +14937,129 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+
+              {role === "admin" && screen === "diagnostics" && (
+                <div className="space-y-6">
+                  <SectionCard title="Layer 2 — Storage Diagnostics">
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                        This panel is read-only. It does not import, delete, reassign, or flip any data source.
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Authenticated destination</div>
+                          <div className="mt-3 space-y-2 text-sm">
+                            <div><span className="text-zinc-500">Email:</span> <span className="font-semibold text-zinc-900">{profileRow?.email || authUser?.email || "—"}</span></div>
+                            <div><span className="text-zinc-500">Profile ID:</span> <span className="break-all font-mono text-xs text-zinc-900">{profileRow?.id || "—"}</span></div>
+                            <div><span className="text-zinc-500">Member ID:</span> <span className="break-all font-mono text-xs text-zinc-900">{ownMember?.id || "—"}</span></div>
+                            <div><span className="text-zinc-500">Name:</span> <span className="font-semibold text-zinc-900">{ownMember?.name || profileRow?.display_name || "—"}</span></div>
+                            <div><span className="text-zinc-500">Role / Plan:</span> <span className="font-semibold text-zinc-900">{role} / {ownMember?.memberPlan || "—"}</span></div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Safety state</div>
+                          <div className="mt-3 space-y-2 text-sm text-zinc-700">
+                            <div>Import enabled: <span className="font-semibold text-zinc-900">No</span></div>
+                            <div>Delete enabled: <span className="font-semibold text-zinc-900">No</span></div>
+                            <div>Automatic linking: <span className="font-semibold text-zinc-900">No</span></div>
+                            <div>Program source: <span className="font-semibold text-zinc-900">Legacy</span></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="Legacy Browser Inventory" collapsible>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {[
+                        ["Programs", legacyDiagnosticSnapshot.programs],
+                        ["Routines", legacyDiagnosticSnapshot.routines],
+                        ["Blocks", legacyDiagnosticSnapshot.blocks],
+                        ["Program Exercises", legacyDiagnosticSnapshot.programExercises],
+                        ["Saved Sessions", legacyDiagnosticSnapshot.savedSessions],
+                        ["Session Entries", legacyDiagnosticSnapshot.sessionEntries],
+                        ["Tracker Exercises", legacyDiagnosticSnapshot.trackerExercises],
+                        ["Exercise Entries", legacyDiagnosticSnapshot.trackerExerciseEntries],
+                        ["Tracker Workouts", legacyDiagnosticSnapshot.trackerWorkouts],
+                        ["Workout Slots", legacyDiagnosticSnapshot.trackerWorkoutSlots],
+                        ["Workout Entries", legacyDiagnosticSnapshot.trackerWorkoutEntries],
+                        ["Tracker Cycles", legacyDiagnosticSnapshot.trackerCycles],
+                      ].map(([label, count]) => (
+                        <div key={String(label)} className="rounded-2xl border border-zinc-200 bg-white p-3">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label}</div>
+                          <div className="mt-1 text-2xl font-bold text-zinc-900">{count}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="Legacy Ownership Signals" collapsible>
+                    <div className="space-y-3 text-sm">
+                      {[
+                        ["Program owner IDs", legacyDiagnosticSnapshot.programOwnerIds],
+                        ["Session owner IDs", legacyDiagnosticSnapshot.sessionOwnerIds],
+                        ["Tracker owner IDs", legacyDiagnosticSnapshot.trackerOwnerIds],
+                      ].map(([label, values]) => (
+                        <div key={String(label)} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                          <div className="font-semibold text-zinc-900">{label}</div>
+                          <div className="mt-2 space-y-1">
+                            {(values as string[]).length ? (values as string[]).map((value) => (
+                              <div key={value} className="break-all font-mono text-xs text-zinc-700">{value}</div>
+                            )) : <div className="text-zinc-500">No owner ID stored.</div>}
+                          </div>
+                        </div>
+                      ))}
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        Owner IDs shown here are legacy browser identifiers. A match with the authenticated Supabase member ID is informative, but no ownership reassignment occurs in this layer.
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="Supabase Table Inventory" collapsible>
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="text-xs text-zinc-500">
+                          {diagnosticsCheckedAt ? `Last checked ${new Date(diagnosticsCheckedAt).toLocaleString()}` : "Not checked yet"}
+                        </div>
+                        <SmallButton onClick={() => void refreshDiagnostics()} disabled={diagnosticsBusy}>
+                          {diagnosticsBusy ? "Checking…" : "Refresh Diagnostics"}
+                        </SmallButton>
+                      </div>
+
+                      {diagnosticsError ? (
+                        <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{diagnosticsError}</div>
+                      ) : null}
+
+                      <div className="space-y-2">
+                        {diagnosticTables.map((item) => (
+                          <div key={item.table} className="flex items-start justify-between gap-3 rounded-2xl border border-zinc-200 bg-white p-3">
+                            <div className="min-w-0">
+                              <div className="font-semibold text-zinc-900">{item.label}</div>
+                              <div className="mt-1 break-words text-xs text-zinc-500">{item.detail}</div>
+                            </div>
+                            <div className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                              item.status === "ready"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : item.status === "notCreated"
+                                  ? "bg-zinc-100 text-zinc-700"
+                                  : item.status === "blocked"
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-red-100 text-red-700"
+                            }`}>
+                              {item.status === "ready" ? String(item.count ?? 0) : item.status === "notCreated" ? "Not created" : item.status}
+                            </div>
+                          </div>
+                        ))}
+                        {!diagnosticTables.length && !diagnosticsBusy ? (
+                          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">Run diagnostics to inspect the current database tables.</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </SectionCard>
+                </div>
+              )}
 
               {screen === "account" && (
                 <SectionCard title="My Account">
