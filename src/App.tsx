@@ -1590,6 +1590,182 @@ type Layer2CValidationIssue = {
   detail: string;
 };
 
+type LegacySessionResolutionMethod = "exact" | "routine" | "structure" | "ambiguous" | "unresolved";
+
+type LegacySessionResolution = {
+  sessionId: string;
+  originalProgramId: string;
+  originalRoutineId: string;
+  resolvedProgramId: string | null;
+  resolvedRoutineId: string | null;
+  method: LegacySessionResolutionMethod;
+  confidence: number;
+  detail: string;
+};
+
+type LegacyRelationshipReport = {
+  totalSessions: number;
+  exact: number;
+  recoveredByRoutine: number;
+  recoveredByStructure: number;
+  ambiguous: number;
+  unresolved: number;
+};
+
+type LegacyRelationshipResolution = {
+  sessions: SavedSession[];
+  sessionResolutions: LegacySessionResolution[];
+  report: LegacyRelationshipReport;
+};
+
+const normalizeLegacyLinkText = (value: unknown) =>
+  String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const resolveLegacyRelationships = (
+  programs: Program[],
+  sessions: SavedSession[]
+): LegacyRelationshipResolution => {
+  const programById = new Map(programs.map((program) => [program.id, program]));
+  const routineCandidatesById = new Map<string, Array<{ program: Program; routine: Routine }>>();
+
+  programs.forEach((program) => {
+    program.routines.forEach((routine) => {
+      routineCandidatesById.set(routine.id, [
+        ...(routineCandidatesById.get(routine.id) || []),
+        { program, routine },
+      ]);
+    });
+  });
+
+  const getRoutineEvidenceScore = (session: SavedSession, routine: Routine) => {
+    const sessionBlockIds = new Set(session.blocks.map((block) => block.blockId).filter(Boolean));
+    const sessionBlockTitles = new Set(session.blocks.map((block) => normalizeLegacyLinkText(block.blockTitle)).filter(Boolean));
+    const sessionExerciseIds = new Set(
+      session.blocks.flatMap((block) => block.entries.map((entry) => entry.exerciseId)).filter(Boolean)
+    );
+    const sessionExerciseNames = new Set(
+      session.blocks.flatMap((block) => block.entries.map((entry) => normalizeLegacyLinkText(entry.exerciseName))).filter(Boolean)
+    );
+
+    let score = 0;
+    routine.blocks.forEach((block) => {
+      if (sessionBlockIds.has(block.id)) score += 8;
+      if (sessionBlockTitles.has(normalizeLegacyLinkText(block.title))) score += 3;
+      block.exercises.forEach((exercise) => {
+        if (sessionExerciseIds.has(exercise.id)) score += 2;
+        if (sessionExerciseNames.has(normalizeLegacyLinkText(exercise.name))) score += 1;
+      });
+    });
+    return score;
+  };
+
+  const sessionResolutions: LegacySessionResolution[] = [];
+  const resolvedSessions = sessions.map((session) => {
+    const exactProgram = programById.get(session.programId);
+    const exactRoutine = exactProgram?.routines.find((routine) => routine.id === session.routineId);
+
+    if (exactProgram && exactRoutine) {
+      sessionResolutions.push({
+        sessionId: session.id,
+        originalProgramId: session.programId,
+        originalRoutineId: session.routineId,
+        resolvedProgramId: exactProgram.id,
+        resolvedRoutineId: exactRoutine.id,
+        method: "exact",
+        confidence: 1,
+        detail: "Program and routine IDs matched exactly.",
+      });
+      return {
+        ...session,
+        memberId: exactProgram.memberId || session.memberId,
+      };
+    }
+
+    const routineCandidates = routineCandidatesById.get(session.routineId) || [];
+    if (routineCandidates.length === 1) {
+      const candidate = routineCandidates[0];
+      sessionResolutions.push({
+        sessionId: session.id,
+        originalProgramId: session.programId,
+        originalRoutineId: session.routineId,
+        resolvedProgramId: candidate.program.id,
+        resolvedRoutineId: candidate.routine.id,
+        method: "routine",
+        confidence: 0.95,
+        detail: "Recovered through a unique routine ID even though the stored program ID had drifted.",
+      });
+      return {
+        ...session,
+        programId: candidate.program.id,
+        routineId: candidate.routine.id,
+        memberId: candidate.program.memberId || session.memberId,
+      };
+    }
+
+    const structuralCandidates = programs.flatMap((program) =>
+      program.routines.map((routine) => ({
+        program,
+        routine,
+        score: getRoutineEvidenceScore(session, routine),
+      }))
+    ).filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score);
+
+    const best = structuralCandidates[0];
+    const second = structuralCandidates[1];
+    if (best && best.score >= 8 && (!second || best.score > second.score)) {
+      const confidence = Math.min(0.9, 0.6 + best.score / 100);
+      sessionResolutions.push({
+        sessionId: session.id,
+        originalProgramId: session.programId,
+        originalRoutineId: session.routineId,
+        resolvedProgramId: best.program.id,
+        resolvedRoutineId: best.routine.id,
+        method: "structure",
+        confidence,
+        detail: `Recovered through unique block/exercise structure evidence (score ${best.score}).`,
+      });
+      return {
+        ...session,
+        programId: best.program.id,
+        routineId: best.routine.id,
+        memberId: best.program.memberId || session.memberId,
+      };
+    }
+
+    const isAmbiguous = Boolean(best && second && best.score === second.score);
+    sessionResolutions.push({
+      sessionId: session.id,
+      originalProgramId: session.programId,
+      originalRoutineId: session.routineId,
+      resolvedProgramId: null,
+      resolvedRoutineId: null,
+      method: isAmbiguous ? "ambiguous" : "unresolved",
+      confidence: 0,
+      detail: isAmbiguous
+        ? `Multiple program routines produced the same best relationship score (${best?.score || 0}); no guess was made.`
+        : "No exact, unique routine, or unique structural parent could be found.",
+    });
+    return session;
+  });
+
+  const count = (method: LegacySessionResolutionMethod) =>
+    sessionResolutions.filter((resolution) => resolution.method === method).length;
+
+  return {
+    sessions: resolvedSessions,
+    sessionResolutions,
+    report: {
+      totalSessions: sessions.length,
+      exact: count("exact"),
+      recoveredByRoutine: count("routine"),
+      recoveredByStructure: count("structure"),
+      ambiguous: count("ambiguous"),
+      unresolved: count("unresolved"),
+    },
+  };
+};
+
 type PrattMemberRow = {
   id: string;
   profile_id: string | null;
@@ -11541,6 +11717,13 @@ export default function App() {
   const [legacyTrackerExercises] = useState<TrackerExercise[]>(loadLegacyTrackerExercisesSnapshot);
   const [legacyTrackerWorkouts] = useState<TrackerWorkout[]>(loadLegacyTrackerWorkoutsSnapshot);
   const [legacyTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadLegacyTrackerCyclesSnapshot);
+
+  const legacyRelationshipResolution = useMemo(
+    () => resolveLegacyRelationships(legacyPrograms, legacySavedSessions),
+    [legacyPrograms, legacySavedSessions]
+  );
+  const resolvedLegacySessions = legacyRelationshipResolution.sessions;
+  const legacyRelationshipReport = legacyRelationshipResolution.report;
   const [newTrackerExerciseName, setNewTrackerExerciseName] = useState("");
   const [newTrackerExerciseMuscleGroup, setNewTrackerExerciseMuscleGroup] = useState<MuscleGroup>("Chest");
   const [newWorkoutName, setNewWorkoutName] = useState("");
@@ -11847,7 +12030,7 @@ export default function App() {
         ),
       0
     );
-    const sessionEntryCount = legacySavedSessions.reduce(
+    const sessionEntryCount = resolvedLegacySessions.reduce(
       (total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0),
       0
     );
@@ -11872,7 +12055,7 @@ export default function App() {
       routines: routineCount,
       blocks: blockCount,
       programExercises: programExerciseCount,
-      savedSessions: legacySavedSessions.length,
+      savedSessions: resolvedLegacySessions.length,
       sessionEntries: sessionEntryCount,
       trackerExercises: legacyTrackerExercises.length,
       trackerExerciseEntries: trackerExerciseEntryCount,
@@ -11881,20 +12064,20 @@ export default function App() {
       trackerWorkoutEntries: trackerWorkoutEntryCount,
       trackerCycles: legacyTrackerCycles.length,
       programOwnerIds: unique(legacyPrograms.map((program) => program.memberId)),
-      sessionOwnerIds: unique(legacySavedSessions.map((session) => session.memberId)),
+      sessionOwnerIds: unique(resolvedLegacySessions.map((session) => session.memberId)),
       trackerOwnerIds: unique([
         ...legacyTrackerExercises.map((exercise) => exercise.memberId),
         ...legacyTrackerWorkouts.map((workout) => workout.memberId),
         ...legacyTrackerCycles.map((cycle) => cycle.memberId),
       ]),
     };
-  }, [legacyPrograms, legacySavedSessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
+  }, [legacyPrograms, legacyRelationshipResolution, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const legacyOwnerAnalysis = useMemo<LegacyOwnerAnalysis[]>(() => {
     const normalizeOwnerId = (value: string | undefined) => String(value || "").trim() || "(no owner ID)";
     const ownerIds = Array.from(new Set([
       ...legacyPrograms.map((program) => normalizeOwnerId(program.memberId)),
-      ...legacySavedSessions.map((session) => normalizeOwnerId(session.memberId)),
+      ...resolvedLegacySessions.map((session) => normalizeOwnerId(session.memberId)),
       ...legacyTrackerExercises.map((exercise) => normalizeOwnerId(exercise.memberId)),
       ...legacyTrackerWorkouts.map((workout) => normalizeOwnerId(workout.memberId)),
       ...legacyTrackerCycles.map((cycle) => normalizeOwnerId(cycle.memberId)),
@@ -11910,7 +12093,7 @@ export default function App() {
       const ownerBlocks = ownerRoutines.flatMap((routine) => routine.blocks);
       const ownerProgramExercises = ownerBlocks.flatMap((block) => block.exercises);
 
-      const ownerSessions = legacySavedSessions.filter((session) => normalizeOwnerId(session.memberId) === ownerId);
+      const ownerSessions = resolvedLegacySessions.filter((session) => normalizeOwnerId(session.memberId) === ownerId);
       const ownerSessionEntries = ownerSessions.flatMap((session) => session.blocks.flatMap((block) => block.entries));
       const missingSessions = ownerSessions.filter((session) => !programOwnerById.has(session.programId)).length;
       const crossOwnerSessions = ownerSessions.filter((session) => {
@@ -12036,7 +12219,7 @@ export default function App() {
         trackerCycleNames: ownerTrackerCycles.map((cycle) => cycle.name || "Unnamed cycle"),
       };
     });
-  }, [legacyPrograms, legacySavedSessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
+  }, [legacyPrograms, legacyRelationshipResolution, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const legacyCompositeCandidates = useMemo<LegacyCompositeCandidate[]>(() => {
     const normalizeOwnerId = (value: string | undefined) => String(value || "").trim() || "(no owner ID)";
@@ -12049,7 +12232,7 @@ export default function App() {
     };
 
     const programOwnerById = new Map(legacyPrograms.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
-    legacySavedSessions.forEach((session) => {
+    resolvedLegacySessions.forEach((session) => {
       const sessionOwner = normalizeOwnerId(session.memberId);
       const programOwner = programOwnerById.get(session.programId);
       if (programOwner) connect(sessionOwner, programOwner);
@@ -12134,7 +12317,7 @@ export default function App() {
         trackerCycleNames: Array.from(new Set(owners.flatMap((owner) => owner.trackerCycleNames))).sort((a, b) => a.localeCompare(b)),
       };
     }).sort((left, right) => right.sessionEntries - left.sessionEntries || right.programs - left.programs);
-  }, [legacyOwnerAnalysis, legacyPrograms, legacySavedSessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
+  }, [legacyOwnerAnalysis, legacyPrograms, resolvedLegacySessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const legacyDatasetPreviewOptions = useMemo(() => {
     const compositeOwnerIds = new Set(legacyCompositeCandidates.flatMap((candidate) => candidate.ownerIds));
@@ -12261,7 +12444,7 @@ export default function App() {
     const effectiveExerciseIds = new Set([...directExerciseIds, ...dependencyExerciseIds]);
 
     const selectedPrograms = legacyPrograms.filter((program) => directProgramIds.has(program.id));
-    const selectedSessions = legacySavedSessions.filter((session) => directProgramIds.has(session.programId));
+    const selectedSessions = resolvedLegacySessions.filter((session) => directProgramIds.has(session.programId));
     const selectedProgramEntries = selectedSessions.flatMap((session) => session.blocks.flatMap((block) => block.entries));
     const selectedExercises = legacyTrackerExercises.filter((exercise) => effectiveExerciseIds.has(exercise.id));
     const selectedExerciseEntries = selectedExercises.flatMap((exercise) => exercise.entries || []);
@@ -12269,6 +12452,22 @@ export default function App() {
     const selectedWorkoutEntries = selectedWorkoutSlots.flatMap((slot) => slot.entries || []);
 
     const issues: Layer2CValidationIssue[] = [];
+    const selectedProgramOwnerIds = new Set(
+      selectedPrograms.map((program) => String(program.memberId || "").trim() || "(no owner ID)")
+    );
+    legacyRelationshipResolution.sessionResolutions
+      .filter((resolution) => resolution.method === "ambiguous" || resolution.method === "unresolved")
+      .forEach((resolution) => {
+        const rawSession = legacySavedSessions.find((session) => session.id === resolution.sessionId);
+        const rawOwner = String(rawSession?.memberId || "").trim() || "(no owner ID)";
+        if (!selectedProgramOwnerIds.has(rawOwner)) return;
+        issues.push({
+          id: `unresolved-session:${resolution.sessionId}`,
+          level: "error",
+          label: `Unresolved session relationship`,
+          detail: `${resolution.sessionId}: ${resolution.detail}`,
+        });
+      });
     selectedCycles.forEach((cycle) => {
       cycle.workoutIds.forEach((workoutId) => {
         if (!workoutById.has(workoutId)) {
@@ -12340,7 +12539,7 @@ export default function App() {
       errorCount: issues.filter((issue) => issue.level === "error").length,
       warningCount: issues.filter((issue) => issue.level === "warning").length,
     };
-  }, [layer2CSelections, legacyPrograms, legacySavedSessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
+  }, [layer2CSelections, legacyPrograms, legacyRelationshipResolution, legacySavedSessions, resolvedLegacySessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const setLayer2CCategorySelection = (
     category: keyof Layer2CSelectionMap,
@@ -12391,6 +12590,7 @@ export default function App() {
     const planIdentity = {
       sourceOwners: Array.from(layer2CSourceOwnerIds).sort(),
       programs: layer2CPlan.selectedPrograms.map((item) => item.id).sort(),
+      sessions: layer2CPlan.selectedSessions.map((item) => `${item.id}:${item.programId}:${item.routineId}`).sort(),
       trackerExercises: layer2CPlan.selectedExercises.map((item) => item.id).sort(),
       trackerWorkouts: layer2CPlan.selectedWorkouts.map((item) => item.id).sort(),
       trackerCycles: layer2CPlan.selectedCycles.map((item) => item.id).sort(),
@@ -16286,6 +16486,35 @@ export default function App() {
                     </div>
                   </SectionCard>
 
+                  <SectionCard title="Legacy Relationship Reconciliation" collapsible>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {[
+                          ["Exact links", legacyRelationshipReport.exact],
+                          ["Recovered by routine", legacyRelationshipReport.recoveredByRoutine],
+                          ["Recovered by structure", legacyRelationshipReport.recoveredByStructure],
+                          ["Ambiguous", legacyRelationshipReport.ambiguous],
+                          ["Unresolved", legacyRelationshipReport.unresolved],
+                          ["Total sessions", legacyRelationshipReport.totalSessions],
+                        ].map(([label, count]) => (
+                          <div key={String(label)} className="rounded-2xl border border-zinc-200 bg-white p-3">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label}</div>
+                            <div className="mt-1 text-2xl font-bold text-zinc-900">{count}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className={`rounded-2xl border p-4 text-sm ${
+                        legacyRelationshipReport.ambiguous || legacyRelationshipReport.unresolved
+                          ? "border-amber-200 bg-amber-50 text-amber-900"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      }`}>
+                        {legacyRelationshipReport.ambiguous || legacyRelationshipReport.unresolved
+                          ? "Some sessions could not be linked uniquely. They are blocked from migration rather than attached by guesswork."
+                          : "Every saved session has a resolved program and routine relationship. Inventory, ownership analysis, program curation, and Layer 3 now share this same relationship graph."}
+                      </div>
+                    </div>
+                  </SectionCard>
+
                   <SectionCard title="Legacy Ownership Intelligence" collapsible>
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -16379,8 +16608,8 @@ export default function App() {
                                 </div>
                                 <div className="divide-y divide-zinc-100">
                                   {layer2CCandidates.programs.map((program) => {
-                                    const sessionCount = savedSessions.filter((session) => session.programId === program.id).length;
-                                    const entryCount = savedSessions
+                                    const sessionCount = resolvedLegacySessions.filter((session) => session.programId === program.id).length;
+                                    const entryCount = resolvedLegacySessions
                                       .filter((session) => session.programId === program.id)
                                       .reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0);
                                     return (
