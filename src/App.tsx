@@ -12451,7 +12451,18 @@ export default function App() {
     const selectedWorkoutSlots = selectedWorkouts.flatMap((workout) => workout.exerciseSlots || []);
     const selectedWorkoutEntries = selectedWorkoutSlots.flatMap((slot) => slot.entries || []);
 
-    const dependencyFamilies = selectedCycles.map((cycle) => {
+    const dependencyFamilies: Array<{
+      id: string;
+      kind: "cycle" | "workout";
+      name: string;
+      direct: boolean;
+      workouts: TrackerWorkout[];
+      workoutIds: Set<string>;
+      exerciseIds: Set<string>;
+      missingWorkoutIds: string[];
+      missingExerciseIds: string[];
+      complete: boolean;
+    }> = selectedCycles.map((cycle) => {
       const familyWorkouts = cycle.workoutIds
         .map((workoutId) => workoutById.get(workoutId))
         .filter((workout): workout is TrackerWorkout => Boolean(workout));
