@@ -1666,11 +1666,11 @@ type RuntimeDataDomain =
 
 const DATA_SOURCE_BY_DOMAIN: Record<RuntimeDataDomain, RuntimeDataSource> = {
   members: "supabase",
-  programs: "legacy",
-  sessions: "legacy",
-  trackerExercises: "legacy",
-  trackerWorkouts: "legacy",
-  trackerCycles: "legacy",
+  programs: "supabase",
+  sessions: "supabase",
+  trackerExercises: "supabase",
+  trackerWorkouts: "supabase",
+  trackerCycles: "supabase",
 };
 
 const cloneLegacyReference = <T,>(value: T): T =>
@@ -1705,28 +1705,28 @@ const writeLegacyJson = (domain: RuntimeDataDomain, key: string, value: unknown)
 };
 
 const loadProgramsFromDeclaredSource = (): Program[] => {
-  assertLegacySource("programs");
+  if (DATA_SOURCE_BY_DOMAIN.programs === "supabase") return [];
   const stored = readLegacyJson<Program[] | null>(STORAGE_KEYS.programs, null);
   return stored ? mergeProgramsWithBase(stored) : buildInitialPrograms().map(normalizeProgram);
 };
 
 const loadSessionsFromDeclaredSource = (): SavedSession[] => {
-  assertLegacySource("sessions");
+  if (DATA_SOURCE_BY_DOMAIN.sessions === "supabase") return [];
   return readLegacyJson<SavedSession[]>(STORAGE_KEYS.savedSessions, []);
 };
 
 const loadTrackerExercisesFromDeclaredSource = (): TrackerExercise[] => {
-  assertLegacySource("trackerExercises");
+  if (DATA_SOURCE_BY_DOMAIN.trackerExercises === "supabase") return [];
   return readLegacyJson<TrackerExercise[]>(STORAGE_KEYS.trackerExercises, []).map(normalizeTrackerExercise);
 };
 
 const loadTrackerWorkoutsFromDeclaredSource = (): TrackerWorkout[] => {
-  assertLegacySource("trackerWorkouts");
+  if (DATA_SOURCE_BY_DOMAIN.trackerWorkouts === "supabase") return [];
   return readLegacyJson<TrackerWorkout[]>(STORAGE_KEYS.trackerWorkouts, []).map(normalizeTrackerWorkout);
 };
 
 const loadTrackerCyclesFromDeclaredSource = (): TrackerWorkoutCycle[] => {
-  assertLegacySource("trackerCycles");
+  if (DATA_SOURCE_BY_DOMAIN.trackerCycles === "supabase") return [];
   return readLegacyJson<TrackerWorkoutCycle[]>(STORAGE_KEYS.trackerCycles, []);
 };
 
@@ -11473,6 +11473,9 @@ export default function App() {
   const [layer3Error, setLayer3Error] = useState("");
   const [layer3RunId, setLayer3RunId] = useState<string | null>(null);
   const [layer3ActualCounts, setLayer3ActualCounts] = useState<Record<string, number> | null>(null);
+  const [supabaseDataStatus, setSupabaseDataStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [supabaseDataError, setSupabaseDataError] = useState("");
+  const [supabaseDataReloadToken, setSupabaseDataReloadToken] = useState(0);
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
@@ -12707,6 +12710,7 @@ export default function App() {
       setLayer3ActualCounts(actualCounts);
       setLayer3Stage("Migration complete");
       setLayer3Status("completed");
+      setSupabaseDataReloadToken((value) => value + 1);
       await refreshDiagnostics();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -13719,30 +13723,255 @@ export default function App() {
   const tooltipPosition = useMemo(() => getSmartTooltipPosition(lastHoveredGraphPoint, 320), [lastHoveredGraphPoint]);
 
   useEffect(() => {
+    if (!supabase || !authenticatedMemberId) return;
+    if (!Object.values(DATA_SOURCE_BY_DOMAIN).some((source) => source === "supabase")) return;
+
+    let cancelled = false;
+    const legacyId = (row: { id: string; legacy_app_id?: string | null }) => String(row.legacy_app_id || row.id);
+    const finalLegacySegment = (value: string | null | undefined, fallback: string) => {
+      const parts = String(value || "").split("::").filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : fallback;
+    };
+
+    const loadSupabaseRuntimeData = async () => {
+      setSupabaseDataStatus("loading");
+      setSupabaseDataError("");
+      try {
+        const memberId = authenticatedMemberId;
+        const fetchRows = async (table: string) => {
+          const result = await supabase.from(table).select("*").eq("member_id", memberId);
+          if (result.error) throw new Error(`${table}: ${result.error.message}`);
+          return (result.data || []) as Array<Record<string, any>>;
+        };
+
+        const [programRows, routineRows, blockRows, programExerciseRows, sessionRows, sessionEntryRows, trackerExerciseRows, trackerEntryRows, workoutRows, workoutSlotRows, workoutEntryRows, cycleRows, cycleWorkoutRows] = await Promise.all([
+          fetchRows("programs"), fetchRows("routines"), fetchRows("blocks"), fetchRows("program_exercises"),
+          fetchRows("sessions"), fetchRows("session_entries"), fetchRows("tracker_exercises"), fetchRows("tracker_entries"),
+          fetchRows("tracker_workouts"), fetchRows("tracker_workout_slots"), fetchRows("tracker_workout_entries"),
+          fetchRows("tracker_cycles"), fetchRows("tracker_cycle_workouts"),
+        ]);
+
+        const exercisesByBlock = new Map<string, Exercise[]>();
+        const appExerciseIdByDbId = new Map<string, string>();
+        [...programExerciseRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const exerciseId = finalLegacySegment(row.legacy_app_id, row.id);
+          appExerciseIdByDbId.set(row.id, exerciseId);
+          const exercise: Exercise = {
+            id: exerciseId,
+            name: String(row.name || "Unnamed exercise"),
+            target: String(row.target || ""),
+            metric: String(row.metric || ""),
+            premiumFields: Array.isArray(row.premium_fields) ? row.premium_fields : [],
+          };
+          exercisesByBlock.set(row.block_id, [...(exercisesByBlock.get(row.block_id) || []), exercise]);
+        });
+
+        const blocksByRoutine = new Map<string, Block[]>();
+        const appBlockIdByDbId = new Map<string, string>();
+        [...blockRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const blockId = finalLegacySegment(row.legacy_app_id, row.id);
+          appBlockIdByDbId.set(row.id, blockId);
+          const block: Block = {
+            id: blockId,
+            type: row.block_type === "single" ? "single" : "paired",
+            title: String(row.title || "Block"),
+            duration: String(row.duration || ""),
+            notes: String(row.notes || ""),
+            interactionMode: row.interaction_mode === "alternating" ? "alternating" : "na",
+            exercises: exercisesByBlock.get(row.id) || [],
+          };
+          blocksByRoutine.set(row.routine_id, [...(blocksByRoutine.get(row.routine_id) || []), block]);
+        });
+
+        const routinesByProgram = new Map<string, Routine[]>();
+        const appRoutineIdByDbId = new Map<string, string>();
+        [...routineRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const routineId = finalLegacySegment(row.legacy_app_id, row.id);
+          appRoutineIdByDbId.set(row.id, routineId);
+          const routine: Routine = { id: routineId, label: String(row.label || "Day"), blocks: blocksByRoutine.get(row.id) || [] };
+          routinesByProgram.set(row.program_id, [...(routinesByProgram.get(row.program_id) || []), routine]);
+        });
+
+        const appProgramIdByDbId = new Map<string, string>();
+        const loadedPrograms: Program[] = [...programRows]
+          .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+          .map((row) => {
+            const programId = legacyId(row as { id: string; legacy_app_id?: string | null });
+            appProgramIdByDbId.set(row.id, programId);
+            return normalizeProgram({
+              id: programId,
+              name: String(row.name || "Unnamed program"),
+              startedAt: String(row.started_at || ""),
+              status: row.status === "paused" || row.status === "closed" ? row.status : "active",
+              routines: routinesByProgram.get(row.id) || [],
+              notes: String(row.notes || ""),
+              memberId,
+              programLength: row.program_length == null ? undefined : Number(row.program_length),
+              inputMode: row.input_mode === "memberInput" ? "memberInput" : "trainerInput",
+            });
+          });
+
+        const entriesBySession = new Map<string, Array<Record<string, any>>>();
+        [...sessionEntryRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          entriesBySession.set(row.session_id, [...(entriesBySession.get(row.session_id) || []), row]);
+        });
+        const loadedSessions: SavedSession[] = sessionRows.map((row) => {
+          const groupedBlocks = new Map<string, SessionBlockInput>();
+          for (const entryRow of entriesBySession.get(row.id) || []) {
+            const blockId = appBlockIdByDbId.get(entryRow.block_id) || entryRow.block_id;
+            const existingBlock = groupedBlocks.get(entryRow.block_id) || {
+              blockId,
+              blockTitle: blockRows.find((blockRow) => blockRow.id === entryRow.block_id)?.title || "Block",
+              entries: [],
+              contextFlags: [],
+            };
+            existingBlock.entries.push({
+              exerciseId: appExerciseIdByDbId.get(entryRow.exercise_id) || finalLegacySegment(entryRow.legacy_app_id, entryRow.id),
+              exerciseName: String(entryRow.exercise_name || "Unnamed exercise"),
+              weight: String(entryRow.weight || ""),
+              performance: String(entryRow.performance || ""),
+              setsCompleted: String(entryRow.sets_completed || ""),
+              target: String(entryRow.target || ""),
+              metric: String(entryRow.metric || ""),
+              supportMetrics: entryRow.support_metrics && typeof entryRow.support_metrics === "object" ? entryRow.support_metrics : {},
+              contextFlags: Array.isArray(entryRow.context_flags) ? entryRow.context_flags : [],
+              scoringDirection: entryRow.scoring_direction === "lowerIsBetter" || entryRow.scoring_direction === "completion" ? entryRow.scoring_direction : "higherIsBetter",
+            });
+            groupedBlocks.set(entryRow.block_id, existingBlock);
+          }
+          return {
+            id: legacyId(row as { id: string; legacy_app_id?: string | null }),
+            programId: appProgramIdByDbId.get(row.program_id) || row.program_id,
+            routineId: appRoutineIdByDbId.get(row.routine_id) || row.routine_id,
+            memberId,
+            date: String(row.session_date || ""),
+            sessionNumber: String(row.session_number || ""),
+            blocks: Array.from(groupedBlocks.values()),
+            contextFlags: Array.isArray(row.context_flags) ? row.context_flags : [],
+            createdAt: String(row.created_at || new Date().toISOString()),
+          };
+        });
+
+        const trackerEntriesByExercise = new Map<string, TrackerEntry[]>();
+        trackerEntryRows.forEach((row) => {
+          const entry: TrackerEntry = {
+            id: legacyId(row as { id: string; legacy_app_id?: string | null }),
+            entryDate: String(row.entry_date || ""), createdAt: String(row.created_at || ""),
+            values: row.values && typeof row.values === "object" ? row.values : {},
+            circuitIndex: row.circuit_index == null ? undefined : Number(row.circuit_index),
+          };
+          trackerEntriesByExercise.set(row.tracker_exercise_id, [...(trackerEntriesByExercise.get(row.tracker_exercise_id) || []), entry]);
+        });
+        const appTrackerExerciseIdByDbId = new Map<string, string>();
+        const loadedTrackerExercises = trackerExerciseRows.map((row) => {
+          const exerciseId = legacyId(row as { id: string; legacy_app_id?: string | null });
+          appTrackerExerciseIdByDbId.set(row.id, exerciseId);
+          return normalizeTrackerExercise({
+            id: exerciseId, memberId, name: String(row.name || "Unnamed exercise"),
+            muscleGroup: String(row.muscle_group || "Other") as MuscleGroup,
+            metrics: Array.isArray(row.metrics) ? row.metrics : [], entries: trackerEntriesByExercise.get(row.id) || [],
+            archived: Boolean(row.archived), createdAt: String(row.created_at || ""),
+          });
+        });
+
+        const workoutEntriesBySlot = new Map<string, TrackerEntry[]>();
+        workoutEntryRows.forEach((row) => {
+          workoutEntriesBySlot.set(row.workout_slot_id, [...(workoutEntriesBySlot.get(row.workout_slot_id) || []), {
+            id: finalLegacySegment(row.legacy_app_id, row.id), entryDate: String(row.entry_date || ""), createdAt: String(row.created_at || ""),
+            values: row.values && typeof row.values === "object" ? row.values : {},
+            circuitIndex: row.circuit_index == null ? undefined : Number(row.circuit_index),
+          }]);
+        });
+        const slotsByWorkout = new Map<string, TrackerWorkoutExerciseSlot[]>();
+        [...workoutSlotRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const slot: TrackerWorkoutExerciseSlot = {
+            id: finalLegacySegment(row.legacy_app_id, row.id),
+            exerciseId: appTrackerExerciseIdByDbId.get(row.tracker_exercise_id) || row.tracker_exercise_id,
+            createdAt: String(row.created_at || ""), entries: workoutEntriesBySlot.get(row.id) || [],
+          };
+          slotsByWorkout.set(row.workout_id, [...(slotsByWorkout.get(row.workout_id) || []), slot]);
+        });
+        const appWorkoutIdByDbId = new Map<string, string>();
+        const loadedWorkouts = workoutRows.map((row) => {
+          const workoutId = legacyId(row as { id: string; legacy_app_id?: string | null });
+          appWorkoutIdByDbId.set(row.id, workoutId);
+          const slots = slotsByWorkout.get(row.id) || [];
+          return normalizeTrackerWorkout({
+            id: workoutId, memberId, name: String(row.name || "Unnamed workout"), exerciseIds: slots.map((slot) => slot.exerciseId), exerciseSlots: slots,
+            startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined,
+            circuitTarget: row.circuit_target == null ? undefined : Number(row.circuit_target),
+            currentCircuit: row.current_circuit == null ? undefined : Number(row.current_circuit),
+            archived: Boolean(row.archived), createdAt: String(row.created_at || ""),
+          });
+        });
+
+        const cycleWorkoutIds = new Map<string, string[]>();
+        [...cycleWorkoutRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const workoutId = appWorkoutIdByDbId.get(row.workout_id) || row.workout_id;
+          cycleWorkoutIds.set(row.cycle_id, [...(cycleWorkoutIds.get(row.cycle_id) || []), workoutId]);
+        });
+        const loadedCycles: TrackerWorkoutCycle[] = cycleRows.map((row) => ({
+          id: legacyId(row as { id: string; legacy_app_id?: string | null }), memberId, name: String(row.name || "Unnamed cycle"),
+          workoutIds: cycleWorkoutIds.get(row.id) || [],
+          nextWorkoutId: row.next_workout_id ? appWorkoutIdByDbId.get(row.next_workout_id) || row.next_workout_id : undefined,
+          startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined,
+          archived: Boolean(row.archived), createdAt: String(row.created_at || ""),
+        }));
+
+        if (cancelled) return;
+        setPrograms(loadedPrograms);
+        setSavedSessions(loadedSessions);
+        setTrackerExercises(loadedTrackerExercises);
+        setTrackerWorkouts(loadedWorkouts);
+        setTrackerCycles(loadedCycles);
+        setSelectedProgramId((current) => loadedPrograms.some((program) => program.id === current) ? current : loadedPrograms[0]?.id || null);
+        setSupabaseDataStatus("ready");
+      } catch (error) {
+        if (cancelled) return;
+        setSupabaseDataStatus("failed");
+        setSupabaseDataError(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    void loadSupabaseRuntimeData();
+    return () => { cancelled = true; };
+  }, [authenticatedMemberId, supabaseDataReloadToken]);
+
+  useEffect(() => {
     if (DATA_SOURCE_BY_DOMAIN.members === "legacy") {
       writeLegacyJson("members", STORAGE_KEYS.members, members);
     }
   }, [members]);
 
   useEffect(() => {
-    writeLegacyJson("programs", STORAGE_KEYS.programs, programs);
+    if (DATA_SOURCE_BY_DOMAIN.programs === "legacy") {
+      writeLegacyJson("programs", STORAGE_KEYS.programs, programs);
+    }
   }, [programs]);
 
   useEffect(() => {
-    writeLegacyJson("sessions", STORAGE_KEYS.savedSessions, savedSessions);
+    if (DATA_SOURCE_BY_DOMAIN.sessions === "legacy") {
+      writeLegacyJson("sessions", STORAGE_KEYS.savedSessions, savedSessions);
+    }
   }, [savedSessions]);
 
 
   useEffect(() => {
-    writeLegacyJson("trackerExercises", STORAGE_KEYS.trackerExercises, trackerExercises);
+    if (DATA_SOURCE_BY_DOMAIN.trackerExercises === "legacy") {
+      writeLegacyJson("trackerExercises", STORAGE_KEYS.trackerExercises, trackerExercises);
+    }
   }, [trackerExercises]);
 
   useEffect(() => {
-    writeLegacyJson("trackerWorkouts", STORAGE_KEYS.trackerWorkouts, trackerWorkouts);
+    if (DATA_SOURCE_BY_DOMAIN.trackerWorkouts === "legacy") {
+      writeLegacyJson("trackerWorkouts", STORAGE_KEYS.trackerWorkouts, trackerWorkouts);
+    }
   }, [trackerWorkouts]);
 
   useEffect(() => {
-    writeLegacyJson("trackerCycles", STORAGE_KEYS.trackerCycles, trackerCycles);
+    if (DATA_SOURCE_BY_DOMAIN.trackerCycles === "legacy") {
+      writeLegacyJson("trackerCycles", STORAGE_KEYS.trackerCycles, trackerCycles);
+    }
   }, [trackerCycles]);
 
   useEffect(() => {
