@@ -12376,9 +12376,29 @@ export default function App() {
     };
 
     const sourceOwner = (value?: string) => String(value || "").trim() || null;
-    const parseDate = (value?: string) => {
-      const text = String(value || "").trim();
-      return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const parseDate = (value?: string, fallbackTimestamp?: string) => {
+      const normalize = (candidate?: string) => {
+        const text = String(candidate || "").trim();
+        if (!text) return null;
+
+        const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (isoMatch) {
+          const [, year, month, day] = isoMatch;
+          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        }
+
+        const usMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
+        if (usMatch) {
+          const [, month, day, rawYear] = usMatch;
+          const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
+          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        }
+
+        const parsed = new Date(text);
+        return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+      };
+
+      return normalize(value) || normalize(fallbackTimestamp) || new Date().toISOString().slice(0, 10);
     };
     const parseTimestamp = (value?: string) => {
       const text = String(value || "").trim();
@@ -12526,7 +12546,7 @@ export default function App() {
           import_run_id: importRunId,
           legacy_source_owner: sourceOwner(session.memberId),
           legacy_app_id: session.id,
-          session_date: parseDate(session.date),
+          session_date: parseDate(session.date, session.createdAt),
           session_number: positiveInt(session.sessionNumber),
           context_flags: session.contextFlags || [],
           created_at: parseTimestamp(session.createdAt) || undefined,
