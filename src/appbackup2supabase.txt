@@ -1590,6 +1590,182 @@ type Layer2CValidationIssue = {
   detail: string;
 };
 
+type LegacySessionResolutionMethod = "exact" | "routine" | "structure" | "ambiguous" | "unresolved";
+
+type LegacySessionResolution = {
+  sessionId: string;
+  originalProgramId: string;
+  originalRoutineId: string;
+  resolvedProgramId: string | null;
+  resolvedRoutineId: string | null;
+  method: LegacySessionResolutionMethod;
+  confidence: number;
+  detail: string;
+};
+
+type LegacyRelationshipReport = {
+  totalSessions: number;
+  exact: number;
+  recoveredByRoutine: number;
+  recoveredByStructure: number;
+  ambiguous: number;
+  unresolved: number;
+};
+
+type LegacyRelationshipResolution = {
+  sessions: SavedSession[];
+  sessionResolutions: LegacySessionResolution[];
+  report: LegacyRelationshipReport;
+};
+
+const normalizeLegacyLinkText = (value: unknown) =>
+  String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const resolveLegacyRelationships = (
+  programs: Program[],
+  sessions: SavedSession[]
+): LegacyRelationshipResolution => {
+  const programById = new Map(programs.map((program) => [program.id, program]));
+  const routineCandidatesById = new Map<string, Array<{ program: Program; routine: Routine }>>();
+
+  programs.forEach((program) => {
+    program.routines.forEach((routine) => {
+      routineCandidatesById.set(routine.id, [
+        ...(routineCandidatesById.get(routine.id) || []),
+        { program, routine },
+      ]);
+    });
+  });
+
+  const getRoutineEvidenceScore = (session: SavedSession, routine: Routine) => {
+    const sessionBlockIds = new Set(session.blocks.map((block) => block.blockId).filter(Boolean));
+    const sessionBlockTitles = new Set(session.blocks.map((block) => normalizeLegacyLinkText(block.blockTitle)).filter(Boolean));
+    const sessionExerciseIds = new Set(
+      session.blocks.flatMap((block) => block.entries.map((entry) => entry.exerciseId)).filter(Boolean)
+    );
+    const sessionExerciseNames = new Set(
+      session.blocks.flatMap((block) => block.entries.map((entry) => normalizeLegacyLinkText(entry.exerciseName))).filter(Boolean)
+    );
+
+    let score = 0;
+    routine.blocks.forEach((block) => {
+      if (sessionBlockIds.has(block.id)) score += 8;
+      if (sessionBlockTitles.has(normalizeLegacyLinkText(block.title))) score += 3;
+      block.exercises.forEach((exercise) => {
+        if (sessionExerciseIds.has(exercise.id)) score += 2;
+        if (sessionExerciseNames.has(normalizeLegacyLinkText(exercise.name))) score += 1;
+      });
+    });
+    return score;
+  };
+
+  const sessionResolutions: LegacySessionResolution[] = [];
+  const resolvedSessions = sessions.map((session) => {
+    const exactProgram = programById.get(session.programId);
+    const exactRoutine = exactProgram?.routines.find((routine) => routine.id === session.routineId);
+
+    if (exactProgram && exactRoutine) {
+      sessionResolutions.push({
+        sessionId: session.id,
+        originalProgramId: session.programId,
+        originalRoutineId: session.routineId,
+        resolvedProgramId: exactProgram.id,
+        resolvedRoutineId: exactRoutine.id,
+        method: "exact",
+        confidence: 1,
+        detail: "Program and routine IDs matched exactly.",
+      });
+      return {
+        ...session,
+        memberId: exactProgram.memberId || session.memberId,
+      };
+    }
+
+    const routineCandidates = routineCandidatesById.get(session.routineId) || [];
+    if (routineCandidates.length === 1) {
+      const candidate = routineCandidates[0];
+      sessionResolutions.push({
+        sessionId: session.id,
+        originalProgramId: session.programId,
+        originalRoutineId: session.routineId,
+        resolvedProgramId: candidate.program.id,
+        resolvedRoutineId: candidate.routine.id,
+        method: "routine",
+        confidence: 0.95,
+        detail: "Recovered through a unique routine ID even though the stored program ID had drifted.",
+      });
+      return {
+        ...session,
+        programId: candidate.program.id,
+        routineId: candidate.routine.id,
+        memberId: candidate.program.memberId || session.memberId,
+      };
+    }
+
+    const structuralCandidates = programs.flatMap((program) =>
+      program.routines.map((routine) => ({
+        program,
+        routine,
+        score: getRoutineEvidenceScore(session, routine),
+      }))
+    ).filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score);
+
+    const best = structuralCandidates[0];
+    const second = structuralCandidates[1];
+    if (best && best.score >= 8 && (!second || best.score > second.score)) {
+      const confidence = Math.min(0.9, 0.6 + best.score / 100);
+      sessionResolutions.push({
+        sessionId: session.id,
+        originalProgramId: session.programId,
+        originalRoutineId: session.routineId,
+        resolvedProgramId: best.program.id,
+        resolvedRoutineId: best.routine.id,
+        method: "structure",
+        confidence,
+        detail: `Recovered through unique block/exercise structure evidence (score ${best.score}).`,
+      });
+      return {
+        ...session,
+        programId: best.program.id,
+        routineId: best.routine.id,
+        memberId: best.program.memberId || session.memberId,
+      };
+    }
+
+    const isAmbiguous = Boolean(best && second && best.score === second.score);
+    sessionResolutions.push({
+      sessionId: session.id,
+      originalProgramId: session.programId,
+      originalRoutineId: session.routineId,
+      resolvedProgramId: null,
+      resolvedRoutineId: null,
+      method: isAmbiguous ? "ambiguous" : "unresolved",
+      confidence: 0,
+      detail: isAmbiguous
+        ? `Multiple program routines produced the same best relationship score (${best?.score || 0}); no guess was made.`
+        : "No exact, unique routine, or unique structural parent could be found.",
+    });
+    return session;
+  });
+
+  const count = (method: LegacySessionResolutionMethod) =>
+    sessionResolutions.filter((resolution) => resolution.method === method).length;
+
+  return {
+    sessions: resolvedSessions,
+    sessionResolutions,
+    report: {
+      totalSessions: sessions.length,
+      exact: count("exact"),
+      recoveredByRoutine: count("routine"),
+      recoveredByStructure: count("structure"),
+      ambiguous: count("ambiguous"),
+      unresolved: count("unresolved"),
+    },
+  };
+};
+
 type PrattMemberRow = {
   id: string;
   profile_id: string | null;
@@ -1666,11 +1842,11 @@ type RuntimeDataDomain =
 
 const DATA_SOURCE_BY_DOMAIN: Record<RuntimeDataDomain, RuntimeDataSource> = {
   members: "supabase",
-  programs: "legacy",
-  sessions: "legacy",
-  trackerExercises: "legacy",
-  trackerWorkouts: "legacy",
-  trackerCycles: "legacy",
+  programs: "supabase",
+  sessions: "supabase",
+  trackerExercises: "supabase",
+  trackerWorkouts: "supabase",
+  trackerCycles: "supabase",
 };
 
 const cloneLegacyReference = <T,>(value: T): T =>
@@ -1705,30 +1881,51 @@ const writeLegacyJson = (domain: RuntimeDataDomain, key: string, value: unknown)
 };
 
 const loadProgramsFromDeclaredSource = (): Program[] => {
-  assertLegacySource("programs");
+  if (DATA_SOURCE_BY_DOMAIN.programs === "supabase") return [];
   const stored = readLegacyJson<Program[] | null>(STORAGE_KEYS.programs, null);
   return stored ? mergeProgramsWithBase(stored) : buildInitialPrograms().map(normalizeProgram);
 };
 
 const loadSessionsFromDeclaredSource = (): SavedSession[] => {
-  assertLegacySource("sessions");
+  if (DATA_SOURCE_BY_DOMAIN.sessions === "supabase") return [];
   return readLegacyJson<SavedSession[]>(STORAGE_KEYS.savedSessions, []);
 };
 
 const loadTrackerExercisesFromDeclaredSource = (): TrackerExercise[] => {
-  assertLegacySource("trackerExercises");
+  if (DATA_SOURCE_BY_DOMAIN.trackerExercises === "supabase") return [];
   return readLegacyJson<TrackerExercise[]>(STORAGE_KEYS.trackerExercises, []).map(normalizeTrackerExercise);
 };
 
 const loadTrackerWorkoutsFromDeclaredSource = (): TrackerWorkout[] => {
-  assertLegacySource("trackerWorkouts");
+  if (DATA_SOURCE_BY_DOMAIN.trackerWorkouts === "supabase") return [];
   return readLegacyJson<TrackerWorkout[]>(STORAGE_KEYS.trackerWorkouts, []).map(normalizeTrackerWorkout);
 };
 
 const loadTrackerCyclesFromDeclaredSource = (): TrackerWorkoutCycle[] => {
-  assertLegacySource("trackerCycles");
+  if (DATA_SOURCE_BY_DOMAIN.trackerCycles === "supabase") return [];
   return readLegacyJson<TrackerWorkoutCycle[]>(STORAGE_KEYS.trackerCycles, []);
 };
+
+// ===== PERMANENT HYBRID MIGRATION SOURCE =====
+// Normal app screens use DATA_SOURCE_BY_DOMAIN (currently Supabase).
+// Diagnostics and Layer 2C/3 always read this device's untouched legacy
+// browser storage directly, so migrations never depend on the runtime source.
+const loadLegacyProgramsSnapshot = (): Program[] => {
+  const stored = readLegacyJson<Program[] | null>(STORAGE_KEYS.programs, null);
+  return stored ? mergeProgramsWithBase(stored) : buildInitialPrograms().map(normalizeProgram);
+};
+
+const loadLegacySessionsSnapshot = (): SavedSession[] =>
+  readLegacyJson<SavedSession[]>(STORAGE_KEYS.savedSessions, []);
+
+const loadLegacyTrackerExercisesSnapshot = (): TrackerExercise[] =>
+  readLegacyJson<TrackerExercise[]>(STORAGE_KEYS.trackerExercises, []).map(normalizeTrackerExercise);
+
+const loadLegacyTrackerWorkoutsSnapshot = (): TrackerWorkout[] =>
+  readLegacyJson<TrackerWorkout[]>(STORAGE_KEYS.trackerWorkouts, []).map(normalizeTrackerWorkout);
+
+const loadLegacyTrackerCyclesSnapshot = (): TrackerWorkoutCycle[] =>
+  readLegacyJson<TrackerWorkoutCycle[]>(STORAGE_KEYS.trackerCycles, []);
 
 const getDataSourceSummary = () =>
   Object.entries(DATA_SOURCE_BY_DOMAIN)
@@ -11473,12 +11670,15 @@ export default function App() {
   const [layer3Error, setLayer3Error] = useState("");
   const [layer3RunId, setLayer3RunId] = useState<string | null>(null);
   const [layer3ActualCounts, setLayer3ActualCounts] = useState<Record<string, number> | null>(null);
+  const [, setSupabaseDataStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [, setSupabaseDataError] = useState("");
+  const [supabaseDataReloadToken, setSupabaseDataReloadToken] = useState(0);
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [workspaceMemberId, setWorkspaceMemberId] = useState<string | null>(null);
   const [isEditingMember, setIsEditingMember] = useState(false);
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
@@ -11508,6 +11708,22 @@ export default function App() {
   const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(loadTrackerExercisesFromDeclaredSource);
   const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(loadTrackerWorkoutsFromDeclaredSource);
   const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
+
+
+  // Immutable per-device legacy source used only by Diagnostics and migration.
+  // Supabase readback can replace the visible runtime state without erasing this source.
+  const [legacyPrograms] = useState<Program[]>(loadLegacyProgramsSnapshot);
+  const [legacySavedSessions] = useState<SavedSession[]>(loadLegacySessionsSnapshot);
+  const [legacyTrackerExercises] = useState<TrackerExercise[]>(loadLegacyTrackerExercisesSnapshot);
+  const [legacyTrackerWorkouts] = useState<TrackerWorkout[]>(loadLegacyTrackerWorkoutsSnapshot);
+  const [legacyTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadLegacyTrackerCyclesSnapshot);
+
+  const legacyRelationshipResolution = useMemo(
+    () => resolveLegacyRelationships(legacyPrograms, legacySavedSessions),
+    [legacyPrograms, legacySavedSessions]
+  );
+  const resolvedLegacySessions = legacyRelationshipResolution.sessions;
+  const legacyRelationshipReport = legacyRelationshipResolution.report;
   const [newTrackerExerciseName, setNewTrackerExerciseName] = useState("");
   const [newTrackerExerciseMuscleGroup, setNewTrackerExerciseMuscleGroup] = useState<MuscleGroup>("Chest");
   const [newWorkoutName, setNewWorkoutName] = useState("");
@@ -11597,7 +11813,7 @@ export default function App() {
       (member) => member.profile_id === user.id
     );
     setAuthenticatedMemberId(ownMember?.id || null);
-    setSelectedMemberId((current) => {
+    setWorkspaceMemberId((current) => {
       if (current && nextMembers.some((member) => member.id === current)) return current;
       return ownMember?.id || nextMembers[0]?.id || null;
     });
@@ -11605,7 +11821,7 @@ export default function App() {
 
   const clearSupabaseIdentity = () => {
     setMembers([]);
-    setSelectedMemberId(null);
+    setWorkspaceMemberId(null);
     setProfileRow(null);
     setAuthenticatedMemberId(null);
     setRole("member");
@@ -11772,23 +11988,40 @@ export default function App() {
     );
   }, [members, memberSearch, viewArchivedMembers, showAllMembers]);
 
-  const selectedMember = useMemo(
-    () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
-    [members, selectedMemberId]
-  );
-
   const ownMember = useMemo(
     () => members.find((member) => member.id === authenticatedMemberId) || null,
     [authenticatedMemberId, members]
   );
 
+  const workspaceMember = useMemo(
+    () => members.find((member) => member.id === workspaceMemberId) || members[0] || null,
+    [members, workspaceMemberId]
+  );
+
+  const isTrainerWorkspaceScreen =
+    canUseTrainerWorkspace &&
+    [
+      "members",
+      "memberOverview",
+      "adminPrograms",
+      "programView",
+      "builder",
+      "adminDash",
+      "input",
+    ].includes(screen);
+
+  // Identity boundary:
+  // Personal routes always resolve to the authenticated member.
+  // Trainer/admin workspace routes resolve to the explicitly selected client.
+  const selectedMember = isTrainerWorkspaceScreen ? workspaceMember : ownMember;
+
   const legacyDiagnosticSnapshot = useMemo<LegacyDiagnosticSnapshot>(() => {
-    const routineCount = programs.reduce((total, program) => total + program.routines.length, 0);
-    const blockCount = programs.reduce(
+    const routineCount = legacyPrograms.reduce((total, program) => total + program.routines.length, 0);
+    const blockCount = legacyPrograms.reduce(
       (total, program) => total + program.routines.reduce((routineTotal, routine) => routineTotal + routine.blocks.length, 0),
       0
     );
-    const programExerciseCount = programs.reduce(
+    const programExerciseCount = legacyPrograms.reduce(
       (total, program) =>
         total + program.routines.reduce(
           (routineTotal, routine) =>
@@ -11797,19 +12030,19 @@ export default function App() {
         ),
       0
     );
-    const sessionEntryCount = savedSessions.reduce(
+    const sessionEntryCount = resolvedLegacySessions.reduce(
       (total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0),
       0
     );
-    const trackerExerciseEntryCount = trackerExercises.reduce(
+    const trackerExerciseEntryCount = legacyTrackerExercises.reduce(
       (total, exercise) => total + (exercise.entries?.length || 0),
       0
     );
-    const trackerWorkoutSlotCount = trackerWorkouts.reduce(
+    const trackerWorkoutSlotCount = legacyTrackerWorkouts.reduce(
       (total, workout) => total + (workout.exerciseSlots?.length || workout.exerciseIds.length),
       0
     );
-    const trackerWorkoutEntryCount = trackerWorkouts.reduce(
+    const trackerWorkoutEntryCount = legacyTrackerWorkouts.reduce(
       (total, workout) =>
         total + (workout.exerciseSlots || []).reduce((slotTotal, slot) => slotTotal + (slot.entries?.length || 0), 0),
       0
@@ -11818,49 +12051,49 @@ export default function App() {
       Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean))).sort();
 
     return {
-      programs: programs.length,
+      programs: legacyPrograms.length,
       routines: routineCount,
       blocks: blockCount,
       programExercises: programExerciseCount,
-      savedSessions: savedSessions.length,
+      savedSessions: resolvedLegacySessions.length,
       sessionEntries: sessionEntryCount,
-      trackerExercises: trackerExercises.length,
+      trackerExercises: legacyTrackerExercises.length,
       trackerExerciseEntries: trackerExerciseEntryCount,
-      trackerWorkouts: trackerWorkouts.length,
+      trackerWorkouts: legacyTrackerWorkouts.length,
       trackerWorkoutSlots: trackerWorkoutSlotCount,
       trackerWorkoutEntries: trackerWorkoutEntryCount,
-      trackerCycles: trackerCycles.length,
-      programOwnerIds: unique(programs.map((program) => program.memberId)),
-      sessionOwnerIds: unique(savedSessions.map((session) => session.memberId)),
+      trackerCycles: legacyTrackerCycles.length,
+      programOwnerIds: unique(legacyPrograms.map((program) => program.memberId)),
+      sessionOwnerIds: unique(resolvedLegacySessions.map((session) => session.memberId)),
       trackerOwnerIds: unique([
-        ...trackerExercises.map((exercise) => exercise.memberId),
-        ...trackerWorkouts.map((workout) => workout.memberId),
-        ...trackerCycles.map((cycle) => cycle.memberId),
+        ...legacyTrackerExercises.map((exercise) => exercise.memberId),
+        ...legacyTrackerWorkouts.map((workout) => workout.memberId),
+        ...legacyTrackerCycles.map((cycle) => cycle.memberId),
       ]),
     };
-  }, [programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+  }, [legacyPrograms, legacyRelationshipResolution, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const legacyOwnerAnalysis = useMemo<LegacyOwnerAnalysis[]>(() => {
     const normalizeOwnerId = (value: string | undefined) => String(value || "").trim() || "(no owner ID)";
     const ownerIds = Array.from(new Set([
-      ...programs.map((program) => normalizeOwnerId(program.memberId)),
-      ...savedSessions.map((session) => normalizeOwnerId(session.memberId)),
-      ...trackerExercises.map((exercise) => normalizeOwnerId(exercise.memberId)),
-      ...trackerWorkouts.map((workout) => normalizeOwnerId(workout.memberId)),
-      ...trackerCycles.map((cycle) => normalizeOwnerId(cycle.memberId)),
+      ...legacyPrograms.map((program) => normalizeOwnerId(program.memberId)),
+      ...resolvedLegacySessions.map((session) => normalizeOwnerId(session.memberId)),
+      ...legacyTrackerExercises.map((exercise) => normalizeOwnerId(exercise.memberId)),
+      ...legacyTrackerWorkouts.map((workout) => normalizeOwnerId(workout.memberId)),
+      ...legacyTrackerCycles.map((cycle) => normalizeOwnerId(cycle.memberId)),
     ])).sort((left, right) => left.localeCompare(right));
 
-    const programOwnerById = new Map(programs.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
-    const trackerExerciseOwnerById = new Map(trackerExercises.map((exercise) => [exercise.id, normalizeOwnerId(exercise.memberId)]));
-    const trackerWorkoutOwnerById = new Map(trackerWorkouts.map((workout) => [workout.id, normalizeOwnerId(workout.memberId)]));
+    const programOwnerById = new Map(legacyPrograms.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
+    const trackerExerciseOwnerById = new Map(legacyTrackerExercises.map((exercise) => [exercise.id, normalizeOwnerId(exercise.memberId)]));
+    const trackerWorkoutOwnerById = new Map(legacyTrackerWorkouts.map((workout) => [workout.id, normalizeOwnerId(workout.memberId)]));
 
     return ownerIds.map((ownerId) => {
-      const ownerPrograms = programs.filter((program) => normalizeOwnerId(program.memberId) === ownerId);
+      const ownerPrograms = legacyPrograms.filter((program) => normalizeOwnerId(program.memberId) === ownerId);
       const ownerRoutines = ownerPrograms.flatMap((program) => program.routines);
       const ownerBlocks = ownerRoutines.flatMap((routine) => routine.blocks);
       const ownerProgramExercises = ownerBlocks.flatMap((block) => block.exercises);
 
-      const ownerSessions = savedSessions.filter((session) => normalizeOwnerId(session.memberId) === ownerId);
+      const ownerSessions = resolvedLegacySessions.filter((session) => normalizeOwnerId(session.memberId) === ownerId);
       const ownerSessionEntries = ownerSessions.flatMap((session) => session.blocks.flatMap((block) => block.entries));
       const missingSessions = ownerSessions.filter((session) => !programOwnerById.has(session.programId)).length;
       const crossOwnerSessions = ownerSessions.filter((session) => {
@@ -11869,10 +12102,10 @@ export default function App() {
       }).length;
       const unownedParentSessions = ownerSessions.filter((session) => programOwnerById.get(session.programId) === "(no owner ID)").length;
 
-      const ownerTrackerExercises = trackerExercises.filter((exercise) => normalizeOwnerId(exercise.memberId) === ownerId);
+      const ownerTrackerExercises = legacyTrackerExercises.filter((exercise) => normalizeOwnerId(exercise.memberId) === ownerId);
       const ownerTrackerExerciseEntries = ownerTrackerExercises.flatMap((exercise) => exercise.entries || []);
 
-      const ownerTrackerWorkouts = trackerWorkouts.filter((workout) => normalizeOwnerId(workout.memberId) === ownerId);
+      const ownerTrackerWorkouts = legacyTrackerWorkouts.filter((workout) => normalizeOwnerId(workout.memberId) === ownerId);
       const ownerTrackerWorkoutSlots = ownerTrackerWorkouts.flatMap((workout) => workout.exerciseSlots || []);
       const ownerTrackerWorkoutEntries = ownerTrackerWorkoutSlots.flatMap((slot) => slot.entries || []);
       const missingTrackerWorkouts = ownerTrackerWorkouts.filter((workout) => {
@@ -11891,7 +12124,7 @@ export default function App() {
         });
       }).length;
 
-      const ownerTrackerCycles = trackerCycles.filter((cycle) => normalizeOwnerId(cycle.memberId) === ownerId);
+      const ownerTrackerCycles = legacyTrackerCycles.filter((cycle) => normalizeOwnerId(cycle.memberId) === ownerId);
       const missingTrackerCycles = ownerTrackerCycles.filter((cycle) =>
         cycle.workoutIds.some((workoutId) => !trackerWorkoutOwnerById.has(workoutId))
       ).length;
@@ -11986,7 +12219,7 @@ export default function App() {
         trackerCycleNames: ownerTrackerCycles.map((cycle) => cycle.name || "Unnamed cycle"),
       };
     });
-  }, [programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+  }, [legacyPrograms, legacyRelationshipResolution, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const legacyCompositeCandidates = useMemo<LegacyCompositeCandidate[]>(() => {
     const normalizeOwnerId = (value: string | undefined) => String(value || "").trim() || "(no owner ID)";
@@ -11998,15 +12231,15 @@ export default function App() {
       adjacency.get(right)?.add(left);
     };
 
-    const programOwnerById = new Map(programs.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
-    savedSessions.forEach((session) => {
+    const programOwnerById = new Map(legacyPrograms.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
+    resolvedLegacySessions.forEach((session) => {
       const sessionOwner = normalizeOwnerId(session.memberId);
       const programOwner = programOwnerById.get(session.programId);
       if (programOwner) connect(sessionOwner, programOwner);
     });
 
-    const exerciseOwnerById = new Map(trackerExercises.map((exercise) => [exercise.id, normalizeOwnerId(exercise.memberId)]));
-    trackerWorkouts.forEach((workout) => {
+    const exerciseOwnerById = new Map(legacyTrackerExercises.map((exercise) => [exercise.id, normalizeOwnerId(exercise.memberId)]));
+    legacyTrackerWorkouts.forEach((workout) => {
       const workoutOwner = normalizeOwnerId(workout.memberId);
       const referencedExerciseIds = workout.exerciseSlots?.length
         ? workout.exerciseSlots.map((slot) => slot.exerciseId)
@@ -12017,8 +12250,8 @@ export default function App() {
       });
     });
 
-    const workoutOwnerById = new Map(trackerWorkouts.map((workout) => [workout.id, normalizeOwnerId(workout.memberId)]));
-    trackerCycles.forEach((cycle) => {
+    const workoutOwnerById = new Map(legacyTrackerWorkouts.map((workout) => [workout.id, normalizeOwnerId(workout.memberId)]));
+    legacyTrackerCycles.forEach((cycle) => {
       const cycleOwner = normalizeOwnerId(cycle.memberId);
       cycle.workoutIds.forEach((workoutId) => {
         const workoutOwner = workoutOwnerById.get(workoutId);
@@ -12084,7 +12317,7 @@ export default function App() {
         trackerCycleNames: Array.from(new Set(owners.flatMap((owner) => owner.trackerCycleNames))).sort((a, b) => a.localeCompare(b)),
       };
     }).sort((left, right) => right.sessionEntries - left.sessionEntries || right.programs - left.programs);
-  }, [legacyOwnerAnalysis, programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+  }, [legacyOwnerAnalysis, legacyPrograms, resolvedLegacySessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const legacyDatasetPreviewOptions = useMemo(() => {
     const compositeOwnerIds = new Set(legacyCompositeCandidates.flatMap((candidate) => candidate.ownerIds));
@@ -12165,12 +12398,12 @@ export default function App() {
     const ownerSelected = (value: string | undefined) => layer2CSourceOwnerIds.has(normalizeOwnerId(value));
 
     return {
-      programs: programs.filter((program) => ownerSelected(program.memberId)),
-      trackerExercises: trackerExercises.filter((exercise) => ownerSelected(exercise.memberId)),
-      trackerWorkouts: trackerWorkouts.filter((workout) => ownerSelected(workout.memberId)),
-      trackerCycles: trackerCycles.filter((cycle) => ownerSelected(cycle.memberId)),
+      programs: legacyPrograms.filter((program) => ownerSelected(program.memberId)),
+      trackerExercises: legacyTrackerExercises.filter((exercise) => ownerSelected(exercise.memberId)),
+      trackerWorkouts: legacyTrackerWorkouts.filter((workout) => ownerSelected(workout.memberId)),
+      trackerCycles: legacyTrackerCycles.filter((cycle) => ownerSelected(cycle.memberId)),
     };
-  }, [layer2CSourceOwnerIds, programs, trackerCycles, trackerExercises, trackerWorkouts]);
+  }, [layer2CSourceOwnerIds, legacyPrograms, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   useEffect(() => {
     setLayer2CSelections((current) => {
@@ -12197,12 +12430,12 @@ export default function App() {
     const directWorkoutIds = new Set(Object.entries(layer2CSelections.trackerWorkouts).filter(([, selected]) => selected).map(([id]) => id));
     const directCycleIds = new Set(Object.entries(layer2CSelections.trackerCycles).filter(([, selected]) => selected).map(([id]) => id));
 
-    const workoutById = new Map(trackerWorkouts.map((workout) => [workout.id, workout]));
-    const exerciseById = new Map(trackerExercises.map((exercise) => [exercise.id, exercise]));
-    const selectedCycles = trackerCycles.filter((cycle) => directCycleIds.has(cycle.id));
+    const workoutById = new Map(legacyTrackerWorkouts.map((workout) => [workout.id, workout]));
+    const exerciseById = new Map(legacyTrackerExercises.map((exercise) => [exercise.id, exercise]));
+    const selectedCycles = legacyTrackerCycles.filter((cycle) => directCycleIds.has(cycle.id));
     const dependencyWorkoutIds = new Set(selectedCycles.flatMap((cycle) => cycle.workoutIds));
     const effectiveWorkoutIds = new Set([...directWorkoutIds, ...dependencyWorkoutIds]);
-    const selectedWorkouts = trackerWorkouts.filter((workout) => effectiveWorkoutIds.has(workout.id));
+    const selectedWorkouts = legacyTrackerWorkouts.filter((workout) => effectiveWorkoutIds.has(workout.id));
     const dependencyExerciseIds = new Set(
       selectedWorkouts.flatMap((workout) =>
         workout.exerciseSlots?.length ? workout.exerciseSlots.map((slot) => slot.exerciseId) : workout.exerciseIds
@@ -12210,15 +12443,31 @@ export default function App() {
     );
     const effectiveExerciseIds = new Set([...directExerciseIds, ...dependencyExerciseIds]);
 
-    const selectedPrograms = programs.filter((program) => directProgramIds.has(program.id));
-    const selectedSessions = savedSessions.filter((session) => directProgramIds.has(session.programId));
+    const selectedPrograms = legacyPrograms.filter((program) => directProgramIds.has(program.id));
+    const selectedSessions = resolvedLegacySessions.filter((session) => directProgramIds.has(session.programId));
     const selectedProgramEntries = selectedSessions.flatMap((session) => session.blocks.flatMap((block) => block.entries));
-    const selectedExercises = trackerExercises.filter((exercise) => effectiveExerciseIds.has(exercise.id));
+    const selectedExercises = legacyTrackerExercises.filter((exercise) => effectiveExerciseIds.has(exercise.id));
     const selectedExerciseEntries = selectedExercises.flatMap((exercise) => exercise.entries || []);
     const selectedWorkoutSlots = selectedWorkouts.flatMap((workout) => workout.exerciseSlots || []);
     const selectedWorkoutEntries = selectedWorkoutSlots.flatMap((slot) => slot.entries || []);
 
     const issues: Layer2CValidationIssue[] = [];
+    const selectedProgramOwnerIds = new Set(
+      selectedPrograms.map((program) => String(program.memberId || "").trim() || "(no owner ID)")
+    );
+    legacyRelationshipResolution.sessionResolutions
+      .filter((resolution) => resolution.method === "ambiguous" || resolution.method === "unresolved")
+      .forEach((resolution) => {
+        const rawSession = legacySavedSessions.find((session) => session.id === resolution.sessionId);
+        const rawOwner = String(rawSession?.memberId || "").trim() || "(no owner ID)";
+        if (!selectedProgramOwnerIds.has(rawOwner)) return;
+        issues.push({
+          id: `unresolved-session:${resolution.sessionId}`,
+          level: "error",
+          label: `Unresolved session relationship`,
+          detail: `${resolution.sessionId}: ${resolution.detail}`,
+        });
+      });
     selectedCycles.forEach((cycle) => {
       cycle.workoutIds.forEach((workoutId) => {
         if (!workoutById.has(workoutId)) {
@@ -12290,7 +12539,7 @@ export default function App() {
       errorCount: issues.filter((issue) => issue.level === "error").length,
       warningCount: issues.filter((issue) => issue.level === "warning").length,
     };
-  }, [layer2CSelections, programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+  }, [layer2CSelections, legacyPrograms, legacyRelationshipResolution, legacySavedSessions, resolvedLegacySessions, legacyTrackerCycles, legacyTrackerExercises, legacyTrackerWorkouts]);
 
   const setLayer2CCategorySelection = (
     category: keyof Layer2CSelectionMap,
@@ -12341,6 +12590,7 @@ export default function App() {
     const planIdentity = {
       sourceOwners: Array.from(layer2CSourceOwnerIds).sort(),
       programs: layer2CPlan.selectedPrograms.map((item) => item.id).sort(),
+      sessions: layer2CPlan.selectedSessions.map((item) => `${item.id}:${item.programId}:${item.routineId}`).sort(),
       trackerExercises: layer2CPlan.selectedExercises.map((item) => item.id).sort(),
       trackerWorkouts: layer2CPlan.selectedWorkouts.map((item) => item.id).sort(),
       trackerCycles: layer2CPlan.selectedCycles.map((item) => item.id).sort(),
@@ -12373,9 +12623,29 @@ export default function App() {
     };
 
     const sourceOwner = (value?: string) => String(value || "").trim() || null;
-    const parseDate = (value?: string) => {
-      const text = String(value || "").trim();
-      return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const parseDate = (value?: string, fallbackTimestamp?: string) => {
+      const normalize = (candidate?: string) => {
+        const text = String(candidate || "").trim();
+        if (!text) return null;
+
+        const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (isoMatch) {
+          const [, year, month, day] = isoMatch;
+          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        }
+
+        const usMatch = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
+        if (usMatch) {
+          const [, month, day, rawYear] = usMatch;
+          const year = rawYear.length === 2 ? `20${rawYear}` : rawYear;
+          return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        }
+
+        const parsed = new Date(text);
+        return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+      };
+
+      return normalize(value) || normalize(fallbackTimestamp) || new Date().toISOString().slice(0, 10);
     };
     const parseTimestamp = (value?: string) => {
       const text = String(value || "").trim();
@@ -12523,7 +12793,7 @@ export default function App() {
           import_run_id: importRunId,
           legacy_source_owner: sourceOwner(session.memberId),
           legacy_app_id: session.id,
-          session_date: parseDate(session.date),
+          session_date: parseDate(session.date, session.createdAt),
           session_number: positiveInt(session.sessionNumber),
           context_flags: session.contextFlags || [],
           created_at: parseTimestamp(session.createdAt) || undefined,
@@ -12707,6 +12977,7 @@ export default function App() {
       setLayer3ActualCounts(actualCounts);
       setLayer3Stage("Migration complete");
       setLayer3Status("completed");
+      setSupabaseDataReloadToken((value) => value + 1);
       await refreshDiagnostics();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -13719,30 +13990,255 @@ export default function App() {
   const tooltipPosition = useMemo(() => getSmartTooltipPosition(lastHoveredGraphPoint, 320), [lastHoveredGraphPoint]);
 
   useEffect(() => {
+    if (!supabase || !authenticatedMemberId) return;
+    if (!Object.values(DATA_SOURCE_BY_DOMAIN).some((source) => source === "supabase")) return;
+
+    let cancelled = false;
+    const legacyId = (row: { id: string; legacy_app_id?: string | null }) => String(row.legacy_app_id || row.id);
+    const finalLegacySegment = (value: string | null | undefined, fallback: string) => {
+      const parts = String(value || "").split("::").filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : fallback;
+    };
+
+    const loadSupabaseRuntimeData = async () => {
+      setSupabaseDataStatus("loading");
+      setSupabaseDataError("");
+      try {
+        const memberId = authenticatedMemberId;
+        const fetchRows = async (table: string) => {
+          const result = await supabase.from(table).select("*").eq("member_id", memberId);
+          if (result.error) throw new Error(`${table}: ${result.error.message}`);
+          return (result.data || []) as Array<Record<string, any>>;
+        };
+
+        const [programRows, routineRows, blockRows, programExerciseRows, sessionRows, sessionEntryRows, trackerExerciseRows, trackerEntryRows, workoutRows, workoutSlotRows, workoutEntryRows, cycleRows, cycleWorkoutRows] = await Promise.all([
+          fetchRows("programs"), fetchRows("routines"), fetchRows("blocks"), fetchRows("program_exercises"),
+          fetchRows("sessions"), fetchRows("session_entries"), fetchRows("tracker_exercises"), fetchRows("tracker_entries"),
+          fetchRows("tracker_workouts"), fetchRows("tracker_workout_slots"), fetchRows("tracker_workout_entries"),
+          fetchRows("tracker_cycles"), fetchRows("tracker_cycle_workouts"),
+        ]);
+
+        const exercisesByBlock = new Map<string, Exercise[]>();
+        const appExerciseIdByDbId = new Map<string, string>();
+        [...programExerciseRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const exerciseId = finalLegacySegment(row.legacy_app_id, row.id);
+          appExerciseIdByDbId.set(row.id, exerciseId);
+          const exercise: Exercise = {
+            id: exerciseId,
+            name: String(row.name || "Unnamed exercise"),
+            target: String(row.target || ""),
+            metric: String(row.metric || ""),
+            premiumFields: Array.isArray(row.premium_fields) ? row.premium_fields : [],
+          };
+          exercisesByBlock.set(row.block_id, [...(exercisesByBlock.get(row.block_id) || []), exercise]);
+        });
+
+        const blocksByRoutine = new Map<string, Block[]>();
+        const appBlockIdByDbId = new Map<string, string>();
+        [...blockRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const blockId = finalLegacySegment(row.legacy_app_id, row.id);
+          appBlockIdByDbId.set(row.id, blockId);
+          const block: Block = {
+            id: blockId,
+            type: row.block_type === "single" ? "single" : "paired",
+            title: String(row.title || "Block"),
+            duration: String(row.duration || ""),
+            notes: String(row.notes || ""),
+            interactionMode: row.interaction_mode === "alternating" ? "alternating" : "na",
+            exercises: exercisesByBlock.get(row.id) || [],
+          };
+          blocksByRoutine.set(row.routine_id, [...(blocksByRoutine.get(row.routine_id) || []), block]);
+        });
+
+        const routinesByProgram = new Map<string, Routine[]>();
+        const appRoutineIdByDbId = new Map<string, string>();
+        [...routineRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const routineId = finalLegacySegment(row.legacy_app_id, row.id);
+          appRoutineIdByDbId.set(row.id, routineId);
+          const routine: Routine = { id: routineId, label: String(row.label || "Day"), blocks: blocksByRoutine.get(row.id) || [] };
+          routinesByProgram.set(row.program_id, [...(routinesByProgram.get(row.program_id) || []), routine]);
+        });
+
+        const appProgramIdByDbId = new Map<string, string>();
+        const loadedPrograms: Program[] = [...programRows]
+          .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+          .map((row) => {
+            const programId = legacyId(row as { id: string; legacy_app_id?: string | null });
+            appProgramIdByDbId.set(row.id, programId);
+            return normalizeProgram({
+              id: programId,
+              name: String(row.name || "Unnamed program"),
+              startedAt: String(row.started_at || ""),
+              status: row.status === "paused" || row.status === "closed" ? row.status : "active",
+              routines: routinesByProgram.get(row.id) || [],
+              notes: String(row.notes || ""),
+              memberId,
+              programLength: row.program_length == null ? undefined : Number(row.program_length),
+              inputMode: row.input_mode === "memberInput" ? "memberInput" : "trainerInput",
+            });
+          });
+
+        const entriesBySession = new Map<string, Array<Record<string, any>>>();
+        [...sessionEntryRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          entriesBySession.set(row.session_id, [...(entriesBySession.get(row.session_id) || []), row]);
+        });
+        const loadedSessions: SavedSession[] = sessionRows.map((row) => {
+          const groupedBlocks = new Map<string, SessionBlockInput>();
+          for (const entryRow of entriesBySession.get(row.id) || []) {
+            const blockId = appBlockIdByDbId.get(entryRow.block_id) || entryRow.block_id;
+            const existingBlock: SessionBlockInput = groupedBlocks.get(entryRow.block_id) || {
+              blockId,
+              blockTitle: blockRows.find((blockRow) => blockRow.id === entryRow.block_id)?.title || "Block",
+              entries: [],
+              contextFlags: [],
+            };
+            existingBlock.entries.push({
+              exerciseId: appExerciseIdByDbId.get(entryRow.exercise_id) || finalLegacySegment(entryRow.legacy_app_id, entryRow.id),
+              exerciseName: String(entryRow.exercise_name || "Unnamed exercise"),
+              weight: String(entryRow.weight || ""),
+              performance: String(entryRow.performance || ""),
+              setsCompleted: String(entryRow.sets_completed || ""),
+              target: String(entryRow.target || ""),
+              metric: String(entryRow.metric || ""),
+              supportMetrics: entryRow.support_metrics && typeof entryRow.support_metrics === "object" ? entryRow.support_metrics : {},
+              contextFlags: Array.isArray(entryRow.context_flags) ? entryRow.context_flags : [],
+              scoringDirection: entryRow.scoring_direction === "lowerIsBetter" || entryRow.scoring_direction === "completion" ? entryRow.scoring_direction : "higherIsBetter",
+            });
+            groupedBlocks.set(entryRow.block_id, existingBlock);
+          }
+          return {
+            id: legacyId(row as { id: string; legacy_app_id?: string | null }),
+            programId: appProgramIdByDbId.get(row.program_id) || row.program_id,
+            routineId: appRoutineIdByDbId.get(row.routine_id) || row.routine_id,
+            memberId,
+            date: String(row.session_date || ""),
+            sessionNumber: String(row.session_number || ""),
+            blocks: Array.from(groupedBlocks.values()),
+            contextFlags: Array.isArray(row.context_flags) ? row.context_flags : [],
+            createdAt: String(row.created_at || new Date().toISOString()),
+          };
+        });
+
+        const trackerEntriesByExercise = new Map<string, TrackerEntry[]>();
+        trackerEntryRows.forEach((row) => {
+          const entry: TrackerEntry = {
+            id: legacyId(row as { id: string; legacy_app_id?: string | null }),
+            entryDate: String(row.entry_date || ""), createdAt: String(row.created_at || ""),
+            values: row.values && typeof row.values === "object" ? row.values : {},
+            circuitIndex: row.circuit_index == null ? undefined : Number(row.circuit_index),
+          };
+          trackerEntriesByExercise.set(row.tracker_exercise_id, [...(trackerEntriesByExercise.get(row.tracker_exercise_id) || []), entry]);
+        });
+        const appTrackerExerciseIdByDbId = new Map<string, string>();
+        const loadedTrackerExercises = trackerExerciseRows.map((row) => {
+          const exerciseId = legacyId(row as { id: string; legacy_app_id?: string | null });
+          appTrackerExerciseIdByDbId.set(row.id, exerciseId);
+          return normalizeTrackerExercise({
+            id: exerciseId, memberId, name: String(row.name || "Unnamed exercise"),
+            muscleGroup: String(row.muscle_group || "Other") as MuscleGroup,
+            metrics: Array.isArray(row.metrics) ? row.metrics : [], entries: trackerEntriesByExercise.get(row.id) || [],
+            archived: Boolean(row.archived), createdAt: String(row.created_at || ""),
+          });
+        });
+
+        const workoutEntriesBySlot = new Map<string, TrackerEntry[]>();
+        workoutEntryRows.forEach((row) => {
+          workoutEntriesBySlot.set(row.workout_slot_id, [...(workoutEntriesBySlot.get(row.workout_slot_id) || []), {
+            id: finalLegacySegment(row.legacy_app_id, row.id), entryDate: String(row.entry_date || ""), createdAt: String(row.created_at || ""),
+            values: row.values && typeof row.values === "object" ? row.values : {},
+            circuitIndex: row.circuit_index == null ? undefined : Number(row.circuit_index),
+          }]);
+        });
+        const slotsByWorkout = new Map<string, TrackerWorkoutExerciseSlot[]>();
+        [...workoutSlotRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const slot: TrackerWorkoutExerciseSlot = {
+            id: finalLegacySegment(row.legacy_app_id, row.id),
+            exerciseId: appTrackerExerciseIdByDbId.get(row.tracker_exercise_id) || row.tracker_exercise_id,
+            createdAt: String(row.created_at || ""), entries: workoutEntriesBySlot.get(row.id) || [],
+          };
+          slotsByWorkout.set(row.workout_id, [...(slotsByWorkout.get(row.workout_id) || []), slot]);
+        });
+        const appWorkoutIdByDbId = new Map<string, string>();
+        const loadedWorkouts = workoutRows.map((row) => {
+          const workoutId = legacyId(row as { id: string; legacy_app_id?: string | null });
+          appWorkoutIdByDbId.set(row.id, workoutId);
+          const slots = slotsByWorkout.get(row.id) || [];
+          return normalizeTrackerWorkout({
+            id: workoutId, memberId, name: String(row.name || "Unnamed workout"), exerciseIds: slots.map((slot) => slot.exerciseId), exerciseSlots: slots,
+            startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined,
+            circuitTarget: row.circuit_target == null ? undefined : Number(row.circuit_target),
+            currentCircuit: row.current_circuit == null ? undefined : Number(row.current_circuit),
+            archived: Boolean(row.archived), createdAt: String(row.created_at || ""),
+          });
+        });
+
+        const cycleWorkoutIds = new Map<string, string[]>();
+        [...cycleWorkoutRows].sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).forEach((row) => {
+          const workoutId = appWorkoutIdByDbId.get(row.workout_id) || row.workout_id;
+          cycleWorkoutIds.set(row.cycle_id, [...(cycleWorkoutIds.get(row.cycle_id) || []), workoutId]);
+        });
+        const loadedCycles: TrackerWorkoutCycle[] = cycleRows.map((row) => ({
+          id: legacyId(row as { id: string; legacy_app_id?: string | null }), memberId, name: String(row.name || "Unnamed cycle"),
+          workoutIds: cycleWorkoutIds.get(row.id) || [],
+          nextWorkoutId: row.next_workout_id ? appWorkoutIdByDbId.get(row.next_workout_id) || row.next_workout_id : undefined,
+          startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined,
+          archived: Boolean(row.archived), createdAt: String(row.created_at || ""),
+        }));
+
+        if (cancelled) return;
+        setPrograms(loadedPrograms);
+        setSavedSessions(loadedSessions);
+        setTrackerExercises(loadedTrackerExercises);
+        setTrackerWorkouts(loadedWorkouts);
+        setTrackerCycles(loadedCycles);
+        setSelectedProgramId((current) => loadedPrograms.some((program) => program.id === current) ? current : loadedPrograms[0]?.id || null);
+        setSupabaseDataStatus("ready");
+      } catch (error) {
+        if (cancelled) return;
+        setSupabaseDataStatus("failed");
+        setSupabaseDataError(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    void loadSupabaseRuntimeData();
+    return () => { cancelled = true; };
+  }, [authenticatedMemberId, supabaseDataReloadToken]);
+
+  useEffect(() => {
     if (DATA_SOURCE_BY_DOMAIN.members === "legacy") {
       writeLegacyJson("members", STORAGE_KEYS.members, members);
     }
   }, [members]);
 
   useEffect(() => {
-    writeLegacyJson("programs", STORAGE_KEYS.programs, programs);
+    if (DATA_SOURCE_BY_DOMAIN.programs === "legacy") {
+      writeLegacyJson("programs", STORAGE_KEYS.programs, programs);
+    }
   }, [programs]);
 
   useEffect(() => {
-    writeLegacyJson("sessions", STORAGE_KEYS.savedSessions, savedSessions);
+    if (DATA_SOURCE_BY_DOMAIN.sessions === "legacy") {
+      writeLegacyJson("sessions", STORAGE_KEYS.savedSessions, savedSessions);
+    }
   }, [savedSessions]);
 
 
   useEffect(() => {
-    writeLegacyJson("trackerExercises", STORAGE_KEYS.trackerExercises, trackerExercises);
+    if (DATA_SOURCE_BY_DOMAIN.trackerExercises === "legacy") {
+      writeLegacyJson("trackerExercises", STORAGE_KEYS.trackerExercises, trackerExercises);
+    }
   }, [trackerExercises]);
 
   useEffect(() => {
-    writeLegacyJson("trackerWorkouts", STORAGE_KEYS.trackerWorkouts, trackerWorkouts);
+    if (DATA_SOURCE_BY_DOMAIN.trackerWorkouts === "legacy") {
+      writeLegacyJson("trackerWorkouts", STORAGE_KEYS.trackerWorkouts, trackerWorkouts);
+    }
   }, [trackerWorkouts]);
 
   useEffect(() => {
-    writeLegacyJson("trackerCycles", STORAGE_KEYS.trackerCycles, trackerCycles);
+    if (DATA_SOURCE_BY_DOMAIN.trackerCycles === "legacy") {
+      writeLegacyJson("trackerCycles", STORAGE_KEYS.trackerCycles, trackerCycles);
+    }
   }, [trackerCycles]);
 
   useEffect(() => {
@@ -14930,11 +15426,20 @@ export default function App() {
     );
   };
 
+  const resetPersonalProgramRoute = () => {
+    setSelectedProgramId(null);
+    setSelectedRoutineId(null);
+    setSelectedBlockId(null);
+    setSessionDraft(null);
+  };
+
   const goHome = () => {
+    resetPersonalProgramRoute();
     setScreen("memberHome");
   };
 
   const goAccount = () => {
+    resetPersonalProgramRoute();
     setScreen("account");
   };
 
@@ -14947,7 +15452,7 @@ export default function App() {
   };
 
   const openMemberOverview = (memberId: string) => {
-    setSelectedMemberId(memberId);
+    setWorkspaceMemberId(memberId);
     setScreen("memberOverview");
   };
 
@@ -15099,10 +15604,12 @@ export default function App() {
   };
 
   const goMemberPrograms = () => {
+    resetPersonalProgramRoute();
     setScreen("programs");
   };
 
   const goGymTracker = () => {
+    resetPersonalProgramRoute();
     setScreen("openTracker");
   };
 
@@ -15979,6 +16486,35 @@ export default function App() {
                     </div>
                   </SectionCard>
 
+                  <SectionCard title="Legacy Relationship Reconciliation" collapsible>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {[
+                          ["Exact links", legacyRelationshipReport.exact],
+                          ["Recovered by routine", legacyRelationshipReport.recoveredByRoutine],
+                          ["Recovered by structure", legacyRelationshipReport.recoveredByStructure],
+                          ["Ambiguous", legacyRelationshipReport.ambiguous],
+                          ["Unresolved", legacyRelationshipReport.unresolved],
+                          ["Total sessions", legacyRelationshipReport.totalSessions],
+                        ].map(([label, count]) => (
+                          <div key={String(label)} className="rounded-2xl border border-zinc-200 bg-white p-3">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label}</div>
+                            <div className="mt-1 text-2xl font-bold text-zinc-900">{count}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className={`rounded-2xl border p-4 text-sm ${
+                        legacyRelationshipReport.ambiguous || legacyRelationshipReport.unresolved
+                          ? "border-amber-200 bg-amber-50 text-amber-900"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      }`}>
+                        {legacyRelationshipReport.ambiguous || legacyRelationshipReport.unresolved
+                          ? "Some sessions could not be linked uniquely. They are blocked from migration rather than attached by guesswork."
+                          : "Every saved session has a resolved program and routine relationship. Inventory, ownership analysis, program curation, and Layer 3 now share this same relationship graph."}
+                      </div>
+                    </div>
+                  </SectionCard>
+
                   <SectionCard title="Legacy Ownership Intelligence" collapsible>
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -16072,8 +16608,8 @@ export default function App() {
                                 </div>
                                 <div className="divide-y divide-zinc-100">
                                   {layer2CCandidates.programs.map((program) => {
-                                    const sessionCount = savedSessions.filter((session) => session.programId === program.id).length;
-                                    const entryCount = savedSessions
+                                    const sessionCount = resolvedLegacySessions.filter((session) => session.programId === program.id).length;
+                                    const entryCount = resolvedLegacySessions
                                       .filter((session) => session.programId === program.id)
                                       .reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0);
                                     return (
@@ -16548,7 +17084,7 @@ export default function App() {
                         {profileButtonLabel}
                       </div>
                       <div className="min-w-0">
-                        <div className="truncate text-base font-semibold text-zinc-900">{selectedMember?.name || "Account Holder"}</div>
+                        <div className="truncate text-base font-semibold text-zinc-900">{ownMember?.name || "Account Holder"}</div>
                         <div className="mt-0.5 text-sm text-zinc-500">{accountRoleLabel}</div>
                       </div>
                     </div>
@@ -16556,7 +17092,7 @@ export default function App() {
                     <div className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
                       <div className="p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Name</div>
-                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.name || "Not connected"}</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{ownMember?.name || "Not connected"}</div>
                       </div>
                       <div className="p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Email</div>
@@ -16569,12 +17105,12 @@ export default function App() {
                         </div>
                         <div className="p-4">
                           <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Member Plan</div>
-                          <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember ? getMemberPlanLabel(selectedMember.memberPlan) : "Not connected"}</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900">{ownMember ? getMemberPlanLabel(ownMember.memberPlan) : "Not connected"}</div>
                         </div>
                       </div>
                       <div className="p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Client ID</div>
-                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.clientId || "Not connected"}</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{ownMember?.clientId || "Not connected"}</div>
                       </div>
                     </div>
 
@@ -17284,10 +17820,10 @@ export default function App() {
                       <div>
                         <Label>Client</Label>
                         <select
-                          value={selectedMember?.id || ""}
+                          value={workspaceMember?.id || ""}
                           onChange={(event) => {
                             const nextMemberId = event.target.value;
-                            setSelectedMemberId(nextMemberId);
+                            setWorkspaceMemberId(nextMemberId);
                             const nextProgram = programs.find((program) => (program.memberId || members[0]?.id || null) === nextMemberId);
                             setSelectedProgramId(nextProgram?.id || null);
                             setAdminDashRoutineFilter("all");
