@@ -11473,8 +11473,8 @@ export default function App() {
   const [layer3Error, setLayer3Error] = useState("");
   const [layer3RunId, setLayer3RunId] = useState<string | null>(null);
   const [layer3ActualCounts, setLayer3ActualCounts] = useState<Record<string, number> | null>(null);
-  const [supabaseDataStatus, setSupabaseDataStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
-  const [supabaseDataError, setSupabaseDataError] = useState("");
+  const [, setSupabaseDataStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [, setSupabaseDataError] = useState("");
   const [supabaseDataReloadToken, setSupabaseDataReloadToken] = useState(0);
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
@@ -13819,7 +13819,7 @@ export default function App() {
           const groupedBlocks = new Map<string, SessionBlockInput>();
           for (const entryRow of entriesBySession.get(row.id) || []) {
             const blockId = appBlockIdByDbId.get(entryRow.block_id) || entryRow.block_id;
-            const existingBlock = groupedBlocks.get(entryRow.block_id) || {
+            const existingBlock: SessionBlockInput = groupedBlocks.get(entryRow.block_id) || {
               blockId,
               blockTitle: blockRows.find((blockRow) => blockRow.id === entryRow.block_id)?.title || "Block",
               entries: [],
