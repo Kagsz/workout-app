@@ -11502,7 +11502,7 @@ export default function App() {
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
   const [showAllMembers, setShowAllMembers] = useState(false);
-  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [workspaceMemberId, setWorkspaceMemberId] = useState<string | null>(null);
   const [isEditingMember, setIsEditingMember] = useState(false);
   const [editedMemberName, setEditedMemberName] = useState("");
   const [editedMemberClientId, setEditedMemberClientId] = useState("");
@@ -11630,7 +11630,7 @@ export default function App() {
       (member) => member.profile_id === user.id
     );
     setAuthenticatedMemberId(ownMember?.id || null);
-    setSelectedMemberId((current) => {
+    setWorkspaceMemberId((current) => {
       if (current && nextMembers.some((member) => member.id === current)) return current;
       return ownMember?.id || nextMembers[0]?.id || null;
     });
@@ -11638,7 +11638,7 @@ export default function App() {
 
   const clearSupabaseIdentity = () => {
     setMembers([]);
-    setSelectedMemberId(null);
+    setWorkspaceMemberId(null);
     setProfileRow(null);
     setAuthenticatedMemberId(null);
     setRole("member");
@@ -11805,15 +11805,32 @@ export default function App() {
     );
   }, [members, memberSearch, viewArchivedMembers, showAllMembers]);
 
-  const selectedMember = useMemo(
-    () => members.find((member) => member.id === selectedMemberId) || members[0] || null,
-    [members, selectedMemberId]
-  );
-
   const ownMember = useMemo(
     () => members.find((member) => member.id === authenticatedMemberId) || null,
     [authenticatedMemberId, members]
   );
+
+  const workspaceMember = useMemo(
+    () => members.find((member) => member.id === workspaceMemberId) || members[0] || null,
+    [members, workspaceMemberId]
+  );
+
+  const isTrainerWorkspaceScreen =
+    canUseTrainerWorkspace &&
+    [
+      "members",
+      "memberOverview",
+      "adminPrograms",
+      "programView",
+      "builder",
+      "adminDash",
+      "input",
+    ].includes(screen);
+
+  // Identity boundary:
+  // Personal routes always resolve to the authenticated member.
+  // Trainer/admin workspace routes resolve to the explicitly selected client.
+  const selectedMember = isTrainerWorkspaceScreen ? workspaceMember : ownMember;
 
   const legacyDiagnosticSnapshot = useMemo<LegacyDiagnosticSnapshot>(() => {
     const routineCount = legacyPrograms.reduce((total, program) => total + program.routines.length, 0);
@@ -15209,11 +15226,20 @@ export default function App() {
     );
   };
 
+  const resetPersonalProgramRoute = () => {
+    setSelectedProgramId(null);
+    setSelectedRoutineId(null);
+    setSelectedBlockId(null);
+    setSessionDraft(null);
+  };
+
   const goHome = () => {
+    resetPersonalProgramRoute();
     setScreen("memberHome");
   };
 
   const goAccount = () => {
+    resetPersonalProgramRoute();
     setScreen("account");
   };
 
@@ -15226,7 +15252,7 @@ export default function App() {
   };
 
   const openMemberOverview = (memberId: string) => {
-    setSelectedMemberId(memberId);
+    setWorkspaceMemberId(memberId);
     setScreen("memberOverview");
   };
 
@@ -15378,10 +15404,12 @@ export default function App() {
   };
 
   const goMemberPrograms = () => {
+    resetPersonalProgramRoute();
     setScreen("programs");
   };
 
   const goGymTracker = () => {
+    resetPersonalProgramRoute();
     setScreen("openTracker");
   };
 
@@ -16827,7 +16855,7 @@ export default function App() {
                         {profileButtonLabel}
                       </div>
                       <div className="min-w-0">
-                        <div className="truncate text-base font-semibold text-zinc-900">{selectedMember?.name || "Account Holder"}</div>
+                        <div className="truncate text-base font-semibold text-zinc-900">{ownMember?.name || "Account Holder"}</div>
                         <div className="mt-0.5 text-sm text-zinc-500">{accountRoleLabel}</div>
                       </div>
                     </div>
@@ -16835,7 +16863,7 @@ export default function App() {
                     <div className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
                       <div className="p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Name</div>
-                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.name || "Not connected"}</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{ownMember?.name || "Not connected"}</div>
                       </div>
                       <div className="p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Email</div>
@@ -16848,12 +16876,12 @@ export default function App() {
                         </div>
                         <div className="p-4">
                           <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Member Plan</div>
-                          <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember ? getMemberPlanLabel(selectedMember.memberPlan) : "Not connected"}</div>
+                          <div className="mt-1 text-sm font-semibold text-zinc-900">{ownMember ? getMemberPlanLabel(ownMember.memberPlan) : "Not connected"}</div>
                         </div>
                       </div>
                       <div className="p-4">
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">Client ID</div>
-                        <div className="mt-1 text-sm font-semibold text-zinc-900">{selectedMember?.clientId || "Not connected"}</div>
+                        <div className="mt-1 text-sm font-semibold text-zinc-900">{ownMember?.clientId || "Not connected"}</div>
                       </div>
                     </div>
 
@@ -17563,10 +17591,10 @@ export default function App() {
                       <div>
                         <Label>Client</Label>
                         <select
-                          value={selectedMember?.id || ""}
+                          value={workspaceMember?.id || ""}
                           onChange={(event) => {
                             const nextMemberId = event.target.value;
-                            setSelectedMemberId(nextMemberId);
+                            setWorkspaceMemberId(nextMemberId);
                             const nextProgram = programs.find((program) => (program.memberId || members[0]?.id || null) === nextMemberId);
                             setSelectedProgramId(nextProgram?.id || null);
                             setAdminDashRoutineFilter("all");
