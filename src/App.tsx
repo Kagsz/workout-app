@@ -12372,10 +12372,6 @@ export default function App() {
       tracker_cycle_workouts: layer2CPlan.selectedCycles.reduce((total, cycle) => total + cycle.workoutIds.length, 0),
     };
 
-    const requireRows = <T,>(data: T[] | null, error: { message?: string } | null, table: string): T[] => {
-      if (error) throw new Error(`${table}: ${error.message || "write failed"}`);
-      return data || [];
-    };
     const sourceOwner = (value?: string) => String(value || "").trim() || null;
     const parseDate = (value?: string) => {
       const text = String(value || "").trim();
