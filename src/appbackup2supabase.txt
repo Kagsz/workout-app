@@ -1517,7 +1517,7 @@ type LegacyDiagnosticSnapshot = {
   trackerOwnerIds: string[];
 };
 
-type LegacyOwnerHealth = "healthy" | "partial" | "split" | "orphaned" | "empty";
+type LegacyOwnerHealth = "healthy" | "partial" | "split" | "orphaned" | "test" | "empty";
 
 type LegacyOwnerAnalysis = {
   ownerId: string;
@@ -1533,13 +1533,39 @@ type LegacyOwnerAnalysis = {
   trackerWorkoutSlots: number;
   trackerWorkoutEntries: number;
   trackerCycles: number;
-  orphanedSessions: number;
-  orphanedTrackerWorkouts: number;
-  orphanedTrackerCycles: number;
+  missingSessions: number;
+  crossOwnerSessions: number;
+  unownedParentSessions: number;
+  missingTrackerWorkouts: number;
+  crossOwnerTrackerWorkouts: number;
+  missingTrackerCycles: number;
+  crossOwnerTrackerCycles: number;
   health: LegacyOwnerHealth;
   healthLabel: string;
   healthDetail: string;
   migrationCandidate: boolean;
+  likelyTestData: boolean;
+  substantialData: boolean;
+};
+
+type LegacyCompositeCandidate = {
+  id: string;
+  ownerIds: string[];
+  programs: number;
+  routines: number;
+  blocks: number;
+  programExercises: number;
+  savedSessions: number;
+  sessionEntries: number;
+  trackerExercises: number;
+  trackerExerciseEntries: number;
+  trackerWorkouts: number;
+  trackerWorkoutSlots: number;
+  trackerWorkoutEntries: number;
+  trackerCycles: number;
+  crossOwnerLinks: number;
+  missingReferences: number;
+  recommended: boolean;
 };
 
 type PrattMemberRow = {
@@ -11790,57 +11816,104 @@ export default function App() {
       ...trackerCycles.map((cycle) => normalizeOwnerId(cycle.memberId)),
     ])).sort((left, right) => left.localeCompare(right));
 
+    const programOwnerById = new Map(programs.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
+    const trackerExerciseOwnerById = new Map(trackerExercises.map((exercise) => [exercise.id, normalizeOwnerId(exercise.memberId)]));
+    const trackerWorkoutOwnerById = new Map(trackerWorkouts.map((workout) => [workout.id, normalizeOwnerId(workout.memberId)]));
+
     return ownerIds.map((ownerId) => {
       const ownerPrograms = programs.filter((program) => normalizeOwnerId(program.memberId) === ownerId);
-      const ownerProgramIds = new Set(ownerPrograms.map((program) => program.id));
       const ownerRoutines = ownerPrograms.flatMap((program) => program.routines);
       const ownerBlocks = ownerRoutines.flatMap((routine) => routine.blocks);
       const ownerProgramExercises = ownerBlocks.flatMap((block) => block.exercises);
 
       const ownerSessions = savedSessions.filter((session) => normalizeOwnerId(session.memberId) === ownerId);
       const ownerSessionEntries = ownerSessions.flatMap((session) => session.blocks.flatMap((block) => block.entries));
-      const orphanedSessions = ownerSessions.filter((session) => !ownerProgramIds.has(session.programId)).length;
+      const missingSessions = ownerSessions.filter((session) => !programOwnerById.has(session.programId)).length;
+      const crossOwnerSessions = ownerSessions.filter((session) => {
+        const targetOwner = programOwnerById.get(session.programId);
+        return Boolean(targetOwner && targetOwner !== ownerId);
+      }).length;
+      const unownedParentSessions = ownerSessions.filter((session) => programOwnerById.get(session.programId) === "(no owner ID)").length;
 
       const ownerTrackerExercises = trackerExercises.filter((exercise) => normalizeOwnerId(exercise.memberId) === ownerId);
-      const ownerTrackerExerciseIds = new Set(ownerTrackerExercises.map((exercise) => exercise.id));
       const ownerTrackerExerciseEntries = ownerTrackerExercises.flatMap((exercise) => exercise.entries || []);
 
       const ownerTrackerWorkouts = trackerWorkouts.filter((workout) => normalizeOwnerId(workout.memberId) === ownerId);
-      const ownerTrackerWorkoutIds = new Set(ownerTrackerWorkouts.map((workout) => workout.id));
       const ownerTrackerWorkoutSlots = ownerTrackerWorkouts.flatMap((workout) => workout.exerciseSlots || []);
       const ownerTrackerWorkoutEntries = ownerTrackerWorkoutSlots.flatMap((slot) => slot.entries || []);
-      const orphanedTrackerWorkouts = ownerTrackerWorkouts.filter((workout) => {
+      const missingTrackerWorkouts = ownerTrackerWorkouts.filter((workout) => {
         const referencedExerciseIds = workout.exerciseSlots?.length
           ? workout.exerciseSlots.map((slot) => slot.exerciseId)
           : workout.exerciseIds;
-        return referencedExerciseIds.some((exerciseId) => !ownerTrackerExerciseIds.has(exerciseId));
+        return referencedExerciseIds.some((exerciseId) => !trackerExerciseOwnerById.has(exerciseId));
+      }).length;
+      const crossOwnerTrackerWorkouts = ownerTrackerWorkouts.filter((workout) => {
+        const referencedExerciseIds = workout.exerciseSlots?.length
+          ? workout.exerciseSlots.map((slot) => slot.exerciseId)
+          : workout.exerciseIds;
+        return referencedExerciseIds.some((exerciseId) => {
+          const targetOwner = trackerExerciseOwnerById.get(exerciseId);
+          return Boolean(targetOwner && targetOwner !== ownerId);
+        });
       }).length;
 
       const ownerTrackerCycles = trackerCycles.filter((cycle) => normalizeOwnerId(cycle.memberId) === ownerId);
-      const orphanedTrackerCycles = ownerTrackerCycles.filter((cycle) =>
-        cycle.workoutIds.some((workoutId) => !ownerTrackerWorkoutIds.has(workoutId))
+      const missingTrackerCycles = ownerTrackerCycles.filter((cycle) =>
+        cycle.workoutIds.some((workoutId) => !trackerWorkoutOwnerById.has(workoutId))
+      ).length;
+      const crossOwnerTrackerCycles = ownerTrackerCycles.filter((cycle) =>
+        cycle.workoutIds.some((workoutId) => {
+          const targetOwner = trackerWorkoutOwnerById.get(workoutId);
+          return Boolean(targetOwner && targetOwner !== ownerId);
+        })
       ).length;
 
       const hasProgramDomain = ownerPrograms.length > 0 || ownerSessions.length > 0;
       const hasTrackerDomain = ownerTrackerExercises.length > 0 || ownerTrackerWorkouts.length > 0 || ownerTrackerCycles.length > 0;
-      const orphanCount = orphanedSessions + orphanedTrackerWorkouts + orphanedTrackerCycles;
-      const hasSubstantialData = ownerPrograms.length > 0 || ownerSessions.length > 0 || ownerTrackerExercises.length > 0 || ownerTrackerWorkouts.length > 0;
+      const missingReferenceCount = missingSessions + missingTrackerWorkouts + missingTrackerCycles;
+      const crossOwnerCount = crossOwnerSessions + crossOwnerTrackerWorkouts + crossOwnerTrackerCycles;
+      const likelyTestData =
+        ownerPrograms.length === 0 &&
+        ownerSessions.length === 0 &&
+        ownerTrackerCycles.length === 0 &&
+        ownerTrackerExerciseEntries.length === 0 &&
+        ownerTrackerWorkoutEntries.length === 0 &&
+        ownerTrackerExercises.length <= 1 &&
+        ownerTrackerWorkouts.length <= 1;
+      const substantialData =
+        ownerPrograms.length >= 2 ||
+        ownerSessions.length > 0 ||
+        ownerSessionEntries.length > 0 ||
+        ownerTrackerExerciseEntries.length > 0 ||
+        ownerTrackerCycles.length > 0 ||
+        ownerTrackerExercises.length >= 3 ||
+        ownerTrackerWorkouts.length >= 2;
 
       let health: LegacyOwnerHealth = "empty";
       let healthLabel = "Empty";
       let healthDetail = "No importable records were detected for this legacy owner.";
 
-      if (orphanCount > 0 || ownerId === "(no owner ID)") {
+      if (likelyTestData) {
+        health = "test";
+        healthLabel = "Likely test data";
+        healthDetail = "This is a tiny tracker-only group with no logged entries. It resembles recent account-isolation test data.";
+      } else if (missingReferenceCount > 0) {
         health = "orphaned";
-        healthLabel = "Orphaned references";
-        healthDetail = `${orphanCount} broken relationship${orphanCount === 1 ? "" : "s"} detected. Review before migration.`;
+        healthLabel = "Missing references";
+        healthDetail = `${missingReferenceCount} reference${missingReferenceCount === 1 ? "" : "s"} point to records that do not exist anywhere in this browser.`;
+      } else if (crossOwnerCount > 0 || ownerId === "(no owner ID)") {
+        health = "split";
+        healthLabel = ownerId === "(no owner ID)" ? "Unowned legacy source" : "Split-owner source";
+        healthDetail = crossOwnerCount > 0
+          ? `${crossOwnerCount} valid relationship${crossOwnerCount === 1 ? "" : "s"} connect this owner to records held under another legacy browser identifier.`
+          : "This program structure has no stored owner ID and may belong to a composite dataset.";
       } else if (hasProgramDomain && hasTrackerDomain) {
         health = "healthy";
-        healthLabel = "Combined candidate";
-        healthDetail = "Program and tracker data are both present with no broken references detected.";
+        healthLabel = "Combined source";
+        healthDetail = "Program and tracker data are both present with no missing or cross-owner references detected.";
       } else if (hasProgramDomain || hasTrackerDomain) {
         health = "partial";
-        healthLabel = hasProgramDomain ? "Program-only candidate" : "Tracker-only candidate";
+        healthLabel = hasProgramDomain ? "Program-only source" : "Tracker-only source";
         healthDetail = hasProgramDomain
           ? "Program data is present, but no tracker data is owned by this identifier."
           : "Tracker data is present, but no program data is owned by this identifier.";
@@ -11860,24 +11933,127 @@ export default function App() {
         trackerWorkoutSlots: ownerTrackerWorkouts.reduce((total, workout) => total + (workout.exerciseSlots?.length || workout.exerciseIds.length), 0),
         trackerWorkoutEntries: ownerTrackerWorkoutEntries.length,
         trackerCycles: ownerTrackerCycles.length,
-        orphanedSessions,
-        orphanedTrackerWorkouts,
-        orphanedTrackerCycles,
+        missingSessions,
+        crossOwnerSessions,
+        unownedParentSessions,
+        missingTrackerWorkouts,
+        crossOwnerTrackerWorkouts,
+        missingTrackerCycles,
+        crossOwnerTrackerCycles,
         health,
         healthLabel,
         healthDetail,
-        migrationCandidate: hasSubstantialData && orphanCount === 0 && ownerId !== "(no owner ID)",
+        migrationCandidate: substantialData && !likelyTestData && missingReferenceCount === 0,
+        likelyTestData,
+        substantialData,
       };
     });
   }, [programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
 
+  const legacyCompositeCandidates = useMemo<LegacyCompositeCandidate[]>(() => {
+    const normalizeOwnerId = (value: string | undefined) => String(value || "").trim() || "(no owner ID)";
+    const ownerIds = legacyOwnerAnalysis.map((owner) => owner.ownerId);
+    const adjacency = new Map(ownerIds.map((ownerId) => [ownerId, new Set<string>()]));
+    const connect = (left: string, right: string) => {
+      if (left === right) return;
+      adjacency.get(left)?.add(right);
+      adjacency.get(right)?.add(left);
+    };
+
+    const programOwnerById = new Map(programs.map((program) => [program.id, normalizeOwnerId(program.memberId)]));
+    savedSessions.forEach((session) => {
+      const sessionOwner = normalizeOwnerId(session.memberId);
+      const programOwner = programOwnerById.get(session.programId);
+      if (programOwner) connect(sessionOwner, programOwner);
+    });
+
+    const exerciseOwnerById = new Map(trackerExercises.map((exercise) => [exercise.id, normalizeOwnerId(exercise.memberId)]));
+    trackerWorkouts.forEach((workout) => {
+      const workoutOwner = normalizeOwnerId(workout.memberId);
+      const referencedExerciseIds = workout.exerciseSlots?.length
+        ? workout.exerciseSlots.map((slot) => slot.exerciseId)
+        : workout.exerciseIds;
+      referencedExerciseIds.forEach((exerciseId) => {
+        const exerciseOwner = exerciseOwnerById.get(exerciseId);
+        if (exerciseOwner) connect(workoutOwner, exerciseOwner);
+      });
+    });
+
+    const workoutOwnerById = new Map(trackerWorkouts.map((workout) => [workout.id, normalizeOwnerId(workout.memberId)]));
+    trackerCycles.forEach((cycle) => {
+      const cycleOwner = normalizeOwnerId(cycle.memberId);
+      cycle.workoutIds.forEach((workoutId) => {
+        const workoutOwner = workoutOwnerById.get(workoutId);
+        if (workoutOwner) connect(cycleOwner, workoutOwner);
+      });
+    });
+
+    const visited = new Set<string>();
+    const components: string[][] = [];
+    ownerIds.forEach((ownerId) => {
+      if (visited.has(ownerId)) return;
+      const stack = [ownerId];
+      const component: string[] = [];
+      visited.add(ownerId);
+      while (stack.length) {
+        const current = stack.pop()!;
+        component.push(current);
+        adjacency.get(current)?.forEach((next) => {
+          if (!visited.has(next)) {
+            visited.add(next);
+            stack.push(next);
+          }
+        });
+      }
+      if (component.length > 1) components.push(component.sort((a, b) => a.localeCompare(b)));
+    });
+
+    return components.map((component, index) => {
+      const owners = legacyOwnerAnalysis.filter((owner) => component.includes(owner.ownerId));
+      const sum = (key: keyof LegacyOwnerAnalysis) =>
+        owners.reduce((total, owner) => total + (typeof owner[key] === "number" ? Number(owner[key]) : 0), 0);
+      const crossOwnerLinks = owners.reduce(
+        (total, owner) => total + owner.crossOwnerSessions + owner.crossOwnerTrackerWorkouts + owner.crossOwnerTrackerCycles,
+        0
+      );
+      const missingReferences = owners.reduce(
+        (total, owner) => total + owner.missingSessions + owner.missingTrackerWorkouts + owner.missingTrackerCycles,
+        0
+      );
+      const meaningfulOwnerCount = owners.filter((owner) => owner.substantialData && !owner.likelyTestData).length;
+
+      return {
+        id: `composite-${index + 1}`,
+        ownerIds: component,
+        programs: sum("programs"),
+        routines: sum("routines"),
+        blocks: sum("blocks"),
+        programExercises: sum("programExercises"),
+        savedSessions: sum("savedSessions"),
+        sessionEntries: sum("sessionEntries"),
+        trackerExercises: sum("trackerExercises"),
+        trackerExerciseEntries: sum("trackerExerciseEntries"),
+        trackerWorkouts: sum("trackerWorkouts"),
+        trackerWorkoutSlots: sum("trackerWorkoutSlots"),
+        trackerWorkoutEntries: sum("trackerWorkoutEntries"),
+        trackerCycles: sum("trackerCycles"),
+        crossOwnerLinks,
+        missingReferences,
+        recommended: meaningfulOwnerCount > 0 && missingReferences === 0,
+      };
+    }).sort((left, right) => right.sessionEntries - left.sessionEntries || right.programs - left.programs);
+  }, [legacyOwnerAnalysis, programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+
   const legacyOwnerSummary = useMemo(() => ({
     owners: legacyOwnerAnalysis.length,
-    healthy: legacyOwnerAnalysis.filter((owner) => owner.health === "healthy").length,
-    partial: legacyOwnerAnalysis.filter((owner) => owner.health === "partial").length,
-    orphaned: legacyOwnerAnalysis.filter((owner) => owner.health === "orphaned").length,
-    candidates: legacyOwnerAnalysis.filter((owner) => owner.migrationCandidate).length,
-  }), [legacyOwnerAnalysis]);
+    composites: legacyCompositeCandidates.length,
+    substantial: legacyOwnerAnalysis.filter((owner) => owner.substantialData && !owner.likelyTestData).length,
+    likelyTests: legacyOwnerAnalysis.filter((owner) => owner.likelyTestData).length,
+    missing: legacyOwnerAnalysis.reduce(
+      (total, owner) => total + owner.missingSessions + owner.missingTrackerWorkouts + owner.missingTrackerCycles,
+      0
+    ),
+  }), [legacyCompositeCandidates.length, legacyOwnerAnalysis]);
 
   const refreshDiagnostics = async () => {
     if (!supabase || role !== "admin") return;
@@ -15124,10 +15300,10 @@ export default function App() {
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                         {[
                           ["Owners", legacyOwnerSummary.owners],
-                          ["Combined", legacyOwnerSummary.healthy],
-                          ["Partial", legacyOwnerSummary.partial],
-                          ["Orphaned", legacyOwnerSummary.orphaned],
-                          ["Candidates", legacyOwnerSummary.candidates],
+                          ["Composite groups", legacyOwnerSummary.composites],
+                          ["Substantial", legacyOwnerSummary.substantial],
+                          ["Likely tests", legacyOwnerSummary.likelyTests],
+                          ["Missing refs", legacyOwnerSummary.missing],
                         ].map(([label, count]) => (
                           <div key={String(label)} className="rounded-2xl border border-zinc-200 bg-white p-3">
                             <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label}</div>
@@ -15137,18 +15313,94 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-                        Each card groups every legacy record owned by the same browser identifier. Counts are inherited through the program hierarchy, while sessions and tracker records are checked for broken references. This remains read-only.
+                        Layer 2B now separates truly missing references from valid cross-owner links. Connected browser identities are grouped into composite candidates, while tiny tracker-only groups with no entries are marked as likely account-isolation tests.
                       </div>
 
+                      {legacyCompositeCandidates.length ? (
+                        <div className="space-y-3">
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Composite datasets</div>
+                          {legacyCompositeCandidates.map((candidate, candidateIndex) => {
+                            const metrics = [
+                              ["Programs", candidate.programs],
+                              ["Routines", candidate.routines],
+                              ["Blocks", candidate.blocks],
+                              ["Program exercises", candidate.programExercises],
+                              ["Saved sessions", candidate.savedSessions],
+                              ["Session entries", candidate.sessionEntries],
+                              ["Tracker exercises", candidate.trackerExercises],
+                              ["Tracker entries", candidate.trackerExerciseEntries],
+                              ["Tracker workouts", candidate.trackerWorkouts],
+                              ["Workout slots", candidate.trackerWorkoutSlots],
+                              ["Workout entries", candidate.trackerWorkoutEntries],
+                              ["Tracker cycles", candidate.trackerCycles],
+                            ];
+
+                            return (
+                              <div key={candidate.id} className="overflow-hidden rounded-2xl border border-emerald-200 bg-white">
+                                <div className="border-b border-emerald-100 bg-emerald-50 p-4">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                                        {candidateIndex === 0 && candidate.recommended ? "Primary composite candidate" : "Composite candidate"}
+                                      </div>
+                                      <div className="mt-2 space-y-1">
+                                        {candidate.ownerIds.map((ownerId) => (
+                                          <div key={ownerId} className="break-all font-mono text-xs font-semibold text-zinc-900">{ownerId}</div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${candidate.recommended ? "bg-emerald-200 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
+                                      Recommended: {candidate.recommended ? "Yes" : "Review"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4">
+                                  {metrics.map(([label, count]) => (
+                                    <div key={String(label)} className="rounded-xl border border-zinc-200 bg-zinc-50 p-2.5">
+                                      <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
+                                      <div className="mt-1 text-lg font-bold text-zinc-900">{count}</div>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div className="border-t border-zinc-100 p-4">
+                                  <div className={`rounded-2xl border p-3 text-sm ${candidate.missingReferences
+                                    ? "border-red-200 bg-red-50 text-red-700"
+                                    : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                                    <div className="font-semibold">
+                                      {candidate.missingReferences ? "Needs review" : "Connected legacy dataset"}
+                                    </div>
+                                    <div className="mt-1">
+                                      Cross-owner links: {candidate.crossOwnerLinks} • Truly missing references: {candidate.missingReferences}
+                                    </div>
+                                    {!candidate.missingReferences ? (
+                                      <div className="mt-1 text-xs">
+                                        These source identities are connected by valid program, session, workout, or cycle references and can be previewed together in Layer 2C.
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
                       <div className="space-y-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Individual source audit</div>
                         {legacyOwnerAnalysis.map((owner) => {
                           const healthClasses = owner.health === "healthy"
                             ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                             : owner.health === "partial"
                               ? "border-amber-200 bg-amber-50 text-amber-800"
-                              : owner.health === "orphaned"
-                                ? "border-red-200 bg-red-50 text-red-700"
-                                : "border-zinc-200 bg-zinc-100 text-zinc-700";
+                              : owner.health === "split"
+                                ? "border-sky-200 bg-sky-50 text-sky-800"
+                                : owner.health === "test"
+                                  ? "border-zinc-200 bg-zinc-50 text-zinc-600"
+                                  : owner.health === "orphaned"
+                                    ? "border-red-200 bg-red-50 text-red-700"
+                                    : "border-zinc-200 bg-zinc-100 text-zinc-700";
                           const metricGroups = [
                             {
                               title: "Program hierarchy",
@@ -15173,7 +15425,8 @@ export default function App() {
                               ],
                             },
                           ];
-                          const orphanCount = owner.orphanedSessions + owner.orphanedTrackerWorkouts + owner.orphanedTrackerCycles;
+                          const missingCount = owner.missingSessions + owner.missingTrackerWorkouts + owner.missingTrackerCycles;
+                          const crossOwnerCount = owner.crossOwnerSessions + owner.crossOwnerTrackerWorkouts + owner.crossOwnerTrackerCycles;
 
                           return (
                             <div key={owner.ownerId} className="overflow-hidden rounded-2xl border border-zinc-200 bg-white">
@@ -15188,7 +15441,7 @@ export default function App() {
                                 <div className="flex flex-col items-end gap-2">
                                   <div className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${healthClasses}`}>{owner.healthLabel}</div>
                                   <div className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${owner.migrationCandidate ? "bg-emerald-100 text-emerald-800" : "bg-zinc-100 text-zinc-600"}`}>
-                                    Migration candidate: {owner.migrationCandidate ? "Yes" : "No"}
+                                    Source candidate: {owner.migrationCandidate ? "Yes" : "No"}
                                   </div>
                                 </div>
                               </div>
@@ -15213,9 +15466,11 @@ export default function App() {
                                 <div className={`rounded-2xl border p-3 text-sm ${healthClasses}`}>
                                   <div className="font-semibold">{owner.healthLabel}</div>
                                   <div className="mt-1">{owner.healthDetail}</div>
-                                  {orphanCount ? (
-                                    <div className="mt-2 text-xs">
-                                      Broken sessions: {owner.orphanedSessions} • Workouts: {owner.orphanedTrackerWorkouts} • Cycles: {owner.orphanedTrackerCycles}
+                                  {crossOwnerCount || missingCount ? (
+                                    <div className="mt-2 space-y-1 text-xs">
+                                      <div>Valid cross-owner links — Sessions: {owner.crossOwnerSessions} • Workouts: {owner.crossOwnerTrackerWorkouts} • Cycles: {owner.crossOwnerTrackerCycles}</div>
+                                      <div>Truly missing — Sessions: {owner.missingSessions} • Workouts: {owner.missingTrackerWorkouts} • Cycles: {owner.missingTrackerCycles}</div>
+                                      {owner.unownedParentSessions ? <div>Sessions linked to unowned program parents: {owner.unownedParentSessions}</div> : null}
                                     </div>
                                   ) : null}
                                 </div>
@@ -15230,7 +15485,7 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                        Candidate status is advisory only. Layer 2B does not select, merge, reassign, import, or delete any records. Final source selection belongs to Layer 2C.
+                        Layer 2B remains read-only. Composite recommendations are advisory and do not select, merge, reassign, import, or delete records. Final source selection belongs to Layer 2C.
                       </div>
                     </div>
                   </SectionCard>

@@ -1546,6 +1546,10 @@ type LegacyOwnerAnalysis = {
   migrationCandidate: boolean;
   likelyTestData: boolean;
   substantialData: boolean;
+  programNames: string[];
+  trackerExerciseNames: string[];
+  trackerWorkoutNames: string[];
+  trackerCycleNames: string[];
 };
 
 type LegacyCompositeCandidate = {
@@ -1566,6 +1570,10 @@ type LegacyCompositeCandidate = {
   crossOwnerLinks: number;
   missingReferences: number;
   recommended: boolean;
+  programNames: string[];
+  trackerExerciseNames: string[];
+  trackerWorkoutNames: string[];
+  trackerCycleNames: string[];
 };
 
 type PrattMemberRow = {
@@ -11439,6 +11447,7 @@ export default function App() {
   const [authenticatedMemberId, setAuthenticatedMemberId] = useState<string | null>(null);
   const [diagnosticTables, setDiagnosticTables] = useState<DiagnosticTableStatus[]>([]);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [legacyPreviewSelections, setLegacyPreviewSelections] = useState<Record<string, boolean>>({});
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
@@ -11946,6 +11955,10 @@ export default function App() {
         migrationCandidate: substantialData && !likelyTestData && missingReferenceCount === 0,
         likelyTestData,
         substantialData,
+        programNames: ownerPrograms.map((program) => program.name || "Unnamed program"),
+        trackerExerciseNames: ownerTrackerExercises.map((exercise) => exercise.name || "Unnamed exercise"),
+        trackerWorkoutNames: ownerTrackerWorkouts.map((workout) => workout.name || "Unnamed workout"),
+        trackerCycleNames: ownerTrackerCycles.map((cycle) => cycle.name || "Unnamed cycle"),
       };
     });
   }, [programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
@@ -12040,9 +12053,80 @@ export default function App() {
         crossOwnerLinks,
         missingReferences,
         recommended: meaningfulOwnerCount > 0 && missingReferences === 0,
+        programNames: Array.from(new Set(owners.flatMap((owner) => owner.programNames))).sort((a, b) => a.localeCompare(b)),
+        trackerExerciseNames: Array.from(new Set(owners.flatMap((owner) => owner.trackerExerciseNames))).sort((a, b) => a.localeCompare(b)),
+        trackerWorkoutNames: Array.from(new Set(owners.flatMap((owner) => owner.trackerWorkoutNames))).sort((a, b) => a.localeCompare(b)),
+        trackerCycleNames: Array.from(new Set(owners.flatMap((owner) => owner.trackerCycleNames))).sort((a, b) => a.localeCompare(b)),
       };
     }).sort((left, right) => right.sessionEntries - left.sessionEntries || right.programs - left.programs);
   }, [legacyOwnerAnalysis, programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+
+  const legacyDatasetPreviewOptions = useMemo(() => {
+    const compositeOwnerIds = new Set(legacyCompositeCandidates.flatMap((candidate) => candidate.ownerIds));
+    const compositeOptions = legacyCompositeCandidates.map((candidate, index) => ({
+      id: candidate.id,
+      label: index === 0 && candidate.recommended ? "Primary composite dataset" : `Composite dataset ${index + 1}`,
+      detail: candidate.ownerIds.join(" + "),
+      recommended: candidate.recommended,
+      likelyTestData: false,
+      programNames: candidate.programNames,
+      trackerExerciseNames: candidate.trackerExerciseNames,
+      trackerWorkoutNames: candidate.trackerWorkoutNames,
+      trackerCycleNames: candidate.trackerCycleNames,
+      counts: {
+        programs: candidate.programs,
+        trackerExercises: candidate.trackerExercises,
+        trackerWorkouts: candidate.trackerWorkouts,
+        trackerCycles: candidate.trackerCycles,
+      },
+    }));
+    const standaloneOptions = legacyOwnerAnalysis
+      .filter((owner) => !compositeOwnerIds.has(owner.ownerId))
+      .map((owner) => ({
+        id: `owner:${owner.ownerId}`,
+        label: owner.healthLabel,
+        detail: owner.ownerId,
+        recommended: owner.migrationCandidate,
+        likelyTestData: owner.likelyTestData,
+        programNames: owner.programNames,
+        trackerExerciseNames: owner.trackerExerciseNames,
+        trackerWorkoutNames: owner.trackerWorkoutNames,
+        trackerCycleNames: owner.trackerCycleNames,
+        counts: {
+          programs: owner.programs,
+          trackerExercises: owner.trackerExercises,
+          trackerWorkouts: owner.trackerWorkouts,
+          trackerCycles: owner.trackerCycles,
+        },
+      }));
+
+    return [...compositeOptions, ...standaloneOptions];
+  }, [legacyCompositeCandidates, legacyOwnerAnalysis]);
+
+  useEffect(() => {
+    setLegacyPreviewSelections((current) => {
+      const next = { ...current };
+      let changed = false;
+      legacyDatasetPreviewOptions.forEach((option) => {
+        if (!(option.id in next)) {
+          next[option.id] = option.recommended && !option.likelyTestData;
+          changed = true;
+        }
+      });
+      Object.keys(next).forEach((id) => {
+        if (!legacyDatasetPreviewOptions.some((option) => option.id === id)) {
+          delete next[id];
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [legacyDatasetPreviewOptions]);
+
+  const selectedLegacyPreviewOptions = useMemo(
+    () => legacyDatasetPreviewOptions.filter((option) => legacyPreviewSelections[option.id]),
+    [legacyDatasetPreviewOptions, legacyPreviewSelections]
+  );
 
   const legacyOwnerSummary = useMemo(() => ({
     owners: legacyOwnerAnalysis.length,
@@ -15313,7 +15397,80 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-                        Layer 2B now separates truly missing references from valid cross-owner links. Connected browser identities are grouped into composite candidates, while tiny tracker-only groups with no entries are marked as likely account-isolation tests.
+                        Layer 2B now separates truly missing references from valid cross-owner links, groups connected browser identities, and previews recognizable program, exercise, workout, and cycle names. The checkboxes below are a local planning rehearsal only and do not import or change any data.
+                      </div>
+
+                      <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">Migration selection rehearsal</div>
+                            <div className="mt-1 text-sm text-violet-950">
+                              Check the browser datasets you recognize. These choices stay only in the current page session and will be rebuilt as a formal import preview in Layer 2C.
+                            </div>
+                          </div>
+                          <div className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-violet-800">
+                            Selected: {selectedLegacyPreviewOptions.length}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          {legacyDatasetPreviewOptions.map((option) => {
+                            const nameGroups = [
+                              ["Programs", option.programNames],
+                              ["Tracker exercises", option.trackerExerciseNames],
+                              ["Tracker workouts", option.trackerWorkoutNames],
+                              ["Tracker cycles", option.trackerCycleNames],
+                            ] as const;
+                            return (
+                              <label key={option.id} className={`block cursor-pointer rounded-2xl border p-4 transition ${legacyPreviewSelections[option.id] ? "border-violet-300 bg-white shadow-sm" : "border-violet-100 bg-white/60"}`}>
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(legacyPreviewSelections[option.id])}
+                                    onChange={(event) => setLegacyPreviewSelections((current) => ({ ...current, [option.id]: event.target.checked }))}
+                                    className="mt-1 h-5 w-5 rounded border-zinc-300"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="font-semibold text-zinc-900">{option.label}</div>
+                                      {option.recommended ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">Recommended</span> : null}
+                                      {option.likelyTestData ? <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-600">Likely test data</span> : null}
+                                    </div>
+                                    <div className="mt-1 break-all font-mono text-[11px] text-zinc-500">{option.detail}</div>
+                                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Programs</div><div className="font-bold">{option.counts.programs}</div></div>
+                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Exercises</div><div className="font-bold">{option.counts.trackerExercises}</div></div>
+                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Workouts</div><div className="font-bold">{option.counts.trackerWorkouts}</div></div>
+                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Cycles</div><div className="font-bold">{option.counts.trackerCycles}</div></div>
+                                    </div>
+
+                                    <details className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50">
+                                      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-zinc-700">Preview names</summary>
+                                      <div className="space-y-3 border-t border-zinc-200 p-3">
+                                        {nameGroups.map(([groupLabel, names]) => (
+                                          <div key={groupLabel}>
+                                            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{groupLabel} ({names.length})</div>
+                                            {names.length ? (
+                                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                                {names.map((name) => (
+                                                  <span key={`${groupLabel}-${name}`} className="max-w-full break-words rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-800">{name}</span>
+                                                ))}
+                                              </div>
+                                            ) : <div className="mt-1 text-xs text-zinc-400">None detected</div>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-4 rounded-xl border border-violet-200 bg-white p-3 text-xs text-violet-900">
+                          Current rehearsal totals: {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.programs, 0)} programs • {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.trackerExercises, 0)} tracker exercises • {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.trackerWorkouts, 0)} workouts • {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.trackerCycles, 0)} cycles. Deduplication and conflict checks are not performed until Layer 2C.
+                        </div>
                       </div>
 
                       {legacyCompositeCandidates.length ? (
@@ -15362,6 +15519,29 @@ export default function App() {
                                       <div className="mt-1 text-lg font-bold text-zinc-900">{count}</div>
                                     </div>
                                   ))}
+                                </div>
+
+                                <div className="border-t border-zinc-100 p-4">
+                                  <details className="rounded-xl border border-zinc-200 bg-zinc-50">
+                                    <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-zinc-700">Preview names in this composite</summary>
+                                    <div className="space-y-3 border-t border-zinc-200 p-3">
+                                      {[
+                                        ["Programs", candidate.programNames],
+                                        ["Tracker exercises", candidate.trackerExerciseNames],
+                                        ["Tracker workouts", candidate.trackerWorkoutNames],
+                                        ["Tracker cycles", candidate.trackerCycleNames],
+                                      ].map(([label, names]) => (
+                                        <div key={String(label)}>
+                                          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label} ({(names as string[]).length})</div>
+                                          {(names as string[]).length ? (
+                                            <div className="mt-1 flex flex-wrap gap-1.5">
+                                              {(names as string[]).map((name) => <span key={`${label}-${name}`} className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-800">{name}</span>)}
+                                            </div>
+                                          ) : <div className="mt-1 text-xs text-zinc-400">None detected</div>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
                                 </div>
 
                                 <div className="border-t border-zinc-100 p-4">
@@ -15463,6 +15643,29 @@ export default function App() {
                               </div>
 
                               <div className="border-t border-zinc-100 p-4">
+                                <details className="rounded-xl border border-zinc-200 bg-zinc-50">
+                                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-zinc-700">Preview names in this source</summary>
+                                  <div className="space-y-3 border-t border-zinc-200 p-3">
+                                    {[
+                                      ["Programs", owner.programNames],
+                                      ["Tracker exercises", owner.trackerExerciseNames],
+                                      ["Tracker workouts", owner.trackerWorkoutNames],
+                                      ["Tracker cycles", owner.trackerCycleNames],
+                                    ].map(([label, names]) => (
+                                      <div key={String(label)}>
+                                        <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{label} ({(names as string[]).length})</div>
+                                        {(names as string[]).length ? (
+                                          <div className="mt-1 flex flex-wrap gap-1.5">
+                                            {(names as string[]).map((name) => <span key={`${label}-${name}`} className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-800">{name}</span>)}
+                                          </div>
+                                        ) : <div className="mt-1 text-xs text-zinc-400">None detected</div>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              </div>
+
+                              <div className="border-t border-zinc-100 p-4">
                                 <div className={`rounded-2xl border p-3 text-sm ${healthClasses}`}>
                                   <div className="font-semibold">{owner.healthLabel}</div>
                                   <div className="mt-1">{owner.healthDetail}</div>
@@ -15485,7 +15688,7 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                        Layer 2B remains read-only. Composite recommendations are advisory and do not select, merge, reassign, import, or delete records. Final source selection belongs to Layer 2C.
+                        Layer 2B remains read-only. Checkbox choices are a temporary on-screen rehearsal only; they do not persist, merge, reassign, import, or delete records. Layer 2C will turn recognized datasets into a deduplicated, conflict-checked import plan.
                       </div>
                     </div>
                   </SectionCard>
