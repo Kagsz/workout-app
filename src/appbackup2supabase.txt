@@ -1576,6 +1576,20 @@ type LegacyCompositeCandidate = {
   trackerCycleNames: string[];
 };
 
+type Layer2CSelectionMap = {
+  programs: Record<string, boolean>;
+  trackerExercises: Record<string, boolean>;
+  trackerWorkouts: Record<string, boolean>;
+  trackerCycles: Record<string, boolean>;
+};
+
+type Layer2CValidationIssue = {
+  id: string;
+  level: "warning" | "error";
+  label: string;
+  detail: string;
+};
+
 type PrattMemberRow = {
   id: string;
   profile_id: string | null;
@@ -11448,6 +11462,12 @@ export default function App() {
   const [diagnosticTables, setDiagnosticTables] = useState<DiagnosticTableStatus[]>([]);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [legacyPreviewSelections, setLegacyPreviewSelections] = useState<Record<string, boolean>>({});
+  const [layer2CSelections, setLayer2CSelections] = useState<Layer2CSelectionMap>({
+    programs: {},
+    trackerExercises: {},
+    trackerWorkouts: {},
+    trackerCycles: {},
+  });
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
@@ -12067,6 +12087,7 @@ export default function App() {
       id: candidate.id,
       label: index === 0 && candidate.recommended ? "Primary composite dataset" : `Composite dataset ${index + 1}`,
       detail: candidate.ownerIds.join(" + "),
+      ownerIds: candidate.ownerIds,
       recommended: candidate.recommended,
       likelyTestData: false,
       programNames: candidate.programNames,
@@ -12086,6 +12107,7 @@ export default function App() {
         id: `owner:${owner.ownerId}`,
         label: owner.healthLabel,
         detail: owner.ownerId,
+        ownerIds: [owner.ownerId],
         recommended: owner.migrationCandidate,
         likelyTestData: owner.likelyTestData,
         programNames: owner.programNames,
@@ -12127,6 +12149,165 @@ export default function App() {
     () => legacyDatasetPreviewOptions.filter((option) => legacyPreviewSelections[option.id]),
     [legacyDatasetPreviewOptions, legacyPreviewSelections]
   );
+
+  const layer2CSourceOwnerIds = useMemo(
+    () => new Set(selectedLegacyPreviewOptions.flatMap((option) => option.ownerIds)),
+    [selectedLegacyPreviewOptions]
+  );
+
+  const layer2CCandidates = useMemo(() => {
+    const normalizeOwnerId = (value: string | undefined) => String(value || "").trim() || "(no owner ID)";
+    const ownerSelected = (value: string | undefined) => layer2CSourceOwnerIds.has(normalizeOwnerId(value));
+
+    return {
+      programs: programs.filter((program) => ownerSelected(program.memberId)),
+      trackerExercises: trackerExercises.filter((exercise) => ownerSelected(exercise.memberId)),
+      trackerWorkouts: trackerWorkouts.filter((workout) => ownerSelected(workout.memberId)),
+      trackerCycles: trackerCycles.filter((cycle) => ownerSelected(cycle.memberId)),
+    };
+  }, [layer2CSourceOwnerIds, programs, trackerCycles, trackerExercises, trackerWorkouts]);
+
+  useEffect(() => {
+    setLayer2CSelections((current) => {
+      const sync = <T extends { id: string }>(items: T[], existing: Record<string, boolean>) => {
+        const next: Record<string, boolean> = {};
+        items.forEach((item) => {
+          next[item.id] = item.id in existing ? existing[item.id] : true;
+        });
+        return next;
+      };
+
+      return {
+        programs: sync(layer2CCandidates.programs, current.programs),
+        trackerExercises: sync(layer2CCandidates.trackerExercises, current.trackerExercises),
+        trackerWorkouts: sync(layer2CCandidates.trackerWorkouts, current.trackerWorkouts),
+        trackerCycles: sync(layer2CCandidates.trackerCycles, current.trackerCycles),
+      };
+    });
+  }, [layer2CCandidates]);
+
+  const layer2CPlan = useMemo(() => {
+    const directProgramIds = new Set(Object.entries(layer2CSelections.programs).filter(([, selected]) => selected).map(([id]) => id));
+    const directExerciseIds = new Set(Object.entries(layer2CSelections.trackerExercises).filter(([, selected]) => selected).map(([id]) => id));
+    const directWorkoutIds = new Set(Object.entries(layer2CSelections.trackerWorkouts).filter(([, selected]) => selected).map(([id]) => id));
+    const directCycleIds = new Set(Object.entries(layer2CSelections.trackerCycles).filter(([, selected]) => selected).map(([id]) => id));
+
+    const workoutById = new Map(trackerWorkouts.map((workout) => [workout.id, workout]));
+    const exerciseById = new Map(trackerExercises.map((exercise) => [exercise.id, exercise]));
+    const selectedCycles = trackerCycles.filter((cycle) => directCycleIds.has(cycle.id));
+    const dependencyWorkoutIds = new Set(selectedCycles.flatMap((cycle) => cycle.workoutIds));
+    const effectiveWorkoutIds = new Set([...directWorkoutIds, ...dependencyWorkoutIds]);
+    const selectedWorkouts = trackerWorkouts.filter((workout) => effectiveWorkoutIds.has(workout.id));
+    const dependencyExerciseIds = new Set(
+      selectedWorkouts.flatMap((workout) =>
+        workout.exerciseSlots?.length ? workout.exerciseSlots.map((slot) => slot.exerciseId) : workout.exerciseIds
+      )
+    );
+    const effectiveExerciseIds = new Set([...directExerciseIds, ...dependencyExerciseIds]);
+
+    const selectedPrograms = programs.filter((program) => directProgramIds.has(program.id));
+    const selectedSessions = savedSessions.filter((session) => directProgramIds.has(session.programId));
+    const selectedProgramEntries = selectedSessions.flatMap((session) => session.blocks.flatMap((block) => block.entries));
+    const selectedExercises = trackerExercises.filter((exercise) => effectiveExerciseIds.has(exercise.id));
+    const selectedExerciseEntries = selectedExercises.flatMap((exercise) => exercise.entries || []);
+    const selectedWorkoutSlots = selectedWorkouts.flatMap((workout) => workout.exerciseSlots || []);
+    const selectedWorkoutEntries = selectedWorkoutSlots.flatMap((slot) => slot.entries || []);
+
+    const issues: Layer2CValidationIssue[] = [];
+    selectedCycles.forEach((cycle) => {
+      cycle.workoutIds.forEach((workoutId) => {
+        if (!workoutById.has(workoutId)) {
+          issues.push({
+            id: `missing-cycle-workout:${cycle.id}:${workoutId}`,
+            level: "error",
+            label: `Missing workout for ${cycle.name || "Unnamed cycle"}`,
+            detail: `Referenced workout ${workoutId} does not exist in this browser.`,
+          });
+        }
+      });
+    });
+    selectedWorkouts.forEach((workout) => {
+      const referencedExerciseIds = workout.exerciseSlots?.length
+        ? workout.exerciseSlots.map((slot) => slot.exerciseId)
+        : workout.exerciseIds;
+      referencedExerciseIds.forEach((exerciseId) => {
+        if (!exerciseById.has(exerciseId)) {
+          issues.push({
+            id: `missing-workout-exercise:${workout.id}:${exerciseId}`,
+            level: "error",
+            label: `Missing exercise for ${workout.name || "Unnamed workout"}`,
+            detail: `Referenced exercise ${exerciseId} does not exist in this browser.`,
+          });
+        }
+      });
+    });
+
+    const addDuplicateNameWarnings = (kind: string, items: Array<{ id: string; name: string }>) => {
+      const byName = new Map<string, Array<{ id: string; name: string }>>();
+      items.forEach((item) => {
+        const key = String(item.name || "").trim().toLowerCase();
+        if (!key) return;
+        byName.set(key, [...(byName.get(key) || []), item]);
+      });
+      byName.forEach((matches, key) => {
+        if (matches.length < 2) return;
+        issues.push({
+          id: `duplicate-${kind}:${key}`,
+          level: "warning",
+          label: `Duplicate ${kind} name`,
+          detail: `${matches.length} selected records use the name “${matches[0].name}”. Layer 3 must preserve IDs and avoid collapsing them by name alone.`,
+        });
+      });
+    };
+
+    addDuplicateNameWarnings("program", selectedPrograms);
+    addDuplicateNameWarnings("tracker exercise", selectedExercises);
+    addDuplicateNameWarnings("workout", selectedWorkouts);
+    addDuplicateNameWarnings("cycle", selectedCycles);
+
+    return {
+      directProgramIds,
+      directExerciseIds,
+      directWorkoutIds,
+      directCycleIds,
+      dependencyWorkoutIds,
+      dependencyExerciseIds,
+      selectedPrograms,
+      selectedSessions,
+      selectedProgramEntries,
+      selectedExercises,
+      selectedExerciseEntries,
+      selectedWorkouts,
+      selectedWorkoutSlots,
+      selectedWorkoutEntries,
+      selectedCycles,
+      issues,
+      errorCount: issues.filter((issue) => issue.level === "error").length,
+      warningCount: issues.filter((issue) => issue.level === "warning").length,
+    };
+  }, [layer2CSelections, programs, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
+
+  const setLayer2CCategorySelection = (
+    category: keyof Layer2CSelectionMap,
+    id: string,
+    selected: boolean
+  ) => {
+    setLayer2CSelections((current) => ({
+      ...current,
+      [category]: { ...current[category], [id]: selected },
+    }));
+  };
+
+  const setAllLayer2CCategory = (
+    category: keyof Layer2CSelectionMap,
+    ids: string[],
+    selected: boolean
+  ) => {
+    setLayer2CSelections((current) => ({
+      ...current,
+      [category]: Object.fromEntries(ids.map((id) => [id, selected])),
+    }));
+  };
 
   const legacyOwnerSummary = useMemo(() => ({
     owners: legacyOwnerAnalysis.length,
@@ -15397,79 +15578,249 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-                        Layer 2B now separates truly missing references from valid cross-owner links, groups connected browser identities, and previews recognizable program, exercise, workout, and cycle names. The checkboxes below are a local planning rehearsal only and do not import or change any data.
+                        Layer 2C now turns the ownership map into a record-level import plan. Source groups define the review scope; individual programs, exercises, workouts, and cycles can then be included or excluded while dependencies and conflicts are checked automatically.
                       </div>
 
                       <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">Migration selection rehearsal</div>
-                            <div className="mt-1 text-sm text-violet-950">
-                              Check the browser datasets you recognize. These choices stay only in the current page session and will be rebuilt as a formal import preview in Layer 2C.
+                            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">Layer 2C — Import Plan Builder</div>
+                            <div className="mt-1 max-w-3xl text-sm text-violet-950">
+                              Choose the legacy source group first, then curate individual programs, exercises, workouts, and cycles. Related sessions, entries, slots, and required dependencies are included automatically. This planner remains read-only.
                             </div>
                           </div>
                           <div className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-violet-800">
-                            Selected: {selectedLegacyPreviewOptions.length}
+                            {layer2CPlan.errorCount ? `${layer2CPlan.errorCount} blocking issue${layer2CPlan.errorCount === 1 ? "" : "s"}` : "Plan buildable"}
                           </div>
                         </div>
 
-                        <div className="mt-4 space-y-3">
-                          {legacyDatasetPreviewOptions.map((option) => {
-                            const nameGroups = [
-                              ["Programs", option.programNames],
-                              ["Tracker exercises", option.trackerExerciseNames],
-                              ["Tracker workouts", option.trackerWorkoutNames],
-                              ["Tracker cycles", option.trackerCycleNames],
-                            ] as const;
-                            return (
-                              <label key={option.id} className={`block cursor-pointer rounded-2xl border p-4 transition ${legacyPreviewSelections[option.id] ? "border-violet-300 bg-white shadow-sm" : "border-violet-100 bg-white/60"}`}>
-                                <div className="flex items-start gap-3">
-                                  <input
-                                    type="checkbox"
-                                    checked={Boolean(legacyPreviewSelections[option.id])}
-                                    onChange={(event) => setLegacyPreviewSelections((current) => ({ ...current, [option.id]: event.target.checked }))}
-                                    className="mt-1 h-5 w-5 rounded border-zinc-300"
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="font-semibold text-zinc-900">{option.label}</div>
-                                      {option.recommended ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">Recommended</span> : null}
-                                      {option.likelyTestData ? <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-600">Likely test data</span> : null}
-                                    </div>
-                                    <div className="mt-1 break-all font-mono text-[11px] text-zinc-500">{option.detail}</div>
-                                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Programs</div><div className="font-bold">{option.counts.programs}</div></div>
-                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Exercises</div><div className="font-bold">{option.counts.trackerExercises}</div></div>
-                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Workouts</div><div className="font-bold">{option.counts.trackerWorkouts}</div></div>
-                                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Cycles</div><div className="font-bold">{option.counts.trackerCycles}</div></div>
-                                    </div>
+                        <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">1. Source scope</div>
+                              <div className="mt-1 text-sm text-zinc-700">Select the browser identity group or groups that contain the records you want to review.</div>
+                            </div>
+                            <div className="rounded-full bg-violet-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-violet-800">
+                              {selectedLegacyPreviewOptions.length} selected
+                            </div>
+                          </div>
 
-                                    <details className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50">
-                                      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-zinc-700">Preview names</summary>
-                                      <div className="space-y-3 border-t border-zinc-200 p-3">
-                                        {nameGroups.map(([groupLabel, names]) => (
-                                          <div key={groupLabel}>
-                                            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{groupLabel} ({names.length})</div>
-                                            {names.length ? (
-                                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                                {names.map((name) => (
-                                                  <span key={`${groupLabel}-${name}`} className="max-w-full break-words rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-800">{name}</span>
-                                                ))}
-                                              </div>
-                                            ) : <div className="mt-1 text-xs text-zinc-400">None detected</div>}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </details>
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {legacyDatasetPreviewOptions.map((option) => (
+                              <label key={option.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${legacyPreviewSelections[option.id] ? "border-violet-300 bg-violet-50" : "border-zinc-200 bg-white"}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(legacyPreviewSelections[option.id])}
+                                  onChange={(event) => setLegacyPreviewSelections((current) => ({ ...current, [option.id]: event.target.checked }))}
+                                  className="mt-0.5 h-5 w-5 rounded border-zinc-300"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-zinc-900">{option.label}</span>
+                                    {option.recommended ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">Recommended</span> : null}
+                                    {option.likelyTestData ? <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-600">Likely test</span> : null}
+                                  </div>
+                                  <div className="mt-1 break-all font-mono text-[10px] text-zinc-500">{option.detail}</div>
+                                  <div className="mt-2 text-xs text-zinc-600">
+                                    {option.counts.programs} programs • {option.counts.trackerExercises} exercises • {option.counts.trackerWorkouts} workouts • {option.counts.trackerCycles} cycles
                                   </div>
                                 </div>
                               </label>
-                            );
-                          })}
+                            ))}
+                          </div>
                         </div>
 
-                        <div className="mt-4 rounded-xl border border-violet-200 bg-white p-3 text-xs text-violet-900">
-                          Current rehearsal totals: {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.programs, 0)} programs • {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.trackerExercises, 0)} tracker exercises • {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.trackerWorkouts, 0)} workouts • {selectedLegacyPreviewOptions.reduce((total, option) => total + option.counts.trackerCycles, 0)} cycles. Deduplication and conflict checks are not performed until Layer 2C.
+                        <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">2. Curate importable records</div>
+                          <div className="mt-1 text-sm text-zinc-700">
+                            Uncheck phone test data you do not want. A selected cycle can require a workout, and a selected workout can require an exercise; required records stay included and are marked below.
+                          </div>
+
+                          {!selectedLegacyPreviewOptions.length ? (
+                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Select at least one source group before building the package.</div>
+                          ) : (
+                            <div className="mt-4 space-y-4">
+                              <div className="rounded-2xl border border-zinc-200">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                                  <div>
+                                    <div className="font-semibold text-zinc-900">Programs</div>
+                                    <div className="text-xs text-zinc-500">Sessions and session entries follow the selected program automatically.</div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <SmallButton onClick={() => setAllLayer2CCategory("programs", layer2CCandidates.programs.map((item) => item.id), true)}>All</SmallButton>
+                                    <SmallButton onClick={() => setAllLayer2CCategory("programs", layer2CCandidates.programs.map((item) => item.id), false)}>None</SmallButton>
+                                  </div>
+                                </div>
+                                <div className="divide-y divide-zinc-100">
+                                  {layer2CCandidates.programs.map((program) => {
+                                    const sessionCount = savedSessions.filter((session) => session.programId === program.id).length;
+                                    const entryCount = savedSessions
+                                      .filter((session) => session.programId === program.id)
+                                      .reduce((total, session) => total + session.blocks.reduce((blockTotal, block) => blockTotal + block.entries.length, 0), 0);
+                                    return (
+                                      <label key={program.id} className="flex cursor-pointer items-start gap-3 px-4 py-3">
+                                        <input type="checkbox" checked={Boolean(layer2CSelections.programs[program.id])} onChange={(event) => setLayer2CCategorySelection("programs", program.id, event.target.checked)} className="mt-0.5 h-5 w-5 rounded border-zinc-300" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="font-semibold text-zinc-900">{program.name || "Unnamed program"}</div>
+                                          <div className="mt-1 text-xs text-zinc-500">{program.routines.length} routines • {sessionCount} sessions • {entryCount} entries</div>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                  {!layer2CCandidates.programs.length ? <div className="px-4 py-3 text-sm text-zinc-400">No programs in the selected source scope.</div> : null}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-zinc-200">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                                  <div>
+                                    <div className="font-semibold text-zinc-900">Tracker exercises</div>
+                                    <div className="text-xs text-zinc-500">Exercise entries follow the selected exercise automatically.</div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <SmallButton onClick={() => setAllLayer2CCategory("trackerExercises", layer2CCandidates.trackerExercises.map((item) => item.id), true)}>All</SmallButton>
+                                    <SmallButton onClick={() => setAllLayer2CCategory("trackerExercises", layer2CCandidates.trackerExercises.map((item) => item.id), false)}>None</SmallButton>
+                                  </div>
+                                </div>
+                                <div className="divide-y divide-zinc-100">
+                                  {layer2CCandidates.trackerExercises.map((exercise) => {
+                                    const required = layer2CPlan.dependencyExerciseIds.has(exercise.id);
+                                    const checked = required || Boolean(layer2CSelections.trackerExercises[exercise.id]);
+                                    return (
+                                      <label key={exercise.id} className={`flex items-start gap-3 px-4 py-3 ${required ? "bg-sky-50/60" : "cursor-pointer"}`}>
+                                        <input type="checkbox" checked={checked} disabled={required} onChange={(event) => setLayer2CCategorySelection("trackerExercises", exercise.id, event.target.checked)} className="mt-0.5 h-5 w-5 rounded border-zinc-300" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-semibold text-zinc-900">{exercise.name || "Unnamed exercise"}</span>
+                                            {required ? <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800">Required by workout</span> : null}
+                                          </div>
+                                          <div className="mt-1 text-xs text-zinc-500">{exercise.muscleGroup} • {(exercise.entries || []).length} entries • {(exercise.metrics || []).join(", ") || "No metrics"}</div>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                  {!layer2CCandidates.trackerExercises.length ? <div className="px-4 py-3 text-sm text-zinc-400">No tracker exercises in the selected source scope.</div> : null}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-zinc-200">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                                  <div>
+                                    <div className="font-semibold text-zinc-900">Tracker workouts</div>
+                                    <div className="text-xs text-zinc-500">Slots and workout entries follow automatically.</div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <SmallButton onClick={() => setAllLayer2CCategory("trackerWorkouts", layer2CCandidates.trackerWorkouts.map((item) => item.id), true)}>All</SmallButton>
+                                    <SmallButton onClick={() => setAllLayer2CCategory("trackerWorkouts", layer2CCandidates.trackerWorkouts.map((item) => item.id), false)}>None</SmallButton>
+                                  </div>
+                                </div>
+                                <div className="divide-y divide-zinc-100">
+                                  {layer2CCandidates.trackerWorkouts.map((workout) => {
+                                    const required = layer2CPlan.dependencyWorkoutIds.has(workout.id);
+                                    const checked = required || Boolean(layer2CSelections.trackerWorkouts[workout.id]);
+                                    const slotCount = workout.exerciseSlots?.length || workout.exerciseIds.length;
+                                    const entryCount = (workout.exerciseSlots || []).reduce((total, slot) => total + (slot.entries || []).length, 0);
+                                    return (
+                                      <label key={workout.id} className={`flex items-start gap-3 px-4 py-3 ${required ? "bg-sky-50/60" : "cursor-pointer"}`}>
+                                        <input type="checkbox" checked={checked} disabled={required} onChange={(event) => setLayer2CCategorySelection("trackerWorkouts", workout.id, event.target.checked)} className="mt-0.5 h-5 w-5 rounded border-zinc-300" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="font-semibold text-zinc-900">{workout.name || "Unnamed workout"}</span>
+                                            {required ? <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800">Required by cycle</span> : null}
+                                          </div>
+                                          <div className="mt-1 text-xs text-zinc-500">{slotCount} slots • {entryCount} entries</div>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
+                                  {!layer2CCandidates.trackerWorkouts.length ? <div className="px-4 py-3 text-sm text-zinc-400">No tracker workouts in the selected source scope.</div> : null}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-zinc-200">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+                                  <div>
+                                    <div className="font-semibold text-zinc-900">Workout cycles</div>
+                                    <div className="text-xs text-zinc-500">Referenced workouts and exercises are included automatically.</div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <SmallButton onClick={() => setAllLayer2CCategory("trackerCycles", layer2CCandidates.trackerCycles.map((item) => item.id), true)}>All</SmallButton>
+                                    <SmallButton onClick={() => setAllLayer2CCategory("trackerCycles", layer2CCandidates.trackerCycles.map((item) => item.id), false)}>None</SmallButton>
+                                  </div>
+                                </div>
+                                <div className="divide-y divide-zinc-100">
+                                  {layer2CCandidates.trackerCycles.map((cycle) => (
+                                    <label key={cycle.id} className="flex cursor-pointer items-start gap-3 px-4 py-3">
+                                      <input type="checkbox" checked={Boolean(layer2CSelections.trackerCycles[cycle.id])} onChange={(event) => setLayer2CCategorySelection("trackerCycles", cycle.id, event.target.checked)} className="mt-0.5 h-5 w-5 rounded border-zinc-300" />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="font-semibold text-zinc-900">{cycle.name || "Unnamed cycle"}</div>
+                                        <div className="mt-1 text-xs text-zinc-500">{cycle.workoutIds.length} referenced workouts</div>
+                                      </div>
+                                    </label>
+                                  ))}
+                                  {!layer2CCandidates.trackerCycles.length ? <div className="px-4 py-3 text-sm text-zinc-400">No cycles in the selected source scope.</div> : null}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">3. Validated import preview</div>
+                              <div className="mt-1 text-sm text-zinc-700">This is the exact package Layer 3 would receive. No records are written from this screen.</div>
+                            </div>
+                            <div className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${layer2CPlan.errorCount ? "bg-red-100 text-red-700" : layer2CPlan.warningCount ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+                              {layer2CPlan.errorCount ? "Blocked" : layer2CPlan.warningCount ? "Ready with warnings" : "Ready"}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            {[
+                              ["Programs", layer2CPlan.selectedPrograms.length],
+                              ["Sessions", layer2CPlan.selectedSessions.length],
+                              ["Session entries", layer2CPlan.selectedProgramEntries.length],
+                              ["Tracker exercises", layer2CPlan.selectedExercises.length],
+                              ["Exercise entries", layer2CPlan.selectedExerciseEntries.length],
+                              ["Workouts", layer2CPlan.selectedWorkouts.length],
+                              ["Workout slots", layer2CPlan.selectedWorkoutSlots.length],
+                              ["Workout entries", layer2CPlan.selectedWorkoutEntries.length],
+                              ["Cycles", layer2CPlan.selectedCycles.length],
+                              ["Dependency workouts", layer2CPlan.dependencyWorkoutIds.size],
+                              ["Dependency exercises", layer2CPlan.dependencyExerciseIds.size],
+                              ["Issues", layer2CPlan.issues.length],
+                            ].map(([label, count]) => (
+                              <div key={String(label)} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
+                                <div className="mt-1 text-xl font-bold text-zinc-900">{count}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {layer2CPlan.issues.length ? (
+                            <div className="mt-4 space-y-2">
+                              {layer2CPlan.issues.map((issue) => (
+                                <div key={issue.id} className={`rounded-xl border p-3 text-sm ${issue.level === "error" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                                  <div className="font-semibold">{issue.label}</div>
+                                  <div className="mt-1 text-xs">{issue.detail}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                              All selected relationships resolve inside the browser dataset. No duplicate-name warnings or missing references were detected.
+                            </div>
+                          )}
+
+                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                            <div className="text-xs text-zinc-600">
+                              Layer 2C is planning only. Layer 3 will add the execution button, write progress, destination IDs, retry handling, and post-import count verification.
+                            </div>
+                            <button type="button" disabled className="rounded-xl bg-zinc-300 px-4 py-2 text-sm font-semibold text-white">
+                              Begin Migration — Layer 3
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -15688,7 +16039,7 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                        Layer 2B remains read-only. Checkbox choices are a temporary on-screen rehearsal only; they do not persist, merge, reassign, import, or delete records. Layer 2C will turn recognized datasets into a deduplicated, conflict-checked import plan.
+                        Layer 2C remains read-only. The plan does not persist, merge, reassign, import, or delete records. Layer 3 will execute only the validated package shown above and will require a separate explicit migration action.
                       </div>
                     </div>
                   </SectionCard>

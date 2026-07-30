@@ -11468,6 +11468,11 @@ export default function App() {
     trackerWorkouts: {},
     trackerCycles: {},
   });
+  const [layer3Status, setLayer3Status] = useState<"idle" | "running" | "completed" | "failed">("idle");
+  const [layer3Stage, setLayer3Stage] = useState("Ready");
+  const [layer3Error, setLayer3Error] = useState("");
+  const [layer3RunId, setLayer3RunId] = useState<string | null>(null);
+  const [layer3ActualCounts, setLayer3ActualCounts] = useState<Record<string, number> | null>(null);
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
@@ -12309,6 +12314,419 @@ export default function App() {
     }));
   };
 
+  const runLayer3Migration = async () => {
+    if (!supabase) {
+      setLayer3Status("failed");
+      setLayer3Error("Supabase is not configured.");
+      return;
+    }
+    if (!authenticatedMemberId) {
+      setLayer3Status("failed");
+      setLayer3Error("No authenticated destination member was found.");
+      return;
+    }
+    if (role !== "admin") {
+      setLayer3Status("failed");
+      setLayer3Error("Only an admin can run this legacy migration.");
+      return;
+    }
+    if (layer2CPlan.errorCount) {
+      setLayer3Status("failed");
+      setLayer3Error("Resolve the blocked Layer 2C plan before migrating.");
+      return;
+    }
+
+    const destinationMemberId = authenticatedMemberId;
+    const sourceLabel = selectedLegacyPreviewOptions.map((option) => option.label).join(" + ") || "Legacy browser data";
+    const planIdentity = {
+      sourceOwners: Array.from(layer2CSourceOwnerIds).sort(),
+      programs: layer2CPlan.selectedPrograms.map((item) => item.id).sort(),
+      trackerExercises: layer2CPlan.selectedExercises.map((item) => item.id).sort(),
+      trackerWorkouts: layer2CPlan.selectedWorkouts.map((item) => item.id).sort(),
+      trackerCycles: layer2CPlan.selectedCycles.map((item) => item.id).sort(),
+    };
+    const fingerprintText = JSON.stringify(planIdentity);
+    let hash = 2166136261;
+    for (let index = 0; index < fingerprintText.length; index += 1) {
+      hash ^= fingerprintText.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    const sourceFingerprint = `layer3-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+
+    const expectedCounts = {
+      programs: layer2CPlan.selectedPrograms.length,
+      routines: layer2CPlan.selectedPrograms.reduce((total, program) => total + program.routines.length, 0),
+      blocks: layer2CPlan.selectedPrograms.reduce((total, program) => total + program.routines.reduce((routineTotal, routine) => routineTotal + routine.blocks.length, 0), 0),
+      program_exercises: layer2CPlan.selectedPrograms.reduce((total, program) => total + program.routines.reduce((routineTotal, routine) => routineTotal + routine.blocks.reduce((blockTotal, block) => blockTotal + block.exercises.length, 0), 0), 0),
+      sessions: layer2CPlan.selectedSessions.length,
+      session_entries: layer2CPlan.selectedProgramEntries.length,
+      tracker_exercises: layer2CPlan.selectedExercises.length,
+      tracker_entries: layer2CPlan.selectedExerciseEntries.length,
+      tracker_workouts: layer2CPlan.selectedWorkouts.length,
+      tracker_workout_slots: layer2CPlan.selectedWorkouts.reduce(
+        (total, workout) => total + (workout.exerciseSlots?.length || workout.exerciseIds.length),
+        0
+      ),
+      tracker_workout_entries: layer2CPlan.selectedWorkoutEntries.length,
+      tracker_cycles: layer2CPlan.selectedCycles.length,
+      tracker_cycle_workouts: layer2CPlan.selectedCycles.reduce((total, cycle) => total + cycle.workoutIds.length, 0),
+    };
+
+    const requireRows = <T,>(data: T[] | null, error: { message?: string } | null, table: string): T[] => {
+      if (error) throw new Error(`${table}: ${error.message || "write failed"}`);
+      return data || [];
+    };
+    const sourceOwner = (value?: string) => String(value || "").trim() || null;
+    const parseDate = (value?: string) => {
+      const text = String(value || "").trim();
+      return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    };
+    const parseTimestamp = (value?: string) => {
+      const text = String(value || "").trim();
+      if (!text) return null;
+      const parsed = new Date(text);
+      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    };
+    const positiveInt = (value: string | number | undefined, fallback = 1) => {
+      const parsed = Number.parseInt(String(value ?? ""), 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    };
+
+    setLayer3Status("running");
+    setLayer3Error("");
+    setLayer3ActualCounts(null);
+    setLayer3RunId(null);
+
+    let importRunId: string | null = null;
+    try {
+      setLayer3Stage("Creating import run");
+      const existing = await supabase
+        .from("legacy_import_runs")
+        .select("id,status,actual_counts,error_message")
+        .eq("member_id", destinationMemberId)
+        .eq("source_fingerprint", sourceFingerprint)
+        .maybeSingle();
+      if (existing.error) throw new Error(`legacy_import_runs: ${existing.error.message}`);
+      if (existing.data) {
+        throw new Error(`This exact import plan already has a ${existing.data.status} run (${existing.data.id}). Change the plan or inspect that run before retrying.`);
+      }
+
+      const runResult = await supabase
+        .from("legacy_import_runs")
+        .insert({
+          member_id: destinationMemberId,
+          source_label: sourceLabel,
+          source_fingerprint: sourceFingerprint,
+          status: "running",
+          plan: planIdentity,
+          expected_counts: expectedCounts,
+          started_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+      if (runResult.error || !runResult.data?.id) throw new Error(`legacy_import_runs: ${runResult.error?.message || "run ID was not returned"}`);
+      importRunId = runResult.data.id;
+      setLayer3RunId(importRunId);
+
+      const programIdMap = new Map<string, string>();
+      const routineIdMap = new Map<string, string>();
+      const blockIdMap = new Map<string, string>();
+      const programExerciseIdMap = new Map<string, string>();
+      const trackerExerciseIdMap = new Map<string, string>();
+      const workoutIdMap = new Map<string, string>();
+      const workoutSlotIdMap = new Map<string, string>();
+
+      setLayer3Stage("Writing programs");
+      for (let programPosition = 0; programPosition < layer2CPlan.selectedPrograms.length; programPosition += 1) {
+        const program = layer2CPlan.selectedPrograms[programPosition];
+        const result = await supabase.from("programs").insert({
+          member_id: destinationMemberId,
+          import_run_id: importRunId,
+          legacy_source_owner: sourceOwner(program.memberId),
+          legacy_app_id: program.id,
+          name: program.name || "Unnamed program",
+          started_at: parseDate(program.startedAt),
+          status: program.status || "active",
+          notes: program.notes || "",
+          program_length: program.programLength ?? null,
+          input_mode: program.inputMode || "trainerInput",
+          position: programPosition,
+        }).select("id").single();
+        if (result.error || !result.data?.id) throw new Error(`programs: ${result.error?.message || "ID not returned"}`);
+        programIdMap.set(program.id, result.data.id);
+
+        for (let routinePosition = 0; routinePosition < program.routines.length; routinePosition += 1) {
+          const routine = program.routines[routinePosition];
+          const routineLegacyKey = `${program.id}::${routine.id}`;
+          const routineResult = await supabase.from("routines").insert({
+            member_id: destinationMemberId,
+            program_id: result.data.id,
+            import_run_id: importRunId,
+            legacy_source_owner: sourceOwner(program.memberId),
+            legacy_app_id: routineLegacyKey,
+            label: routine.label || `Day ${routinePosition + 1}`,
+            position: routinePosition,
+          }).select("id").single();
+          if (routineResult.error || !routineResult.data?.id) throw new Error(`routines: ${routineResult.error?.message || "ID not returned"}`);
+          routineIdMap.set(routineLegacyKey, routineResult.data.id);
+
+          for (let blockPosition = 0; blockPosition < routine.blocks.length; blockPosition += 1) {
+            const block = routine.blocks[blockPosition];
+            const blockLegacyKey = `${program.id}::${routine.id}::${block.id}`;
+            const blockResult = await supabase.from("blocks").insert({
+              member_id: destinationMemberId,
+              routine_id: routineResult.data.id,
+              import_run_id: importRunId,
+              legacy_source_owner: sourceOwner(program.memberId),
+              legacy_app_id: blockLegacyKey,
+              block_type: block.type,
+              title: block.title || `Block ${blockPosition + 1}`,
+              duration: block.duration || "",
+              notes: block.notes || "",
+              interaction_mode: block.interactionMode || (block.type === "paired" ? "alternating" : "na"),
+              position: blockPosition,
+            }).select("id").single();
+            if (blockResult.error || !blockResult.data?.id) throw new Error(`blocks: ${blockResult.error?.message || "ID not returned"}`);
+            blockIdMap.set(blockLegacyKey, blockResult.data.id);
+
+            for (let exercisePosition = 0; exercisePosition < block.exercises.length; exercisePosition += 1) {
+              const exercise = block.exercises[exercisePosition];
+              const exerciseLegacyKey = `${program.id}::${routine.id}::${block.id}::${exercise.id}`;
+              const exerciseResult = await supabase.from("program_exercises").insert({
+                member_id: destinationMemberId,
+                block_id: blockResult.data.id,
+                import_run_id: importRunId,
+                legacy_source_owner: sourceOwner(program.memberId),
+                legacy_app_id: exerciseLegacyKey,
+                name: exercise.name || "Unnamed exercise",
+                target: exercise.target || "",
+                metric: exercise.metric || "",
+                premium_fields: exercise.premiumFields || [],
+                position: exercisePosition,
+              }).select("id").single();
+              if (exerciseResult.error || !exerciseResult.data?.id) throw new Error(`program_exercises: ${exerciseResult.error?.message || "ID not returned"}`);
+              programExerciseIdMap.set(exerciseLegacyKey, exerciseResult.data.id);
+            }
+          }
+        }
+      }
+
+      setLayer3Stage("Writing sessions and entries");
+      for (const session of layer2CPlan.selectedSessions) {
+        const program = layer2CPlan.selectedPrograms.find((item) => item.id === session.programId);
+        if (!program) throw new Error(`sessions: selected program ${session.programId} was not found`);
+        const programId = programIdMap.get(session.programId);
+        const routineKey = `${session.programId}::${session.routineId}`;
+        const routineId = routineIdMap.get(routineKey);
+        if (!programId || !routineId) throw new Error(`sessions: destination parent mapping missing for ${session.id}`);
+
+        const sessionResult = await supabase.from("sessions").insert({
+          member_id: destinationMemberId,
+          program_id: programId,
+          routine_id: routineId,
+          import_run_id: importRunId,
+          legacy_source_owner: sourceOwner(session.memberId),
+          legacy_app_id: session.id,
+          session_date: parseDate(session.date),
+          session_number: positiveInt(session.sessionNumber),
+          context_flags: session.contextFlags || [],
+          created_at: parseTimestamp(session.createdAt) || undefined,
+        }).select("id").single();
+        if (sessionResult.error || !sessionResult.data?.id) throw new Error(`sessions: ${sessionResult.error?.message || "ID not returned"}`);
+
+        let entryPosition = 0;
+        for (const sessionBlock of session.blocks) {
+          const blockKey = `${session.programId}::${session.routineId}::${sessionBlock.blockId}`;
+          const blockId = blockIdMap.get(blockKey);
+          if (!blockId) throw new Error(`session_entries: block mapping missing for ${sessionBlock.blockId}`);
+          for (const entry of sessionBlock.entries) {
+            const exerciseKey = `${session.programId}::${session.routineId}::${sessionBlock.blockId}::${entry.exerciseId}`;
+            const entryLegacyId = `${session.id}::${sessionBlock.blockId}::${entry.exerciseId}::${entryPosition}`;
+            const entryResult = await supabase.from("session_entries").insert({
+              member_id: destinationMemberId,
+              session_id: sessionResult.data.id,
+              block_id: blockId,
+              exercise_id: programExerciseIdMap.get(exerciseKey) || null,
+              import_run_id: importRunId,
+              legacy_source_owner: sourceOwner(session.memberId),
+              legacy_app_id: entryLegacyId,
+              exercise_name: entry.exerciseName || "Unnamed exercise",
+              weight: entry.weight || "",
+              performance: entry.performance || "",
+              sets_completed: entry.setsCompleted || "",
+              target: entry.target || "",
+              metric: entry.metric || "",
+              support_metrics: entry.supportMetrics || {},
+              context_flags: [...(sessionBlock.contextFlags || []), ...(entry.contextFlags || [])],
+              scoring_direction: entry.scoringDirection || "higherIsBetter",
+              position: entryPosition,
+            });
+            if (entryResult.error) throw new Error(`session_entries: ${entryResult.error.message}`);
+            entryPosition += 1;
+          }
+        }
+      }
+
+      setLayer3Stage("Writing tracker exercises");
+      for (const exercise of layer2CPlan.selectedExercises) {
+        const exerciseResult = await supabase.from("tracker_exercises").insert({
+          member_id: destinationMemberId,
+          import_run_id: importRunId,
+          legacy_source_owner: sourceOwner(exercise.memberId),
+          legacy_app_id: exercise.id,
+          name: exercise.name || "Unnamed exercise",
+          muscle_group: exercise.muscleGroup || "Other",
+          metrics: exercise.metrics || [],
+          archived: Boolean(exercise.archived),
+          created_at: parseTimestamp(exercise.createdAt) || undefined,
+        }).select("id").single();
+        if (exerciseResult.error || !exerciseResult.data?.id) throw new Error(`tracker_exercises: ${exerciseResult.error?.message || "ID not returned"}`);
+        trackerExerciseIdMap.set(exercise.id, exerciseResult.data.id);
+
+        for (const entry of exercise.entries || []) {
+          const trackerEntryResult = await supabase.from("tracker_entries").insert({
+            member_id: destinationMemberId,
+            tracker_exercise_id: exerciseResult.data.id,
+            import_run_id: importRunId,
+            legacy_source_owner: sourceOwner(exercise.memberId),
+            legacy_app_id: entry.id,
+            entry_date: parseDate(entry.entryDate),
+            values: entry.values || {},
+            circuit_index: entry.circuitIndex ?? null,
+            created_at: parseTimestamp(entry.createdAt) || undefined,
+          });
+          if (trackerEntryResult.error) throw new Error(`tracker_entries: ${trackerEntryResult.error.message}`);
+        }
+      }
+
+      setLayer3Stage("Writing workouts");
+      for (const workout of layer2CPlan.selectedWorkouts) {
+        const workoutResult = await supabase.from("tracker_workouts").insert({
+          member_id: destinationMemberId,
+          import_run_id: importRunId,
+          legacy_source_owner: sourceOwner(workout.memberId),
+          legacy_app_id: workout.id,
+          name: workout.name || "Unnamed workout",
+          started_at: parseTimestamp(workout.startedAt),
+          completed_at: parseTimestamp(workout.completedAt),
+          circuit_target: workout.circuitTarget ?? null,
+          current_circuit: workout.currentCircuit ?? null,
+          archived: Boolean(workout.archived),
+          created_at: parseTimestamp(workout.createdAt) || undefined,
+        }).select("id").single();
+        if (workoutResult.error || !workoutResult.data?.id) throw new Error(`tracker_workouts: ${workoutResult.error?.message || "ID not returned"}`);
+        workoutIdMap.set(workout.id, workoutResult.data.id);
+
+        const slots = workout.exerciseSlots?.length
+          ? workout.exerciseSlots
+          : workout.exerciseIds.map((exerciseId, index) => ({ id: `${workout.id}-slot-${index + 1}`, exerciseId, createdAt: workout.createdAt, entries: [] }));
+        for (let slotPosition = 0; slotPosition < slots.length; slotPosition += 1) {
+          const slot = slots[slotPosition];
+          const trackerExerciseId = trackerExerciseIdMap.get(slot.exerciseId);
+          if (!trackerExerciseId) throw new Error(`tracker_workout_slots: exercise mapping missing for ${slot.exerciseId}`);
+          const slotResult = await supabase.from("tracker_workout_slots").insert({
+            member_id: destinationMemberId,
+            workout_id: workoutResult.data.id,
+            tracker_exercise_id: trackerExerciseId,
+            import_run_id: importRunId,
+            legacy_source_owner: sourceOwner(workout.memberId),
+            legacy_app_id: `${workout.id}::${slot.id}`,
+            position: slotPosition,
+            created_at: parseTimestamp(slot.createdAt) || undefined,
+          }).select("id").single();
+          if (slotResult.error || !slotResult.data?.id) throw new Error(`tracker_workout_slots: ${slotResult.error?.message || "ID not returned"}`);
+          workoutSlotIdMap.set(`${workout.id}::${slot.id}`, slotResult.data.id);
+
+          for (const entry of slot.entries || []) {
+            const workoutEntryResult = await supabase.from("tracker_workout_entries").insert({
+              member_id: destinationMemberId,
+              workout_slot_id: slotResult.data.id,
+              import_run_id: importRunId,
+              legacy_source_owner: sourceOwner(workout.memberId),
+              legacy_app_id: `${workout.id}::${slot.id}::${entry.id}`,
+              entry_date: parseDate(entry.entryDate),
+              values: entry.values || {},
+              circuit_index: entry.circuitIndex ?? null,
+              created_at: parseTimestamp(entry.createdAt) || undefined,
+            });
+            if (workoutEntryResult.error) throw new Error(`tracker_workout_entries: ${workoutEntryResult.error.message}`);
+          }
+        }
+      }
+
+      setLayer3Stage("Writing cycles");
+      for (const cycle of layer2CPlan.selectedCycles) {
+        const nextWorkoutId = cycle.nextWorkoutId ? workoutIdMap.get(cycle.nextWorkoutId) || null : null;
+        const cycleResult = await supabase.from("tracker_cycles").insert({
+          member_id: destinationMemberId,
+          next_workout_id: nextWorkoutId,
+          import_run_id: importRunId,
+          legacy_source_owner: sourceOwner(cycle.memberId),
+          legacy_app_id: cycle.id,
+          name: cycle.name || "Unnamed cycle",
+          started_at: parseTimestamp(cycle.startedAt),
+          completed_at: parseTimestamp(cycle.completedAt),
+          archived: Boolean(cycle.archived),
+          created_at: parseTimestamp(cycle.createdAt) || undefined,
+        }).select("id").single();
+        if (cycleResult.error || !cycleResult.data?.id) throw new Error(`tracker_cycles: ${cycleResult.error?.message || "ID not returned"}`);
+
+        for (let workoutPosition = 0; workoutPosition < cycle.workoutIds.length; workoutPosition += 1) {
+          const legacyWorkoutId = cycle.workoutIds[workoutPosition];
+          const destinationWorkoutId = workoutIdMap.get(legacyWorkoutId);
+          if (!destinationWorkoutId) throw new Error(`tracker_cycle_workouts: workout mapping missing for ${legacyWorkoutId}`);
+          const relationResult = await supabase.from("tracker_cycle_workouts").insert({
+            member_id: destinationMemberId,
+            cycle_id: cycleResult.data.id,
+            workout_id: destinationWorkoutId,
+            import_run_id: importRunId,
+            legacy_source_owner: sourceOwner(cycle.memberId),
+            legacy_app_id: `${cycle.id}::${legacyWorkoutId}`,
+            position: workoutPosition,
+          });
+          if (relationResult.error) throw new Error(`tracker_cycle_workouts: ${relationResult.error.message}`);
+        }
+      }
+
+      setLayer3Stage("Verifying destination counts");
+      const actualCounts: Record<string, number> = {};
+      for (const table of Object.keys(expectedCounts)) {
+        const countResult = await supabase.from(table).select("*", { count: "exact", head: true }).eq("import_run_id", importRunId);
+        if (countResult.error) throw new Error(`${table} verification: ${countResult.error.message}`);
+        actualCounts[table] = countResult.count || 0;
+      }
+      const mismatches = Object.entries(expectedCounts).filter(([table, expected]) => actualCounts[table] !== expected);
+      if (mismatches.length) {
+        throw new Error(`Count verification failed: ${mismatches.map(([table, expected]) => `${table} expected ${expected}, found ${actualCounts[table]}`).join("; ")}`);
+      }
+
+      const completeResult = await supabase.from("legacy_import_runs").update({
+        status: "completed",
+        actual_counts: actualCounts,
+        completed_at: new Date().toISOString(),
+        error_message: null,
+      }).eq("id", importRunId);
+      if (completeResult.error) throw new Error(`legacy_import_runs completion: ${completeResult.error.message}`);
+
+      setLayer3ActualCounts(actualCounts);
+      setLayer3Stage("Migration complete");
+      setLayer3Status("completed");
+      await refreshDiagnostics();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLayer3Error(message);
+      setLayer3Stage("Migration failed");
+      setLayer3Status("failed");
+      if (importRunId) {
+        await supabase.from("legacy_import_runs").update({
+          status: "failed",
+          error_message: message,
+          completed_at: new Date().toISOString(),
+        }).eq("id", importRunId);
+      }
+    }
+  };
+
   const legacyOwnerSummary = useMemo(() => ({
     owners: legacyOwnerAnalysis.length,
     composites: legacyCompositeCandidates.length,
@@ -12332,12 +12750,17 @@ export default function App() {
       ["programs", "Programs"],
       ["routines", "Routines"],
       ["blocks", "Blocks"],
+      ["program_exercises", "Program Exercises"],
       ["sessions", "Sessions"],
       ["session_entries", "Session Entries"],
       ["tracker_exercises", "Tracker Exercises"],
-      ["tracker_workouts", "Tracker Workouts"],
       ["tracker_entries", "Tracker Entries"],
-      ["cycles", "Tracker Cycles"],
+      ["tracker_workouts", "Tracker Workouts"],
+      ["tracker_workout_slots", "Workout Slots"],
+      ["tracker_workout_entries", "Workout Entries"],
+      ["tracker_cycles", "Tracker Cycles"],
+      ["tracker_cycle_workouts", "Cycle Workouts"],
+      ["legacy_import_runs", "Legacy Import Runs"],
     ] as const;
 
     try {
@@ -15813,13 +16236,46 @@ export default function App() {
                             </div>
                           )}
 
-                          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                            <div className="text-xs text-zinc-600">
-                              Layer 2C is planning only. Layer 3 will add the execution button, write progress, destination IDs, retry handling, and post-import count verification.
+                          <div className="mt-4 space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Layer 3 — Execute migration</div>
+                                <div className="mt-1 text-xs text-zinc-600">
+                                  Writes this exact validated package to the authenticated member in Supabase, then verifies every imported table count.
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void runLayer3Migration()}
+                                disabled={layer3Status === "running" || Boolean(layer2CPlan.errorCount) || !authenticatedMemberId}
+                                className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+                              >
+                                {layer3Status === "running" ? "Migrating…" : layer3Status === "completed" ? "Migration Complete" : "Begin Migration — Layer 3"}
+                              </button>
                             </div>
-                            <button type="button" disabled className="rounded-xl bg-zinc-300 px-4 py-2 text-sm font-semibold text-white">
-                              Begin Migration — Layer 3
-                            </button>
+                            {layer3Status !== "idle" ? (
+                              <div className={`rounded-xl border p-3 text-sm ${
+                                layer3Status === "completed"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                                  : layer3Status === "failed"
+                                    ? "border-red-200 bg-red-50 text-red-800"
+                                    : "border-sky-200 bg-sky-50 text-sky-900"
+                              }`}>
+                                <div className="font-semibold">{layer3Stage}</div>
+                                {layer3RunId ? <div className="mt-1 break-all font-mono text-[11px]">Run: {layer3RunId}</div> : null}
+                                {layer3Error ? <div className="mt-2 text-xs">{layer3Error}</div> : null}
+                                {layer3ActualCounts ? (
+                                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                    {Object.entries(layer3ActualCounts).map(([table, count]) => (
+                                      <div key={table} className="rounded-lg border border-emerald-200 bg-white p-2">
+                                        <div className="break-words text-[9px] uppercase tracking-wide text-zinc-500">{table.replaceAll("_", " ")}</div>
+                                        <div className="mt-1 font-bold text-zinc-900">{count}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -16039,7 +16495,7 @@ export default function App() {
                       </div>
 
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                        Layer 2C remains read-only. The plan does not persist, merge, reassign, import, or delete records. Layer 3 will execute only the validated package shown above and will require a separate explicit migration action.
+                        Layer 2C remains read-only until you press the explicit Layer 3 migration button. Layer 3 writes only the validated package shown above and leaves the browser data untouched.
                       </div>
                     </div>
                   </SectionCard>
