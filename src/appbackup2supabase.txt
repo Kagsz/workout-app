@@ -12451,6 +12451,75 @@ export default function App() {
     const selectedWorkoutSlots = selectedWorkouts.flatMap((workout) => workout.exerciseSlots || []);
     const selectedWorkoutEntries = selectedWorkoutSlots.flatMap((slot) => slot.entries || []);
 
+    const dependencyFamilies: Array<{
+      id: string;
+      kind: "cycle" | "workout";
+      name: string;
+      direct: boolean;
+      workouts: TrackerWorkout[];
+      workoutIds: Set<string>;
+      exerciseIds: Set<string>;
+      missingWorkoutIds: string[];
+      missingExerciseIds: string[];
+      complete: boolean;
+    }> = selectedCycles.map((cycle) => {
+      const familyWorkouts = cycle.workoutIds
+        .map((workoutId) => workoutById.get(workoutId))
+        .filter((workout): workout is TrackerWorkout => Boolean(workout));
+      const familyExerciseIds = new Set(
+        familyWorkouts.flatMap((workout) =>
+          workout.exerciseSlots?.length
+            ? workout.exerciseSlots.map((slot) => slot.exerciseId)
+            : workout.exerciseIds
+        )
+      );
+      const missingWorkoutIds = cycle.workoutIds.filter((workoutId) => !workoutById.has(workoutId));
+      const missingExerciseIds = Array.from(familyExerciseIds).filter((exerciseId) => !exerciseById.has(exerciseId));
+      return {
+        id: `cycle-family:${cycle.id}`,
+        kind: "cycle" as const,
+        name: cycle.name || "Unnamed cycle",
+        direct: directCycleIds.has(cycle.id),
+        workouts: familyWorkouts,
+        workoutIds: new Set(cycle.workoutIds),
+        exerciseIds: familyExerciseIds,
+        missingWorkoutIds,
+        missingExerciseIds,
+        complete: missingWorkoutIds.length === 0 && missingExerciseIds.length === 0,
+      };
+    });
+
+    const cycleWorkoutIds = new Set(selectedCycles.flatMap((cycle) => cycle.workoutIds));
+    selectedWorkouts
+      .filter((workout) => !cycleWorkoutIds.has(workout.id))
+      .forEach((workout) => {
+        const familyExerciseIds = new Set(
+          workout.exerciseSlots?.length
+            ? workout.exerciseSlots.map((slot) => slot.exerciseId)
+            : workout.exerciseIds
+        );
+        const missingExerciseIds = Array.from(familyExerciseIds).filter((exerciseId) => !exerciseById.has(exerciseId));
+        dependencyFamilies.push({
+          id: `workout-family:${workout.id}`,
+          kind: "workout" as const,
+          name: workout.name || "Unnamed workout",
+          direct: directWorkoutIds.has(workout.id),
+          workouts: [workout],
+          workoutIds: new Set([workout.id]),
+          exerciseIds: familyExerciseIds,
+          missingWorkoutIds: [],
+          missingExerciseIds,
+          complete: missingExerciseIds.length === 0,
+        });
+      });
+
+    const familyReferencedExerciseIds = new Set(
+      dependencyFamilies.flatMap((family) => Array.from(family.exerciseIds))
+    );
+    const standaloneSelectedExercises = selectedExercises.filter(
+      (exercise) => directExerciseIds.has(exercise.id) && !familyReferencedExerciseIds.has(exercise.id)
+    );
+
     const issues: Layer2CValidationIssue[] = [];
     const selectedProgramOwnerIds = new Set(
       selectedPrograms.map((program) => String(program.memberId || "").trim() || "(no owner ID)")
@@ -12535,6 +12604,8 @@ export default function App() {
       selectedWorkoutSlots,
       selectedWorkoutEntries,
       selectedCycles,
+      dependencyFamilies,
+      standaloneSelectedExercises,
       issues,
       errorCount: issues.filter((issue) => issue.level === "error").length,
       warningCount: issues.filter((issue) => issue.level === "warning").length,
@@ -16721,9 +16792,126 @@ export default function App() {
                         </div>
 
                         <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">3. Dependency family diagnostics</div>
+                              <div className="mt-1 text-sm text-zinc-700">
+                                Explains why workouts and exercises are included. This is derived entirely in the browser and does not require any additional Supabase tables.
+                              </div>
+                            </div>
+                            <div className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                              layer2CPlan.dependencyFamilies.every((family) => family.complete)
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-red-100 text-red-700"
+                            }`}>
+                              {layer2CPlan.dependencyFamilies.every((family) => family.complete) ? "Families complete" : "Missing dependencies"}
+                            </div>
+                          </div>
+
+                          <div className="mt-4 space-y-3">
+                            {layer2CPlan.dependencyFamilies.length ? layer2CPlan.dependencyFamilies.map((family) => {
+                              const requiredWorkoutCount = family.workouts.filter((workout) => !layer2CPlan.directWorkoutIds.has(workout.id)).length;
+                              const requiredExerciseCount = Array.from(family.exerciseIds).filter((exerciseId) => !layer2CPlan.directExerciseIds.has(exerciseId)).length;
+                              return (
+                                <details key={family.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                  <summary className="cursor-pointer list-none">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="font-semibold text-zinc-900">{family.name}</div>
+                                        <div className="mt-1 text-xs text-zinc-600">
+                                          {family.kind === "cycle" ? "Cycle family" : "Workout family"} • {family.workouts.length} workout{family.workouts.length === 1 ? "" : "s"} • {family.exerciseIds.size} exercise{family.exerciseIds.size === 1 ? "" : "s"}
+                                        </div>
+                                      </div>
+                                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                                        family.complete ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"
+                                      }`}>
+                                        {family.complete ? "Complete" : "Incomplete"}
+                                      </span>
+                                    </div>
+                                  </summary>
+                                  <div className="mt-3 space-y-3 border-t border-zinc-200 pt-3 text-xs text-zinc-700">
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                      {[
+                                        ["Direct workouts", family.workouts.length - requiredWorkoutCount],
+                                        ["Required workouts", requiredWorkoutCount],
+                                        ["Direct exercises", family.exerciseIds.size - requiredExerciseCount],
+                                        ["Required exercises", requiredExerciseCount],
+                                      ].map(([label, count]) => (
+                                        <div key={String(label)} className="rounded-lg border border-zinc-200 bg-white p-2">
+                                          <div className="text-[9px] uppercase tracking-wide text-zinc-500">{label}</div>
+                                          <div className="mt-1 text-base font-bold text-zinc-900">{count}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div>
+                                      <div className="font-semibold text-zinc-800">Workouts</div>
+                                      <div className="mt-1 flex flex-wrap gap-1.5">
+                                        {family.workouts.map((workout) => (
+                                          <span key={workout.id} className={`rounded-full px-2 py-1 ${
+                                            layer2CPlan.directWorkoutIds.has(workout.id)
+                                              ? "bg-white text-zinc-700"
+                                              : "bg-sky-100 text-sky-800"
+                                          }`}>
+                                            {workout.name || "Unnamed workout"}{layer2CPlan.directWorkoutIds.has(workout.id) ? "" : " • required by cycle"}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="font-semibold text-zinc-800">Exercises</div>
+                                      <div className="mt-1 flex flex-wrap gap-1.5">
+                                        {Array.from(family.exerciseIds).map((exerciseId) => {
+                                          const exercise = legacyTrackerExercises.find((item) => item.id === exerciseId);
+                                          const required = !layer2CPlan.directExerciseIds.has(exerciseId);
+                                          return (
+                                            <span key={exerciseId} className={`rounded-full px-2 py-1 ${
+                                              required ? "bg-sky-100 text-sky-800" : "bg-white text-zinc-700"
+                                            }`}>
+                                              {exercise?.name || `Missing exercise ${exerciseId}`}{required ? " • required by workout" : ""}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                    {family.missingWorkoutIds.length || family.missingExerciseIds.length ? (
+                                      <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-800">
+                                        {family.missingWorkoutIds.length ? <div>Missing workouts: {family.missingWorkoutIds.join(", ")}</div> : null}
+                                        {family.missingExerciseIds.length ? <div>Missing exercises: {family.missingExerciseIds.join(", ")}</div> : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </details>
+                              );
+                            }) : (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                                No selected workouts or cycles create dependency families.
+                              </div>
+                            )}
+
+                            {layer2CPlan.standaloneSelectedExercises.length ? (
+                              <details className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                <summary className="cursor-pointer list-none">
+                                  <div className="font-semibold text-zinc-900">Standalone selected exercises</div>
+                                  <div className="mt-1 text-xs text-zinc-600">
+                                    {layer2CPlan.standaloneSelectedExercises.length} exercise{layer2CPlan.standaloneSelectedExercises.length === 1 ? "" : "s"} selected directly and not required by any selected workout.
+                                  </div>
+                                </summary>
+                                <div className="mt-3 flex flex-wrap gap-1.5 border-t border-zinc-200 pt-3">
+                                  {layer2CPlan.standaloneSelectedExercises.map((exercise) => (
+                                    <span key={exercise.id} className="rounded-full bg-white px-2 py-1 text-xs text-zinc-700">
+                                      {exercise.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              </details>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
-                              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">3. Validated import preview</div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">4. Validated import preview</div>
                               <div className="mt-1 text-sm text-zinc-700">This is the exact package Layer 3 would receive. No records are written from this screen.</div>
                             </div>
                             <div className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${layer2CPlan.errorCount ? "bg-red-100 text-red-700" : layer2CPlan.warningCount ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>

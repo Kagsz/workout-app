@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 import {
   CartesianGrid,
@@ -11672,6 +11672,13 @@ export default function App() {
   const [layer3ActualCounts, setLayer3ActualCounts] = useState<Record<string, number> | null>(null);
   const [, setSupabaseDataStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [, setSupabaseDataError] = useState("");
+  const [supabaseRuntimeSaveStatus, setSupabaseRuntimeSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [supabaseRuntimeSaveError, setSupabaseRuntimeSaveError] = useState("");
+  const supabaseRuntimeHydratedRef = useRef(false);
+  const supabaseRuntimeSnapshotRef = useRef("");
+  const supabaseRuntimeSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const supabaseRuntimeSyncInFlightRef = useRef(false);
+  const supabaseRuntimeSyncQueuedRef = useRef(false);
   const [supabaseDataReloadToken, setSupabaseDataReloadToken] = useState(0);
   const [diagnosticsCheckedAt, setDiagnosticsCheckedAt] = useState<string | null>(null);
   const [diagnosticsError, setDiagnosticsError] = useState("");
@@ -14060,7 +14067,374 @@ export default function App() {
 
   const tooltipPosition = useMemo(() => getSmartTooltipPosition(lastHoveredGraphPoint, 320), [lastHoveredGraphPoint]);
 
+  const buildSupabaseRuntimeWritableSnapshot = (
+    sessionsValue: SavedSession[],
+    exercisesValue: TrackerExercise[],
+    workoutsValue: TrackerWorkout[],
+    cyclesValue: TrackerWorkoutCycle[]
+  ) => JSON.stringify({
+    sessions: sessionsValue,
+    trackerExercises: exercisesValue,
+    trackerWorkouts: workoutsValue,
+    trackerCycles: cyclesValue,
+  });
+
+  const syncSupabaseRuntimeWritableDomains = async () => {
+    if (!supabase || !authenticatedMemberId) return;
+    if (supabaseRuntimeSyncInFlightRef.current) {
+      supabaseRuntimeSyncQueuedRef.current = true;
+      return;
+    }
+
+    supabaseRuntimeSyncInFlightRef.current = true;
+    setSupabaseRuntimeSaveStatus("saving");
+    setSupabaseRuntimeSaveError("");
+
+    const memberId = authenticatedMemberId;
+    const parseDateForWrite = (value?: string) => {
+      const raw = String(value || "").trim();
+      if (!raw) return new Date().toISOString().slice(0, 10);
+      const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) return raw;
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? new Date().toISOString().slice(0, 10) : parsed.toISOString().slice(0, 10);
+    };
+    const parseTimestampForWrite = (value?: string) => {
+      const raw = String(value || "").trim();
+      if (!raw) return null;
+      const parsed = new Date(raw);
+      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    };
+    const fetchMemberRows = async (table: string) => {
+      const result = await supabase.from(table).select("*").eq("member_id", memberId);
+      if (result.error) throw new Error(`${table}: ${result.error.message}`);
+      return (result.data || []) as Array<Record<string, any>>;
+    };
+    const findByLegacyId = (rows: Array<Record<string, any>>, legacyAppId: string) =>
+      rows.find((row) => String(row.legacy_app_id || "") === legacyAppId);
+
+    try {
+      const [
+        programRows,
+        routineRows,
+        blockRows,
+        programExerciseRows,
+        existingSessionRows,
+        trackerExerciseRows,
+        trackerWorkoutRows,
+        trackerCycleRows,
+      ] = await Promise.all([
+        fetchMemberRows("programs"),
+        fetchMemberRows("routines"),
+        fetchMemberRows("blocks"),
+        fetchMemberRows("program_exercises"),
+        fetchMemberRows("sessions"),
+        fetchMemberRows("tracker_exercises"),
+        fetchMemberRows("tracker_workouts"),
+        fetchMemberRows("tracker_cycles"),
+      ]);
+
+      const programDbIdByLegacy = new Map<string, string>();
+      programRows.forEach((row) => programDbIdByLegacy.set(String(row.legacy_app_id || row.id), String(row.id)));
+
+      const routineDbIdByLegacy = new Map<string, string>();
+      routineRows.forEach((row) => {
+        const parts = String(row.legacy_app_id || "").split("::").filter(Boolean);
+        const appRoutineId = parts[parts.length - 1] || String(row.id);
+        const parentProgram = programRows.find((programRow) => String(programRow.id) === String(row.program_id));
+        const appProgramId = String(parentProgram?.legacy_app_id || parentProgram?.id || "");
+        routineDbIdByLegacy.set(`${appProgramId}::${appRoutineId}`, String(row.id));
+      });
+
+      const blockDbIdByLegacy = new Map<string, string>();
+      blockRows.forEach((row) => {
+        const parts = String(row.legacy_app_id || "").split("::").filter(Boolean);
+        const appBlockId = parts[parts.length - 1] || String(row.id);
+        const routineRow = routineRows.find((routine) => String(routine.id) === String(row.routine_id));
+        const routineParts = String(routineRow?.legacy_app_id || "").split("::").filter(Boolean);
+        const appRoutineId = routineParts[routineParts.length - 1] || String(routineRow?.id || "");
+        const programRow = programRows.find((program) => String(program.id) === String(routineRow?.program_id));
+        const appProgramId = String(programRow?.legacy_app_id || programRow?.id || "");
+        blockDbIdByLegacy.set(`${appProgramId}::${appRoutineId}::${appBlockId}`, String(row.id));
+      });
+
+      const programExerciseDbIdByLegacy = new Map<string, string>();
+      programExerciseRows.forEach((row) => {
+        const parts = String(row.legacy_app_id || "").split("::").filter(Boolean);
+        const appExerciseId = parts[parts.length - 1] || String(row.id);
+        const blockRow = blockRows.find((block) => String(block.id) === String(row.block_id));
+        const blockParts = String(blockRow?.legacy_app_id || "").split("::").filter(Boolean);
+        const appBlockId = blockParts[blockParts.length - 1] || String(blockRow?.id || "");
+        const routineRow = routineRows.find((routine) => String(routine.id) === String(blockRow?.routine_id));
+        const routineParts = String(routineRow?.legacy_app_id || "").split("::").filter(Boolean);
+        const appRoutineId = routineParts[routineParts.length - 1] || String(routineRow?.id || "");
+        const programRow = programRows.find((program) => String(program.id) === String(routineRow?.program_id));
+        const appProgramId = String(programRow?.legacy_app_id || programRow?.id || "");
+        programExerciseDbIdByLegacy.set(`${appProgramId}::${appRoutineId}::${appBlockId}::${appExerciseId}`, String(row.id));
+      });
+
+      // Sessions + session entries.
+      const retainedSessionDbIds = new Set<string>();
+      for (const session of savedSessions) {
+        const programDbId = programDbIdByLegacy.get(session.programId);
+        const routineDbId = routineDbIdByLegacy.get(`${session.programId}::${session.routineId}`);
+        if (!programDbId || !routineDbId) {
+          throw new Error(`sessions: parent mapping missing for ${session.id}`);
+        }
+
+        const sessionPayload = {
+          member_id: memberId,
+          program_id: programDbId,
+          routine_id: routineDbId,
+          legacy_app_id: session.id,
+          session_date: parseDateForWrite(session.date),
+          session_number: Math.max(1, Number.parseInt(String(session.sessionNumber || "1"), 10) || 1),
+          context_flags: session.contextFlags || [],
+          created_at: parseTimestampForWrite(session.createdAt) || undefined,
+        };
+        const existingSession = findByLegacyId(existingSessionRows, session.id);
+        const sessionResult = existingSession
+          ? await supabase.from("sessions").update(sessionPayload).eq("id", existingSession.id).select("id").single()
+          : await supabase.from("sessions").insert(sessionPayload).select("id").single();
+        if (sessionResult.error || !sessionResult.data?.id) {
+          throw new Error(`sessions: ${sessionResult.error?.message || "ID not returned"}`);
+        }
+        const sessionDbId = String(sessionResult.data.id);
+        retainedSessionDbIds.add(sessionDbId);
+
+        const deleteEntries = await supabase.from("session_entries").delete().eq("member_id", memberId).eq("session_id", sessionDbId);
+        if (deleteEntries.error) throw new Error(`session_entries delete: ${deleteEntries.error.message}`);
+
+        const entryRows: Array<Record<string, any>> = [];
+        let entryPosition = 0;
+        session.blocks.forEach((sessionBlock) => {
+          const blockDbId = blockDbIdByLegacy.get(`${session.programId}::${session.routineId}::${sessionBlock.blockId}`);
+          if (!blockDbId) throw new Error(`session_entries: block mapping missing for ${sessionBlock.blockId}`);
+          sessionBlock.entries.forEach((entry) => {
+            const exerciseDbId = programExerciseDbIdByLegacy.get(
+              `${session.programId}::${session.routineId}::${sessionBlock.blockId}::${entry.exerciseId}`
+            ) || null;
+            entryRows.push({
+              member_id: memberId,
+              session_id: sessionDbId,
+              block_id: blockDbId,
+              exercise_id: exerciseDbId,
+              legacy_app_id: `${session.id}::${sessionBlock.blockId}::${entry.exerciseId}::${entryPosition}`,
+              exercise_name: entry.exerciseName || "Unnamed exercise",
+              weight: entry.weight || "",
+              performance: entry.performance || "",
+              sets_completed: entry.setsCompleted || "",
+              target: entry.target || "",
+              metric: entry.metric || "",
+              support_metrics: entry.supportMetrics || {},
+              context_flags: [...(sessionBlock.contextFlags || []), ...(entry.contextFlags || [])],
+              scoring_direction: entry.scoringDirection || "higherIsBetter",
+              position: entryPosition,
+            });
+            entryPosition += 1;
+          });
+        });
+        if (entryRows.length) {
+          const insertEntries = await supabase.from("session_entries").insert(entryRows);
+          if (insertEntries.error) throw new Error(`session_entries insert: ${insertEntries.error.message}`);
+        }
+      }
+
+      const sessionIdsToDelete = existingSessionRows
+        .map((row) => String(row.id))
+        .filter((id) => !retainedSessionDbIds.has(id));
+      if (sessionIdsToDelete.length) {
+        const deleteSessions = await supabase.from("sessions").delete().eq("member_id", memberId).in("id", sessionIdsToDelete);
+        if (deleteSessions.error) throw new Error(`sessions delete: ${deleteSessions.error.message}`);
+      }
+
+      // Tracker exercises + direct exercise entries.
+      const trackerExerciseDbIdByLegacy = new Map<string, string>();
+      const retainedExerciseDbIds = new Set<string>();
+      for (const exercise of trackerExercises) {
+        const payload = {
+          member_id: memberId,
+          legacy_app_id: exercise.id,
+          name: exercise.name || "Unnamed exercise",
+          muscle_group: exercise.muscleGroup || "Other",
+          metrics: exercise.metrics || [],
+          archived: Boolean(exercise.archived),
+          created_at: parseTimestampForWrite(exercise.createdAt) || undefined,
+        };
+        const existingExercise = findByLegacyId(trackerExerciseRows, exercise.id);
+        const result = existingExercise
+          ? await supabase.from("tracker_exercises").update(payload).eq("id", existingExercise.id).select("id").single()
+          : await supabase.from("tracker_exercises").insert(payload).select("id").single();
+        if (result.error || !result.data?.id) throw new Error(`tracker_exercises: ${result.error?.message || "ID not returned"}`);
+        const exerciseDbId = String(result.data.id);
+        trackerExerciseDbIdByLegacy.set(exercise.id, exerciseDbId);
+        retainedExerciseDbIds.add(exerciseDbId);
+
+        const deleteEntries = await supabase.from("tracker_entries").delete().eq("member_id", memberId).eq("tracker_exercise_id", exerciseDbId);
+        if (deleteEntries.error) throw new Error(`tracker_entries delete: ${deleteEntries.error.message}`);
+        const rows = (exercise.entries || []).map((entry) => ({
+          member_id: memberId,
+          tracker_exercise_id: exerciseDbId,
+          legacy_app_id: entry.id,
+          entry_date: parseDateForWrite(entry.entryDate),
+          values: entry.values || {},
+          circuit_index: entry.circuitIndex ?? null,
+          created_at: parseTimestampForWrite(entry.createdAt) || undefined,
+        }));
+        if (rows.length) {
+          const insertEntries = await supabase.from("tracker_entries").insert(rows);
+          if (insertEntries.error) throw new Error(`tracker_entries insert: ${insertEntries.error.message}`);
+        }
+      }
+
+      // Tracker workouts, slots, and workout entries.
+      const retainedWorkoutDbIds = new Set<string>();
+      const workoutDbIdByLegacy = new Map<string, string>();
+      for (const workout of trackerWorkouts) {
+        const payload = {
+          member_id: memberId,
+          legacy_app_id: workout.id,
+          name: workout.name || "Unnamed workout",
+          started_at: parseTimestampForWrite(workout.startedAt),
+          completed_at: parseTimestampForWrite(workout.completedAt),
+          circuit_target: workout.circuitTarget ?? null,
+          current_circuit: workout.currentCircuit ?? null,
+          archived: Boolean(workout.archived),
+          created_at: parseTimestampForWrite(workout.createdAt) || undefined,
+        };
+        const existingWorkout = findByLegacyId(trackerWorkoutRows, workout.id);
+        const result = existingWorkout
+          ? await supabase.from("tracker_workouts").update(payload).eq("id", existingWorkout.id).select("id").single()
+          : await supabase.from("tracker_workouts").insert(payload).select("id").single();
+        if (result.error || !result.data?.id) throw new Error(`tracker_workouts: ${result.error?.message || "ID not returned"}`);
+        const workoutDbId = String(result.data.id);
+        retainedWorkoutDbIds.add(workoutDbId);
+        workoutDbIdByLegacy.set(workout.id, workoutDbId);
+
+        const deleteSlots = await supabase.from("tracker_workout_slots").delete().eq("member_id", memberId).eq("workout_id", workoutDbId);
+        if (deleteSlots.error) throw new Error(`tracker_workout_slots delete: ${deleteSlots.error.message}`);
+
+        const slots = workout.exerciseSlots?.length
+          ? workout.exerciseSlots
+          : workout.exerciseIds.map((exerciseId, index) => ({
+              id: `${workout.id}-slot-${index + 1}`,
+              exerciseId,
+              createdAt: workout.createdAt,
+              entries: [],
+            }));
+
+        for (let slotPosition = 0; slotPosition < slots.length; slotPosition += 1) {
+          const slot = slots[slotPosition];
+          const exerciseDbId = trackerExerciseDbIdByLegacy.get(slot.exerciseId);
+          if (!exerciseDbId) throw new Error(`tracker_workout_slots: exercise mapping missing for ${slot.exerciseId}`);
+          const slotResult = await supabase.from("tracker_workout_slots").insert({
+            member_id: memberId,
+            workout_id: workoutDbId,
+            tracker_exercise_id: exerciseDbId,
+            legacy_app_id: `${workout.id}::${slot.id}`,
+            position: slotPosition,
+            created_at: parseTimestampForWrite(slot.createdAt) || undefined,
+          }).select("id").single();
+          if (slotResult.error || !slotResult.data?.id) throw new Error(`tracker_workout_slots: ${slotResult.error?.message || "ID not returned"}`);
+
+          const workoutEntryRows = (slot.entries || []).map((entry) => ({
+            member_id: memberId,
+            workout_slot_id: slotResult.data.id,
+            legacy_app_id: `${workout.id}::${slot.id}::${entry.id}`,
+            entry_date: parseDateForWrite(entry.entryDate),
+            values: entry.values || {},
+            circuit_index: entry.circuitIndex ?? null,
+            created_at: parseTimestampForWrite(entry.createdAt) || undefined,
+          }));
+          if (workoutEntryRows.length) {
+            const insertWorkoutEntries = await supabase.from("tracker_workout_entries").insert(workoutEntryRows);
+            if (insertWorkoutEntries.error) throw new Error(`tracker_workout_entries: ${insertWorkoutEntries.error.message}`);
+          }
+        }
+      }
+
+      // Cycles + cycle/workout relationships.
+      const retainedCycleDbIds = new Set<string>();
+      for (const cycle of trackerCycles) {
+        const nextWorkoutDbId = cycle.nextWorkoutId ? workoutDbIdByLegacy.get(cycle.nextWorkoutId) || null : null;
+        const payload = {
+          member_id: memberId,
+          next_workout_id: nextWorkoutDbId,
+          legacy_app_id: cycle.id,
+          name: cycle.name || "Unnamed cycle",
+          started_at: parseTimestampForWrite(cycle.startedAt),
+          completed_at: parseTimestampForWrite(cycle.completedAt),
+          archived: Boolean(cycle.archived),
+          created_at: parseTimestampForWrite(cycle.createdAt) || undefined,
+        };
+        const existingCycle = findByLegacyId(trackerCycleRows, cycle.id);
+        const result = existingCycle
+          ? await supabase.from("tracker_cycles").update(payload).eq("id", existingCycle.id).select("id").single()
+          : await supabase.from("tracker_cycles").insert(payload).select("id").single();
+        if (result.error || !result.data?.id) throw new Error(`tracker_cycles: ${result.error?.message || "ID not returned"}`);
+        const cycleDbId = String(result.data.id);
+        retainedCycleDbIds.add(cycleDbId);
+
+        const deleteRelations = await supabase.from("tracker_cycle_workouts").delete().eq("member_id", memberId).eq("cycle_id", cycleDbId);
+        if (deleteRelations.error) throw new Error(`tracker_cycle_workouts delete: ${deleteRelations.error.message}`);
+        const relationRows = cycle.workoutIds.map((workoutId, position) => {
+          const workoutDbId = workoutDbIdByLegacy.get(workoutId);
+          if (!workoutDbId) throw new Error(`tracker_cycle_workouts: workout mapping missing for ${workoutId}`);
+          return {
+            member_id: memberId,
+            cycle_id: cycleDbId,
+            workout_id: workoutDbId,
+            legacy_app_id: `${cycle.id}::${workoutId}`,
+            position,
+          };
+        });
+        if (relationRows.length) {
+          const insertRelations = await supabase.from("tracker_cycle_workouts").insert(relationRows);
+          if (insertRelations.error) throw new Error(`tracker_cycle_workouts insert: ${insertRelations.error.message}`);
+        }
+      }
+
+      // Prune deleted cycles/workouts/exercises after rebuilding their dependents.
+      const cycleIdsToDelete = trackerCycleRows.map((row) => String(row.id)).filter((id) => !retainedCycleDbIds.has(id));
+      if (cycleIdsToDelete.length) {
+        const result = await supabase.from("tracker_cycles").delete().eq("member_id", memberId).in("id", cycleIdsToDelete);
+        if (result.error) throw new Error(`tracker_cycles delete: ${result.error.message}`);
+      }
+      const workoutIdsToDelete = trackerWorkoutRows.map((row) => String(row.id)).filter((id) => !retainedWorkoutDbIds.has(id));
+      if (workoutIdsToDelete.length) {
+        const result = await supabase.from("tracker_workouts").delete().eq("member_id", memberId).in("id", workoutIdsToDelete);
+        if (result.error) throw new Error(`tracker_workouts delete: ${result.error.message}`);
+      }
+      const exerciseIdsToDelete = trackerExerciseRows.map((row) => String(row.id)).filter((id) => !retainedExerciseDbIds.has(id));
+      if (exerciseIdsToDelete.length) {
+        const result = await supabase.from("tracker_exercises").delete().eq("member_id", memberId).in("id", exerciseIdsToDelete);
+        if (result.error) throw new Error(`tracker_exercises delete: ${result.error.message}`);
+      }
+
+      supabaseRuntimeSnapshotRef.current = buildSupabaseRuntimeWritableSnapshot(
+        savedSessions,
+        trackerExercises,
+        trackerWorkouts,
+        trackerCycles
+      );
+      setSupabaseRuntimeSaveStatus("saved");
+    } catch (error) {
+      setSupabaseRuntimeSaveStatus("failed");
+      setSupabaseRuntimeSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      supabaseRuntimeSyncInFlightRef.current = false;
+      if (supabaseRuntimeSyncQueuedRef.current) {
+        supabaseRuntimeSyncQueuedRef.current = false;
+        void syncSupabaseRuntimeWritableDomains();
+      }
+    }
+  };
+
   useEffect(() => {
+    supabaseRuntimeHydratedRef.current = false;
+    supabaseRuntimeSnapshotRef.current = "";
+    setSupabaseRuntimeSaveStatus("idle");
+    setSupabaseRuntimeSaveError("");
     if (!supabase || !authenticatedMemberId) return;
     if (!Object.values(DATA_SOURCE_BY_DOMAIN).some((source) => source === "supabase")) return;
 
@@ -14262,6 +14636,14 @@ export default function App() {
         setTrackerExercises(loadedTrackerExercises);
         setTrackerWorkouts(loadedWorkouts);
         setTrackerCycles(loadedCycles);
+        supabaseRuntimeSnapshotRef.current = buildSupabaseRuntimeWritableSnapshot(
+          loadedSessions,
+          loadedTrackerExercises,
+          loadedWorkouts,
+          loadedCycles
+        );
+        supabaseRuntimeHydratedRef.current = true;
+        setSupabaseRuntimeSaveStatus("saved");
         setSelectedProgramId((current) => loadedPrograms.some((program) => program.id === current) ? current : loadedPrograms[0]?.id || null);
         setSupabaseDataStatus("ready");
       } catch (error) {
@@ -14274,6 +14656,30 @@ export default function App() {
     void loadSupabaseRuntimeData();
     return () => { cancelled = true; };
   }, [authenticatedMemberId, supabaseDataReloadToken]);
+
+  useEffect(() => {
+    if (!supabase || !authenticatedMemberId || !supabaseRuntimeHydratedRef.current) return;
+    const nextSnapshot = buildSupabaseRuntimeWritableSnapshot(
+      savedSessions,
+      trackerExercises,
+      trackerWorkouts,
+      trackerCycles
+    );
+    if (nextSnapshot === supabaseRuntimeSnapshotRef.current) return;
+
+    if (supabaseRuntimeSyncTimerRef.current) {
+      clearTimeout(supabaseRuntimeSyncTimerRef.current);
+    }
+    supabaseRuntimeSyncTimerRef.current = setTimeout(() => {
+      void syncSupabaseRuntimeWritableDomains();
+    }, 650);
+
+    return () => {
+      if (supabaseRuntimeSyncTimerRef.current) {
+        clearTimeout(supabaseRuntimeSyncTimerRef.current);
+      }
+    };
+  }, [authenticatedMemberId, savedSessions, trackerCycles, trackerExercises, trackerWorkouts]);
 
   useEffect(() => {
     if (DATA_SOURCE_BY_DOMAIN.members === "legacy") {
@@ -17216,6 +17622,48 @@ export default function App() {
 
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                         Layer 2C remains read-only until you press the explicit Layer 3 migration button. Layer 3 writes only the validated package shown above and leaves the browser data untouched.
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="Supabase Runtime Persistence" collapsible>
+                    <div className={`rounded-2xl border p-4 ${
+                      supabaseRuntimeSaveStatus === "failed"
+                        ? "border-red-200 bg-red-50"
+                        : supabaseRuntimeSaveStatus === "saving"
+                          ? "border-amber-200 bg-amber-50"
+                          : "border-emerald-200 bg-emerald-50"
+                    }`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold text-zinc-900">Sessions and Gym Tracker write-through</div>
+                          <div className="mt-1 text-xs text-zinc-600">
+                            Normal session, exercise, workout, workout-entry, and cycle changes now persist to Supabase automatically.
+                          </div>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                          supabaseRuntimeSaveStatus === "failed"
+                            ? "bg-red-100 text-red-700"
+                            : supabaseRuntimeSaveStatus === "saving"
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-emerald-100 text-emerald-800"
+                        }`}>
+                          {supabaseRuntimeSaveStatus === "saving"
+                            ? "Saving"
+                            : supabaseRuntimeSaveStatus === "failed"
+                              ? "Save failed"
+                              : supabaseRuntimeSaveStatus === "saved"
+                                ? "Saved"
+                                : "Idle"}
+                        </span>
+                      </div>
+                      {supabaseRuntimeSaveError ? (
+                        <div className="mt-3 rounded-xl border border-red-200 bg-white p-3 text-xs text-red-700">
+                          {supabaseRuntimeSaveError}
+                        </div>
+                      ) : null}
+                      <div className="mt-3 text-xs text-zinc-600">
+                        Program Design hierarchy edits remain the next Supabase write layer; this pass does not route them back into local storage.
                       </div>
                     </div>
                   </SectionCard>
