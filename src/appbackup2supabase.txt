@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 import {
   CartesianGrid,
@@ -11707,6 +11707,7 @@ export default function App() {
 
   const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(loadTrackerExercisesFromDeclaredSource);
   const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(loadTrackerWorkoutsFromDeclaredSource);
+  const trackerExerciseSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
 
 
@@ -13477,10 +13478,16 @@ export default function App() {
     };
 
     if (source === "exercise") {
-      updateTrackerExercise(sourceId, (exercise) => ({
-        ...exercise,
-        entries: (exercise.entries || []).map((item) => (item.id === entry.id ? updatedEntry : item)),
-      }));
+      const exercise = trackerExercises.find((item) => item.id === sourceId);
+      if (exercise) {
+        updateTrackerExercise(sourceId, (currentExercise) => ({
+          ...currentExercise,
+          entries: (currentExercise.entries || []).map((item) => (item.id === entry.id ? updatedEntry : item)),
+        }));
+        void persistTrackerExerciseEntry(exercise, updatedEntry).catch((error) =>
+          showTrackerPersistenceError(`Edit entry for "${exercise.name}"`, error)
+        );
+      }
     } else {
       setTrackerWorkouts((current) =>
         current.map((workout) => {
@@ -13506,10 +13513,16 @@ export default function App() {
     if (!confirmed) return;
 
     if (source === "exercise") {
-      updateTrackerExercise(sourceId, (exercise) => ({
-        ...exercise,
-        entries: (exercise.entries || []).filter((item) => item.id !== entry.id),
-      }));
+      const exercise = trackerExercises.find((item) => item.id === sourceId);
+      if (exercise) {
+        updateTrackerExercise(sourceId, (currentExercise) => ({
+          ...currentExercise,
+          entries: (currentExercise.entries || []).filter((item) => item.id !== entry.id),
+        }));
+        void deleteTrackerExerciseEntryFromSupabase(exercise, entry.id).catch((error) =>
+          showTrackerPersistenceError(`Delete entry for "${exercise.name}"`, error)
+        );
+      }
     } else {
       setTrackerWorkouts((current) =>
         current.map((workout) => {
@@ -14656,6 +14669,124 @@ export default function App() {
   };
 
 
+  const showTrackerPersistenceError = (action: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[Tracker persistence] ${action}:`, error);
+    window.alert(`${action} could not be saved to Supabase.\n\n${message}`);
+  };
+
+  const getTrackerExerciseDbRow = async (exerciseId: string, memberId: string) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const result = await supabase
+      .from("tracker_exercises")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("legacy_app_id", exerciseId)
+      .limit(1);
+    if (result.error) throw new Error(result.error.message);
+    return result.data?.[0] || null;
+  };
+
+  const persistTrackerExercise = async (exercise: TrackerExercise) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = exercise.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this exercise.");
+
+    const payload = {
+      member_id: memberId,
+      legacy_app_id: exercise.id,
+      name: exercise.name || "Unnamed exercise",
+      muscle_group: exercise.muscleGroup || "Other",
+      metrics: exercise.metrics || [],
+      archived: Boolean(exercise.archived),
+      created_at: exercise.createdAt || new Date().toISOString(),
+    };
+
+    const existing = await getTrackerExerciseDbRow(exercise.id, memberId);
+    const result = existing
+      ? await supabase.from("tracker_exercises").update(payload).eq("id", existing.id)
+      : await supabase.from("tracker_exercises").insert(payload);
+
+    if (result.error) throw new Error(result.error.message);
+  };
+
+  const scheduleTrackerExerciseSave = (exercise: TrackerExercise) => {
+    const existingTimer = trackerExerciseSaveTimersRef.current.get(exercise.id);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(() => {
+      trackerExerciseSaveTimersRef.current.delete(exercise.id);
+      void persistTrackerExercise(exercise).catch((error) =>
+        showTrackerPersistenceError(`Exercise "${exercise.name || "Unnamed exercise"}"`, error)
+      );
+    }, 450);
+
+    trackerExerciseSaveTimersRef.current.set(exercise.id, timer);
+  };
+
+  const persistTrackerExerciseEntry = async (
+    exercise: TrackerExercise,
+    entry: TrackerEntry
+  ) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = exercise.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this exercise.");
+
+    let exerciseRow = await getTrackerExerciseDbRow(exercise.id, memberId);
+    if (!exerciseRow) {
+      await persistTrackerExercise(exercise);
+      exerciseRow = await getTrackerExerciseDbRow(exercise.id, memberId);
+    }
+    if (!exerciseRow) throw new Error("The parent tracker exercise could not be resolved.");
+
+    const existingEntryResult = await supabase
+      .from("tracker_entries")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("tracker_exercise_id", exerciseRow.id)
+      .eq("legacy_app_id", entry.id)
+      .limit(1);
+    if (existingEntryResult.error) throw new Error(existingEntryResult.error.message);
+
+    const payload = {
+      member_id: memberId,
+      tracker_exercise_id: exerciseRow.id,
+      legacy_app_id: entry.id,
+      entry_date: entry.entryDate,
+      values: entry.values || {},
+      circuit_index: entry.circuitIndex ?? null,
+      created_at: entry.createdAt || new Date().toISOString(),
+    };
+
+    const existingEntry = existingEntryResult.data?.[0];
+    const saveResult = existingEntry
+      ? await supabase.from("tracker_entries").update(payload).eq("id", existingEntry.id)
+      : await supabase.from("tracker_entries").insert(payload);
+
+    if (saveResult.error) throw new Error(saveResult.error.message);
+  };
+
+  const deleteTrackerExerciseEntryFromSupabase = async (
+    exercise: TrackerExercise,
+    entryId: string
+  ) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = exercise.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this exercise.");
+
+    const exerciseRow = await getTrackerExerciseDbRow(exercise.id, memberId);
+    if (!exerciseRow) return;
+
+    const result = await supabase
+      .from("tracker_entries")
+      .delete()
+      .eq("member_id", memberId)
+      .eq("tracker_exercise_id", exerciseRow.id)
+      .eq("legacy_app_id", entryId);
+
+    if (result.error) throw new Error(result.error.message);
+  };
+
   const addTrackerExercise = (nameOverride?: string, muscleGroupOverride?: MuscleGroup) => {
     if (!selectedMember) return null;
     const name = (nameOverride ?? newTrackerExerciseName).trim();
@@ -14675,6 +14806,12 @@ export default function App() {
     setTrackerExercises((current) => [exercise, ...current]);
     setExpandedTrackerExerciseIds((current) => [exercise.id, ...current]);
 
+    void persistTrackerExercise(exercise).catch((error) => {
+      setTrackerExercises((current) => current.filter((item) => item.id !== exercise.id));
+      setExpandedTrackerExerciseIds((current) => current.filter((id) => id !== exercise.id));
+      showTrackerPersistenceError(`Create exercise "${exercise.name}"`, error);
+    });
+
     if (!nameOverride) {
       setNewTrackerExerciseName("");
       setNewTrackerExerciseMuscleGroup("Chest");
@@ -14684,7 +14821,11 @@ export default function App() {
   };
 
   const archiveTrackerExercise = (exerciseId: string) => {
-    setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? { ...exercise, archived: true } : exercise)));
+    const currentExercise = trackerExercises.find((exercise) => exercise.id === exerciseId);
+    if (!currentExercise) return;
+    const archivedExercise = { ...currentExercise, archived: true };
+
+    setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? archivedExercise : exercise)));
     setTrackerWorkouts((current) =>
       current.map((workout) => {
         const normalized = normalizeTrackerWorkout(workout);
@@ -14692,17 +14833,36 @@ export default function App() {
         return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
       })
     );
+
+    void persistTrackerExercise(archivedExercise).catch((error) => {
+      setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? currentExercise : exercise)));
+      showTrackerPersistenceError(`Archive exercise "${currentExercise.name}"`, error);
+    });
   };
 
   const restoreTrackerExercise = (exerciseId: string) => {
-    setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? { ...exercise, archived: false } : exercise)));
+    const currentExercise = trackerExercises.find((exercise) => exercise.id === exerciseId);
+    if (!currentExercise) return;
+    const restoredExercise = { ...currentExercise, archived: false };
+
+    setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? restoredExercise : exercise)));
+
+    void persistTrackerExercise(restoredExercise).catch((error) => {
+      setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? currentExercise : exercise)));
+      showTrackerPersistenceError(`Restore exercise "${currentExercise.name}"`, error);
+    });
   };
 
   const deleteTrackerExercisePermanently = (exerciseId: string) => {
     const confirmDelete = window.confirm("Delete this exercise permanently? This also removes it from any workouts.");
     if (!confirmDelete) return;
 
-    setTrackerExercises((current) => current.filter((exercise) => exercise.id !== exerciseId));
+    const exercise = trackerExercises.find((item) => item.id === exerciseId);
+    if (!exercise) return;
+    const previousExercises = trackerExercises;
+    const previousWorkouts = trackerWorkouts;
+
+    setTrackerExercises((current) => current.filter((item) => item.id !== exerciseId));
     setTrackerWorkouts((current) =>
       current.map((workout) => {
         const normalized = normalizeTrackerWorkout(workout);
@@ -14713,10 +14873,35 @@ export default function App() {
     setExpandedTrackerExerciseIds((current) => current.filter((id) => id !== exerciseId));
     if (graphViewerExerciseId === exerciseId) setGraphViewerExerciseId(null);
     if (dataViewerExerciseId === exerciseId) setDataViewerExerciseId(null);
+
+    void (async () => {
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const memberId = exercise.memberId || authenticatedMemberId;
+      if (!memberId) throw new Error("No member is connected to this exercise.");
+      const row = await getTrackerExerciseDbRow(exercise.id, memberId);
+      if (!row) return;
+      const result = await supabase
+        .from("tracker_exercises")
+        .delete()
+        .eq("member_id", memberId)
+        .eq("id", row.id);
+      if (result.error) throw new Error(result.error.message);
+    })().catch((error) => {
+      setTrackerExercises(previousExercises);
+      setTrackerWorkouts(previousWorkouts);
+      showTrackerPersistenceError(`Delete exercise "${exercise.name}"`, error);
+    });
   };
 
   const updateTrackerExercise = (exerciseId: string, updater: (exercise: TrackerExercise) => TrackerExercise) => {
-    setTrackerExercises((current) => current.map((exercise) => (exercise.id === exerciseId ? normalizeTrackerExercise(updater(normalizeTrackerExercise(exercise))) : exercise)));
+    setTrackerExercises((current) =>
+      current.map((exercise) => {
+        if (exercise.id !== exerciseId) return exercise;
+        const nextExercise = normalizeTrackerExercise(updater(normalizeTrackerExercise(exercise)));
+        scheduleTrackerExerciseSave(nextExercise);
+        return nextExercise;
+      })
+    );
   };
 
   const addMetricToTrackerExercise = (exerciseId: string) => {
@@ -15104,15 +15289,21 @@ export default function App() {
         })
       );
     } else {
-      updateTrackerExercise(exerciseId, (exercise) => {
-        const existingEntry = (exercise.entries || []).find((item) => item.entryDate === entryDate);
-        return {
-          ...exercise,
-          entries: existingEntry
-            ? (exercise.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
-            : [...(exercise.entries || []), entry],
-        };
-      });
+      const currentExercise = trackerExercises.find((item) => item.id === exerciseId);
+      if (currentExercise) {
+        updateTrackerExercise(exerciseId, (exercise) => {
+          const existingEntry = (exercise.entries || []).find((item) => item.entryDate === entryDate);
+          return {
+            ...exercise,
+            entries: existingEntry
+              ? (exercise.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
+              : [...(exercise.entries || []), entry],
+          };
+        });
+        void persistTrackerExerciseEntry(currentExercise, entry).catch((error) =>
+          showTrackerPersistenceError(`Save entry for "${currentExercise.name}"`, error)
+        );
+      }
     }
 
     setTrackerDraftValues((current) => ({
