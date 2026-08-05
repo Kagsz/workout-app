@@ -14851,11 +14851,12 @@ export default function App() {
     const retainedSlotDbIds = new Set<string>();
 
     // Move every existing slot to a unique temporary position before assigning
-    // the final order. This avoids transient collisions with the database's
-    // unique (workout_id, position) constraint during swaps/reordering.
+    // the final order. Temporary positions must remain non-negative because the
+    // database enforces a position check constraint.
+    const temporaryPositionBase = 1000000;
     for (let index = 0; index < (existingResult.data || []).length; index += 1) {
       const existingSlot = (existingResult.data || [])[index];
-      const temporaryPosition = -100000 - index;
+      const temporaryPosition = temporaryPositionBase + index;
       const temporaryResult = await supabase
         .from("tracker_workout_slots")
         .update({ position: temporaryPosition })
