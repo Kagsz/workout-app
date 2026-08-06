@@ -13260,6 +13260,8 @@ export default function App() {
     return Boolean((slot.entries || []).find((entry) => isTrackerEntryForCircuit(entry, circuitIndex) && (getSafeDateTime(entry.createdAt || entry.entryDate) >= startedTime || String(entry.entryDate || "") >= startedDate)));
   };
 
+  // Durable resume position is derived from persisted workout entries. After refresh
+  // or on another device, the first slot without an entry for the active circuit is Next Up.
   const getWorkoutFirstIncompleteSlotId = (workout: TrackerWorkout | null | undefined) => {
     if (!workout?.startedAt || workout.completedAt) return null;
     const normalized = normalizeTrackerWorkout(workout);
@@ -13489,20 +13491,38 @@ export default function App() {
         );
       }
     } else {
-      setTrackerWorkouts((current) =>
-        current.map((workout) => {
-          const normalized = normalizeTrackerWorkout(workout);
-          const nextSlots = (normalized.exerciseSlots || []).map((slot) =>
-            slot.id === sourceId
-              ? {
-                  ...slot,
-                  entries: (slot.entries || []).map((item) => (item.id === entry.id ? updatedEntry : item)),
-                }
-              : slot
+      const workout = trackerWorkouts
+        .map(normalizeTrackerWorkout)
+        .find((item) => (item.exerciseSlots || []).some((slot) => slot.id === sourceId));
+      if (workout) {
+        const previousWorkout = workout;
+        const nextSlots = (workout.exerciseSlots || []).map((slot) =>
+          slot.id === sourceId
+            ? {
+                ...slot,
+                entries: (slot.entries || []).map((item) => (item.id === entry.id ? updatedEntry : item)),
+              }
+            : slot
+        );
+        const nextWorkout = {
+          ...workout,
+          exerciseSlots: nextSlots,
+          exerciseIds: nextSlots.map((slot) => slot.exerciseId),
+        };
+
+        setTrackerWorkouts((current) =>
+          current.map((item) => (item.id === workout.id ? nextWorkout : item))
+        );
+
+        void (async () => {
+          await persistTrackerWorkoutEntry(nextWorkout, sourceId, updatedEntry);
+        })().catch((error) => {
+          setTrackerWorkouts((current) =>
+            current.map((item) => (item.id === workout.id ? previousWorkout : item))
           );
-          return { ...normalized, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
-        })
-      );
+          showTrackerPersistenceError(`Edit workout entry in "${workout.name}"`, error);
+        });
+      }
     }
 
     clearTrackerDataEditing();
@@ -13524,26 +13544,48 @@ export default function App() {
         );
       }
     } else {
-      setTrackerWorkouts((current) =>
-        current.map((workout) => {
-          const normalized = normalizeTrackerWorkout(workout);
-          const nextSlots = (normalized.exerciseSlots || []).map((slot) =>
-            slot.id === sourceId
-              ? {
-                  ...slot,
-                  entries: (slot.entries || []).filter((item) => item.id !== entry.id),
-                }
-              : slot
+      const workout = trackerWorkouts
+        .map(normalizeTrackerWorkout)
+        .find((item) => (item.exerciseSlots || []).some((slot) => slot.id === sourceId));
+      if (workout) {
+        const previousWorkout = workout;
+        const nextSlots = (workout.exerciseSlots || []).map((slot) =>
+          slot.id === sourceId
+            ? {
+                ...slot,
+                entries: (slot.entries || []).filter((item) => item.id !== entry.id),
+              }
+            : slot
+        );
+        const candidateWorkout = {
+          ...workout,
+          exerciseSlots: nextSlots,
+          exerciseIds: nextSlots.map((slot) => slot.exerciseId),
+        };
+        const currentCircuit = getTrackerWorkoutCurrentCircuit(candidateWorkout);
+        const allSlotsComplete =
+          Boolean(candidateWorkout.startedAt) &&
+          nextSlots.length > 0 &&
+          nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, candidateWorkout, currentCircuit));
+        const nextWorkout = {
+          ...candidateWorkout,
+          completedAt: allSlotsComplete ? candidateWorkout.completedAt : undefined,
+        };
+
+        setTrackerWorkouts((current) =>
+          current.map((item) => (item.id === workout.id ? nextWorkout : item))
+        );
+
+        void (async () => {
+          await deleteTrackerWorkoutEntryFromSupabase(workout, sourceId, entry.id);
+          await persistTrackerWorkoutMetadata(nextWorkout);
+        })().catch((error) => {
+          setTrackerWorkouts((current) =>
+            current.map((item) => (item.id === workout.id ? previousWorkout : item))
           );
-          const allSlotsComplete = Boolean(normalized.startedAt) && nextSlots.length > 0 && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, { ...normalized, exerciseSlots: nextSlots }));
-          return {
-            ...normalized,
-            completedAt: allSlotsComplete ? normalized.completedAt : undefined,
-            exerciseSlots: nextSlots,
-            exerciseIds: nextSlots.map((slot) => slot.exerciseId),
-          };
-        })
-      );
+          showTrackerPersistenceError(`Delete workout entry from "${workout.name}"`, error);
+        });
+      }
     }
 
     clearTrackerDataEditing();
@@ -14825,6 +14867,94 @@ export default function App() {
     if (result.error) throw new Error(result.error.message);
   };
 
+  const getTrackerWorkoutSlotDbRow = async (
+    workout: TrackerWorkout,
+    slotId: string
+  ) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = workout.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this workout.");
+
+    const workoutRow = await getTrackerWorkoutDbRow(workout.id, memberId);
+    if (!workoutRow) throw new Error("The parent workout could not be resolved.");
+
+    const legacyAppId = `${workout.id}::${slotId}`;
+    const result = await supabase
+      .from("tracker_workout_slots")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("workout_id", workoutRow.id)
+      .eq("legacy_app_id", legacyAppId)
+      .limit(1);
+
+    if (result.error) throw new Error(result.error.message);
+    const row = result.data?.[0] || null;
+    if (!row) throw new Error(`Workout slot ${slotId} could not be resolved in Supabase.`);
+    return row;
+  };
+
+  const persistTrackerWorkoutEntry = async (
+    workout: TrackerWorkout,
+    slotId: string,
+    entry: TrackerEntry
+  ) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = workout.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this workout.");
+
+    const slotRow = await getTrackerWorkoutSlotDbRow(workout, slotId);
+    const legacyAppId = `${workout.id}::${slotId}::${entry.id}`;
+
+    const existingResult = await supabase
+      .from("tracker_workout_entries")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("workout_slot_id", slotRow.id)
+      .eq("legacy_app_id", legacyAppId)
+      .limit(1);
+
+    if (existingResult.error) throw new Error(existingResult.error.message);
+
+    const payload = {
+      member_id: memberId,
+      workout_slot_id: slotRow.id,
+      legacy_app_id: legacyAppId,
+      entry_date: entry.entryDate,
+      values: entry.values || {},
+      circuit_index: entry.circuitIndex ?? null,
+      created_at: entry.createdAt || new Date().toISOString(),
+    };
+
+    const existing = existingResult.data?.[0];
+    const result = existing
+      ? await supabase.from("tracker_workout_entries").update(payload).eq("id", existing.id)
+      : await supabase.from("tracker_workout_entries").insert(payload);
+
+    if (result.error) throw new Error(result.error.message);
+  };
+
+  const deleteTrackerWorkoutEntryFromSupabase = async (
+    workout: TrackerWorkout,
+    slotId: string,
+    entryId: string
+  ) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = workout.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this workout.");
+
+    const slotRow = await getTrackerWorkoutSlotDbRow(workout, slotId);
+    const legacyAppId = `${workout.id}::${slotId}::${entryId}`;
+
+    const result = await supabase
+      .from("tracker_workout_entries")
+      .delete()
+      .eq("member_id", memberId)
+      .eq("workout_slot_id", slotRow.id)
+      .eq("legacy_app_id", legacyAppId);
+
+    if (result.error) throw new Error(result.error.message);
+  };
+
   const syncTrackerWorkoutSlots = async (workout: TrackerWorkout) => {
     if (!supabase) throw new Error("Supabase is not configured.");
     const normalized = normalizeTrackerWorkout(workout);
@@ -15423,32 +15553,55 @@ export default function App() {
       circuitIndex: activeCircuitIndex,
     };
 
-    if (pendingTrackerWorkoutSlotId) {
-      setTrackerWorkouts((current) =>
-        current.map((workout) => {
-          const normalized = normalizeTrackerWorkout(workout);
-          const nextSlots = (normalized.exerciseSlots || []).map((slot) => {
-            if (slot.id !== pendingTrackerWorkoutSlotId) return slot;
-            const existingEntry = (slot.entries || []).find((item) => item.entryDate === entryDate && isTrackerEntryForCircuit(item, activeCircuitIndex || 1));
-            return {
-              ...slot,
-              entries: existingEntry
-                ? (slot.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
-                : [...(slot.entries || []), entry],
-            };
-          });
-          if (normalized.id !== pendingTrackerWorkoutSlot?.workout.id) return workout;
-          const startedAt = normalized.startedAt || new Date().toISOString();
-          const updatedWorkout = { ...normalized, startedAt, completedAt: undefined, exerciseSlots: nextSlots, exerciseIds: nextSlots.map((slot) => slot.exerciseId) };
-          const currentCircuit = getTrackerWorkoutCurrentCircuit(updatedWorkout);
-          const targetCircuit = getTrackerWorkoutCircuitTarget(updatedWorkout);
-          const allSlotsComplete = Boolean(updatedWorkout.startedAt) && (nextSlots.length > 0) && nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout, currentCircuit));
+    if (pendingTrackerWorkoutSlotId && pendingTrackerWorkoutSlot?.workout) {
+      const previousWorkout = normalizeTrackerWorkout(pendingTrackerWorkoutSlot.workout);
+      const nextSlots = (previousWorkout.exerciseSlots || []).map((slot) => {
+        if (slot.id !== pendingTrackerWorkoutSlotId) return slot;
+        const existingEntry = (slot.entries || []).find(
+          (item) => item.entryDate === entryDate && isTrackerEntryForCircuit(item, activeCircuitIndex || 1)
+        );
+        return {
+          ...slot,
+          entries: existingEntry
+            ? (slot.entries || []).map((item) => (item.id === existingEntry.id ? entry : item))
+            : [...(slot.entries || []), entry],
+        };
+      });
 
-          if (!allSlotsComplete) return updatedWorkout;
-          if (currentCircuit < targetCircuit) return { ...updatedWorkout, currentCircuit: currentCircuit + 1, completedAt: undefined };
-          return { ...updatedWorkout, completedAt: new Date().toISOString(), currentCircuit: targetCircuit };
-        })
+      const startedAt = previousWorkout.startedAt || new Date().toISOString();
+      const updatedWorkout = {
+        ...previousWorkout,
+        startedAt,
+        completedAt: undefined,
+        exerciseSlots: nextSlots,
+        exerciseIds: nextSlots.map((slot) => slot.exerciseId),
+      };
+      const currentCircuit = getTrackerWorkoutCurrentCircuit(updatedWorkout);
+      const targetCircuit = getTrackerWorkoutCircuitTarget(updatedWorkout);
+      const allSlotsComplete =
+        Boolean(updatedWorkout.startedAt) &&
+        nextSlots.length > 0 &&
+        nextSlots.every((slot) => hasWorkoutSlotEntrySinceStart(slot, updatedWorkout, currentCircuit));
+
+      const nextWorkout = !allSlotsComplete
+        ? updatedWorkout
+        : currentCircuit < targetCircuit
+          ? { ...updatedWorkout, currentCircuit: currentCircuit + 1, completedAt: undefined }
+          : { ...updatedWorkout, completedAt: new Date().toISOString(), currentCircuit: targetCircuit };
+
+      setTrackerWorkouts((current) =>
+        current.map((workout) => (workout.id === previousWorkout.id ? nextWorkout : workout))
       );
+
+      void (async () => {
+        await persistTrackerWorkoutEntry(nextWorkout, pendingTrackerWorkoutSlotId, entry);
+        await persistTrackerWorkoutMetadata(nextWorkout);
+      })().catch((error) => {
+        setTrackerWorkouts((current) =>
+          current.map((workout) => (workout.id === previousWorkout.id ? previousWorkout : workout))
+        );
+        showTrackerPersistenceError(`Save workout entry in "${previousWorkout.name}"`, error);
+      });
     } else {
       const currentExercise = trackerExercises.find((item) => item.id === exerciseId);
       if (currentExercise) {

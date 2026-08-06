@@ -15732,20 +15732,214 @@ export default function App() {
     }
   };
 
+  const getTrackerCycleDbRow = async (cycleId: string, memberId: string) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const result = await supabase
+      .from("tracker_cycles")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("legacy_app_id", cycleId)
+      .limit(1);
+    if (result.error) throw new Error(result.error.message);
+    return result.data?.[0] || null;
+  };
+
+  const persistTrackerCycleMetadata = async (cycle: TrackerWorkoutCycle) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = cycle.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this cycle.");
+
+    let nextWorkoutDbId: string | null = null;
+    if (cycle.nextWorkoutId) {
+      const nextWorkoutRow = await getTrackerWorkoutDbRow(cycle.nextWorkoutId, memberId);
+      if (!nextWorkoutRow) throw new Error(`Next workout ${cycle.nextWorkoutId} could not be resolved in Supabase.`);
+      nextWorkoutDbId = String(nextWorkoutRow.id);
+    }
+
+    const payload = {
+      member_id: memberId,
+      next_workout_id: nextWorkoutDbId,
+      legacy_app_id: cycle.id,
+      name: cycle.name || "Unnamed cycle",
+      started_at: cycle.startedAt || null,
+      completed_at: cycle.completedAt || null,
+      archived: Boolean(cycle.archived),
+      created_at: cycle.createdAt || new Date().toISOString(),
+    };
+
+    const existing = await getTrackerCycleDbRow(cycle.id, memberId);
+    const result = existing
+      ? await supabase.from("tracker_cycles").update(payload).eq("id", existing.id)
+      : await supabase.from("tracker_cycles").insert(payload);
+
+    if (result.error) throw new Error(result.error.message);
+  };
+
+  const syncTrackerCycleWorkouts = async (cycle: TrackerWorkoutCycle) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = cycle.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this cycle.");
+
+    let cycleRow = await getTrackerCycleDbRow(cycle.id, memberId);
+    if (!cycleRow) {
+      await persistTrackerCycleMetadata(cycle);
+      cycleRow = await getTrackerCycleDbRow(cycle.id, memberId);
+    }
+    if (!cycleRow) throw new Error("The parent cycle could not be resolved.");
+
+    const existingResult = await supabase
+      .from("tracker_cycle_workouts")
+      .select("id, legacy_app_id, workout_id, position")
+      .eq("member_id", memberId)
+      .eq("cycle_id", cycleRow.id);
+    if (existingResult.error) throw new Error(existingResult.error.message);
+
+    const existingByLegacyId = new Map(
+      (existingResult.data || []).map((row) => [String(row.legacy_app_id || ""), row])
+    );
+    const retainedRelationDbIds = new Set<string>();
+
+    // Stage existing rows at high positive positions so swaps/reorders cannot
+    // collide with the cycle/workout unique position constraint.
+    const temporaryPositionBase = 1000000;
+    for (let index = 0; index < (existingResult.data || []).length; index += 1) {
+      const existingRelation = (existingResult.data || [])[index];
+      const temporaryResult = await supabase
+        .from("tracker_cycle_workouts")
+        .update({ position: temporaryPositionBase + index })
+        .eq("member_id", memberId)
+        .eq("cycle_id", cycleRow.id)
+        .eq("id", existingRelation.id);
+      if (temporaryResult.error) throw new Error(temporaryResult.error.message);
+    }
+
+    for (let position = 0; position < cycle.workoutIds.length; position += 1) {
+      const workoutId = cycle.workoutIds[position];
+      const workoutRow = await getTrackerWorkoutDbRow(workoutId, memberId);
+      if (!workoutRow) throw new Error(`Workout ${workoutId} could not be resolved in Supabase.`);
+
+      const legacyAppId = `${cycle.id}::${workoutId}`;
+      const payload = {
+        member_id: memberId,
+        cycle_id: cycleRow.id,
+        workout_id: workoutRow.id,
+        legacy_app_id: legacyAppId,
+        position,
+      };
+      const existingRelation = existingByLegacyId.get(legacyAppId);
+      const result = existingRelation
+        ? await supabase
+            .from("tracker_cycle_workouts")
+            .update(payload)
+            .eq("id", existingRelation.id)
+            .select("id")
+            .single()
+        : await supabase
+            .from("tracker_cycle_workouts")
+            .insert(payload)
+            .select("id")
+            .single();
+
+      if (result.error || !result.data?.id) {
+        throw new Error(result.error?.message || "Cycle/workout relationship ID was not returned.");
+      }
+      retainedRelationDbIds.add(String(result.data.id));
+    }
+
+    const removedRelationIds = (existingResult.data || [])
+      .map((row) => String(row.id))
+      .filter((id) => !retainedRelationDbIds.has(id));
+
+    if (removedRelationIds.length) {
+      const deleteResult = await supabase
+        .from("tracker_cycle_workouts")
+        .delete()
+        .eq("member_id", memberId)
+        .eq("cycle_id", cycleRow.id)
+        .in("id", removedRelationIds);
+      if (deleteResult.error) throw new Error(deleteResult.error.message);
+    }
+  };
+
+  const persistTrackerCycleStructure = async (cycle: TrackerWorkoutCycle) => {
+    await persistTrackerCycleMetadata(cycle);
+    await syncTrackerCycleWorkouts(cycle);
+  };
+
+  const applyTrackerCycleChange = (
+    cycleId: string,
+    updater: (cycle: TrackerWorkoutCycle) => TrackerWorkoutCycle,
+    persistence: "metadata" | "structure",
+    actionLabel: string
+  ) => {
+    const previousCycle = trackerCycles.find((cycle) => cycle.id === cycleId);
+    if (!previousCycle) return null;
+    const nextCycle = updater(previousCycle);
+
+    setTrackerCycles((current) =>
+      current.map((cycle) => (cycle.id === cycleId ? nextCycle : cycle))
+    );
+
+    const save = persistence === "structure"
+      ? persistTrackerCycleStructure(nextCycle)
+      : persistTrackerCycleMetadata(nextCycle);
+
+    void save.catch((error) => {
+      setTrackerCycles((current) =>
+        current.map((cycle) => (cycle.id === cycleId ? previousCycle : cycle))
+      );
+      showTrackerPersistenceError(actionLabel, error);
+    });
+
+    return nextCycle;
+  };
+
   const archiveTrackerCycle = (cycleId: string) => {
     const cycle = trackerCycles.find((item) => item.id === cycleId);
     if (cycle && !window.confirm(`Archive ${cycle.name}?`)) return;
-    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, archived: true } : cycle));
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => ({ ...current, archived: true }),
+      "metadata",
+      `Archive cycle "${cycle?.name || "Unnamed cycle"}"`
+    );
   };
 
   const restoreTrackerCycle = (cycleId: string) => {
-    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, archived: false } : cycle));
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => ({ ...current, archived: false }),
+      "metadata",
+      `Restore cycle "${cycle?.name || "Unnamed cycle"}"`
+    );
   };
 
   const deleteTrackerCyclePermanently = (cycleId: string) => {
     const cycle = trackerCycles.find((item) => item.id === cycleId);
-    if (cycle?.startedAt && !window.confirm(`Delete ${cycle.name} and its cycle progress?`)) return;
-    setTrackerCycles((current) => current.filter((cycle) => cycle.id !== cycleId));
+    if (!cycle) return;
+    if (cycle.startedAt && !window.confirm(`Delete ${cycle.name} and its cycle progress?`)) return;
+
+    const previousCycles = trackerCycles;
+    setTrackerCycles((current) => current.filter((item) => item.id !== cycleId));
+
+    void (async () => {
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const memberId = cycle.memberId || authenticatedMemberId;
+      if (!memberId) throw new Error("No member is connected to this cycle.");
+      const row = await getTrackerCycleDbRow(cycle.id, memberId);
+      if (!row) return;
+      const result = await supabase
+        .from("tracker_cycles")
+        .delete()
+        .eq("member_id", memberId)
+        .eq("id", row.id);
+      if (result.error) throw new Error(result.error.message);
+    })().catch((error) => {
+      setTrackerCycles(previousCycles);
+      showTrackerPersistenceError(`Delete cycle "${cycle.name}"`, error);
+    });
+
     if (selectedTrackerCycleId === cycleId) setSelectedTrackerCycleId(null);
   };
 
@@ -15831,19 +16025,39 @@ export default function App() {
 
   const startTrackerCycle = (cycleId: string) => {
     const now = new Date().toISOString();
-    setTrackerCycles((current) => current.map((cycle) => {
-      if (cycle.id !== cycleId) return cycle;
-      const validNext = cycle.nextWorkoutId && cycle.workoutIds.includes(cycle.nextWorkoutId) ? cycle.nextWorkoutId : cycle.workoutIds[0];
-      return { ...cycle, startedAt: now, completedAt: undefined, nextWorkoutId: validNext };
-    }));
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => {
+        const validNext = current.nextWorkoutId && current.workoutIds.includes(current.nextWorkoutId)
+          ? current.nextWorkoutId
+          : current.workoutIds[0];
+        return { ...current, startedAt: now, completedAt: undefined, nextWorkoutId: validNext };
+      },
+      "metadata",
+      `Start cycle "${cycle?.name || "Unnamed cycle"}"`
+    );
   };
 
   const markTrackerCycleComplete = (cycleId: string) => {
-    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, completedAt: new Date().toISOString(), startedAt: cycle.startedAt || new Date().toISOString() } : cycle));
+    const now = new Date().toISOString();
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => ({ ...current, completedAt: now, startedAt: current.startedAt || now }),
+      "metadata",
+      `Complete cycle "${cycle?.name || "Unnamed cycle"}"`
+    );
   };
 
   const setCycleNextWorkout = (cycleId: string, workoutId: string) => {
-    setTrackerCycles((current) => current.map((cycle) => cycle.id === cycleId ? { ...cycle, nextWorkoutId: workoutId, completedAt: undefined } : cycle));
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => ({ ...current, nextWorkoutId: workoutId, completedAt: undefined }),
+      "metadata",
+      `Set next workout for "${cycle?.name || "Unnamed cycle"}"`
+    );
   };
 
   const addTrackerCycle = () => {
@@ -15859,20 +16073,35 @@ export default function App() {
       archived: false,
       createdAt: new Date().toISOString(),
     };
+
     setTrackerCycles((current) => [cycle, ...current]);
     setSelectedTrackerCycleId(cycle.id);
     setNewCycleName("");
     setTrackerTab("cycles");
+
+    void persistTrackerCycleMetadata(cycle).catch((error) => {
+      setTrackerCycles((current) => current.filter((item) => item.id !== cycle.id));
+      if (selectedTrackerCycleId === cycle.id) setSelectedTrackerCycleId(null);
+      showTrackerPersistenceError(`Create cycle "${cycle.name}"`, error);
+    });
   };
 
   const addWorkoutToCycle = (cycleId: string) => {
     if (!selectedCycleWorkoutId) return;
-    setTrackerCycles((current) =>
-      current.map((cycle) => {
-        if (cycle.id !== cycleId) return cycle;
-        const nextWorkoutIds = [...cycle.workoutIds, selectedCycleWorkoutId];
-        return { ...cycle, workoutIds: nextWorkoutIds, nextWorkoutId: cycle.nextWorkoutId || selectedCycleWorkoutId };
-      })
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => {
+        if (current.workoutIds.includes(selectedCycleWorkoutId)) return current;
+        const nextWorkoutIds = [...current.workoutIds, selectedCycleWorkoutId];
+        return {
+          ...current,
+          workoutIds: nextWorkoutIds,
+          nextWorkoutId: current.nextWorkoutId || selectedCycleWorkoutId,
+        };
+      },
+      "structure",
+      `Add workout to "${cycle?.name || "Unnamed cycle"}"`
     );
     setSelectedCycleWorkoutId("");
   };
@@ -15890,15 +16119,23 @@ export default function App() {
 
   const addSelectedWorkoutsToCycle = () => {
     if (!bulkWorkoutCycleId || !selectedBulkWorkoutIds.length) return;
+    const cycleId = bulkWorkoutCycleId;
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
 
-    setTrackerCycles((current) =>
-      current.map((cycle) => {
-        if (cycle.id !== bulkWorkoutCycleId) return cycle;
-        const existingWorkoutIds = new Set(cycle.workoutIds);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => {
+        const existingWorkoutIds = new Set(current.workoutIds);
         const selectedNewWorkoutIds = selectedBulkWorkoutIds.filter((workoutId) => !existingWorkoutIds.has(workoutId));
-        const nextWorkoutIds = [...cycle.workoutIds, ...selectedNewWorkoutIds];
-        return { ...cycle, workoutIds: nextWorkoutIds, nextWorkoutId: cycle.nextWorkoutId || nextWorkoutIds[0] };
-      })
+        const nextWorkoutIds = [...current.workoutIds, ...selectedNewWorkoutIds];
+        return {
+          ...current,
+          workoutIds: nextWorkoutIds,
+          nextWorkoutId: current.nextWorkoutId || nextWorkoutIds[0],
+        };
+      },
+      "structure",
+      `Add workouts to "${cycle?.name || "Unnamed cycle"}"`
     );
 
     setBulkWorkoutCycleId(null);
@@ -15906,25 +16143,37 @@ export default function App() {
   };
 
   const removeWorkoutFromCycle = (cycleId: string, workoutId: string) => {
-    setTrackerCycles((current) => current.map((cycle) => {
-      if (cycle.id !== cycleId) return cycle;
-      const nextWorkoutIds = cycle.workoutIds.filter((id) => id !== workoutId);
-      return { ...cycle, workoutIds: nextWorkoutIds, nextWorkoutId: cycle.nextWorkoutId === workoutId ? nextWorkoutIds[0] : cycle.nextWorkoutId };
-    }));
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => {
+        const nextWorkoutIds = current.workoutIds.filter((id) => id !== workoutId);
+        return {
+          ...current,
+          workoutIds: nextWorkoutIds,
+          nextWorkoutId: current.nextWorkoutId === workoutId ? nextWorkoutIds[0] : current.nextWorkoutId,
+        };
+      },
+      "structure",
+      `Remove workout from "${cycle?.name || "Unnamed cycle"}"`
+    );
   };
 
   const moveCycleWorkout = (cycleId: string, workoutId: string, direction: -1 | 1) => {
-    setTrackerCycles((current) =>
-      current.map((cycle) => {
-        if (cycle.id !== cycleId) return cycle;
-        const index = cycle.workoutIds.indexOf(workoutId);
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => {
+        const index = current.workoutIds.indexOf(workoutId);
         const nextIndex = index + direction;
-        if (index < 0 || nextIndex < 0 || nextIndex >= cycle.workoutIds.length) return cycle;
-        const nextWorkoutIds = [...cycle.workoutIds];
+        if (index < 0 || nextIndex < 0 || nextIndex >= current.workoutIds.length) return current;
+        const nextWorkoutIds = [...current.workoutIds];
         const [moved] = nextWorkoutIds.splice(index, 1);
         nextWorkoutIds.splice(nextIndex, 0, moved);
-        return { ...cycle, workoutIds: nextWorkoutIds };
-      })
+        return { ...current, workoutIds: nextWorkoutIds };
+      },
+      "structure",
+      `Reorder workouts in "${cycle?.name || "Unnamed cycle"}"`
     );
   };
 
