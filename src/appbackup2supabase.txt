@@ -16548,6 +16548,179 @@ export default function App() {
     setSelectedBlockId(nextBlock.id);
   };
 
+  const getProgramHierarchyDbRowsForSession = async (session: SavedSession) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = session.memberId || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this session.");
+
+    const programResult = await supabase
+      .from("programs")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("legacy_app_id", session.programId)
+      .limit(1);
+    if (programResult.error) throw new Error(`programs: ${programResult.error.message}`);
+    const programRow = programResult.data?.[0];
+    if (!programRow) throw new Error(`Program mapping missing for ${session.programId}.`);
+
+    const routineLegacyId = `${session.programId}::${session.routineId}`;
+    const routineResult = await supabase
+      .from("routines")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("program_id", programRow.id)
+      .eq("legacy_app_id", routineLegacyId)
+      .limit(1);
+    if (routineResult.error) throw new Error(`routines: ${routineResult.error.message}`);
+    const routineRow = routineResult.data?.[0];
+    if (!routineRow) throw new Error(`Routine mapping missing for ${routineLegacyId}.`);
+
+    return { memberId, programRow, routineRow };
+  };
+
+  const persistProgramSession = async (session: SavedSession) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { memberId, programRow, routineRow } = await getProgramHierarchyDbRowsForSession(session);
+
+    const existingSessionResult = await supabase
+      .from("sessions")
+      .select("id, created_at")
+      .eq("member_id", memberId)
+      .eq("legacy_app_id", session.id)
+      .limit(1);
+    if (existingSessionResult.error) throw new Error(`sessions: ${existingSessionResult.error.message}`);
+    const existingSessionRow = existingSessionResult.data?.[0] || null;
+
+    const sessionPayload = {
+      member_id: memberId,
+      program_id: programRow.id,
+      routine_id: routineRow.id,
+      legacy_app_id: session.id,
+      session_date: session.date,
+      session_number: Math.max(1, Number.parseInt(String(session.sessionNumber || "1"), 10) || 1),
+      context_flags: session.contextFlags || [],
+      created_at: existingSessionRow?.created_at || session.createdAt || new Date().toISOString(),
+    };
+
+    const sessionResult = existingSessionRow
+      ? await supabase
+          .from("sessions")
+          .update(sessionPayload)
+          .eq("id", existingSessionRow.id)
+          .select("id")
+          .single()
+      : await supabase
+          .from("sessions")
+          .insert(sessionPayload)
+          .select("id")
+          .single();
+
+    if (sessionResult.error || !sessionResult.data?.id) {
+      throw new Error(`sessions: ${sessionResult.error?.message || "Session ID was not returned."}`);
+    }
+
+    const sessionDbId = String(sessionResult.data.id);
+    const blockDbIdByLegacy = new Map<string, string>();
+    const exerciseDbIdByLegacy = new Map<string, string>();
+
+    // Resolve and validate every parent before touching existing session entries.
+    for (const sessionBlock of session.blocks) {
+      const blockLegacyId = `${session.programId}::${session.routineId}::${sessionBlock.blockId}`;
+      const blockResult = await supabase
+        .from("blocks")
+        .select("id")
+        .eq("member_id", memberId)
+        .eq("routine_id", routineRow.id)
+        .eq("legacy_app_id", blockLegacyId)
+        .limit(1);
+      if (blockResult.error) throw new Error(`blocks: ${blockResult.error.message}`);
+      const blockRow = blockResult.data?.[0];
+      if (!blockRow) throw new Error(`Block mapping missing for ${blockLegacyId}.`);
+      blockDbIdByLegacy.set(sessionBlock.blockId, String(blockRow.id));
+
+      for (const entry of sessionBlock.entries) {
+        const exerciseLegacyId = `${session.programId}::${session.routineId}::${sessionBlock.blockId}::${entry.exerciseId}`;
+        const exerciseResult = await supabase
+          .from("program_exercises")
+          .select("id")
+          .eq("member_id", memberId)
+          .eq("block_id", blockRow.id)
+          .eq("legacy_app_id", exerciseLegacyId)
+          .limit(1);
+        if (exerciseResult.error) throw new Error(`program_exercises: ${exerciseResult.error.message}`);
+        const exerciseRow = exerciseResult.data?.[0] || null;
+        if (exerciseRow) exerciseDbIdByLegacy.set(exerciseLegacyId, String(exerciseRow.id));
+      }
+    }
+
+    const entryRows: Array<Record<string, unknown>> = [];
+    let position = 0;
+    for (const sessionBlock of session.blocks) {
+      const blockDbId = blockDbIdByLegacy.get(sessionBlock.blockId);
+      if (!blockDbId) throw new Error(`Block mapping missing for ${sessionBlock.blockId}.`);
+
+      for (const entry of sessionBlock.entries) {
+        const exerciseLegacyId = `${session.programId}::${session.routineId}::${sessionBlock.blockId}::${entry.exerciseId}`;
+        entryRows.push({
+          member_id: memberId,
+          session_id: sessionDbId,
+          block_id: blockDbId,
+          exercise_id: exerciseDbIdByLegacy.get(exerciseLegacyId) || null,
+          legacy_app_id: `${session.id}::${sessionBlock.blockId}::${entry.exerciseId}::${position}`,
+          exercise_name: entry.exerciseName || "Unnamed exercise",
+          weight: entry.weight || "",
+          performance: entry.performance || "",
+          sets_completed: entry.setsCompleted || "",
+          target: entry.target || "",
+          metric: entry.metric || "",
+          support_metrics: entry.supportMetrics || {},
+          context_flags: [...(sessionBlock.contextFlags || []), ...(entry.contextFlags || [])],
+          scoring_direction: entry.scoringDirection || "higherIsBetter",
+          position,
+        });
+        position += 1;
+      }
+    }
+
+    const existingEntriesResult = await supabase
+      .from("session_entries")
+      .select("*")
+      .eq("member_id", memberId)
+      .eq("session_id", sessionDbId);
+    if (existingEntriesResult.error) throw new Error(`session_entries: ${existingEntriesResult.error.message}`);
+    const previousEntryRows = existingEntriesResult.data || [];
+
+    const deleteResult = await supabase
+      .from("session_entries")
+      .delete()
+      .eq("member_id", memberId)
+      .eq("session_id", sessionDbId);
+    if (deleteResult.error) throw new Error(`session_entries delete: ${deleteResult.error.message}`);
+
+    if (entryRows.length) {
+      const insertResult = await supabase.from("session_entries").insert(entryRows);
+      if (insertResult.error) {
+        // Best-effort restoration if the replacement insert is rejected.
+        if (previousEntryRows.length) {
+          const restoreRows = previousEntryRows.map(({ id, ...row }) => row);
+          await supabase.from("session_entries").insert(restoreRows);
+        }
+        throw new Error(`session_entries insert: ${insertResult.error.message}`);
+      }
+    }
+  };
+
+  const saveProgramSessionToSupabase = (
+    savedSession: SavedSession,
+    previousSessions: SavedSession[],
+    actionLabel: string
+  ) => {
+    void persistProgramSession(savedSession).catch((error) => {
+      setSavedSessions(previousSessions);
+      showTrackerPersistenceError(actionLabel, error);
+    });
+  };
+
   const updateSessionDraftField = (field: "date" | "sessionNumber", value: string) => {
     setSessionDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
   };
@@ -16689,18 +16862,25 @@ export default function App() {
     if (!trimmedDate || !trimmedSessionNumber) return;
 
     const existingSession = getExistingMemberInputSession(memberInputDraft);
+    const editingSession = savedSessions.find((session) => session.id === editingMemberInputSessionId) || existingSession || null;
     const savedSession: SavedSession = {
       ...memberInputDraft,
       date: trimmedDate,
       sessionNumber: trimmedSessionNumber,
       id: editingMemberInputSessionId || existingSession?.id || uid(),
-      createdAt: new Date().toISOString(),
+      createdAt: editingSession?.createdAt || new Date().toISOString(),
     };
 
+    const previousSessions = savedSessions;
     setSavedSessions((prev) => {
       const filtered = prev.filter((session) => session.id !== savedSession.id);
       return [...filtered, savedSession];
     });
+    saveProgramSessionToSupabase(
+      savedSession,
+      previousSessions,
+      `Save program session ${savedSession.sessionNumber}`
+    );
 
     setEditingMemberInputSessionId(savedSession.id);
     setMemberInputDraft(createMemberInputDraft(savedSession));
@@ -16934,10 +17114,17 @@ export default function App() {
       date: trimmedDate,
       sessionNumber: trimmedSessionNumber,
       id: existingSession?.id || uid(),
-      createdAt: new Date().toISOString(),
+      createdAt: existingSession?.createdAt || new Date().toISOString(),
     };
 
+    const previousSessions = savedSessions;
     setSavedSessions((prev) => [...prev.filter((session) => session.id !== savedSession.id), savedSession]);
+    saveProgramSessionToSupabase(
+      savedSession,
+      previousSessions,
+      `Save trainer session ${savedSession.sessionNumber}`
+    );
+
     setSessionDraft({
       ...savedSession,
       blocks: savedSession.blocks,
