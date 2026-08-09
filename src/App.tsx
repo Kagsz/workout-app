@@ -11709,6 +11709,7 @@ export default function App() {
   const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(loadTrackerWorkoutsFromDeclaredSource);
   const trackerExerciseSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const programHierarchySaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const programHierarchyWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
 
 
@@ -14724,6 +14725,25 @@ export default function App() {
     }
   };
 
+  const enqueueProgramHierarchyWrite = (
+    programId: string,
+    write: () => Promise<void>
+  ) => {
+    const previous = programHierarchyWriteQueueRef.current.get(programId) || Promise.resolve();
+
+    const next = previous
+      .catch(() => undefined)
+      .then(write)
+      .finally(() => {
+        if (programHierarchyWriteQueueRef.current.get(programId) === next) {
+          programHierarchyWriteQueueRef.current.delete(programId);
+        }
+      });
+
+    programHierarchyWriteQueueRef.current.set(programId, next);
+    return next;
+  };
+
   const scheduleProgramHierarchySave = (
     nextProgram: Program,
     previousProgram: Program | null,
@@ -14735,7 +14755,10 @@ export default function App() {
     const timer = setTimeout(() => {
       programHierarchySaveTimersRef.current.delete(nextProgram.id);
       const position = programs.findIndex((program) => program.id === nextProgram.id);
-      void persistProgramHierarchy(nextProgram, position < 0 ? undefined : position).catch((error) => {
+      void enqueueProgramHierarchyWrite(
+        nextProgram.id,
+        () => persistProgramHierarchy(nextProgram, position < 0 ? undefined : position)
+      ).catch((error) => {
         if (previousProgram) {
           setPrograms((current) =>
             current.map((program) => (program.id === previousProgram.id ? previousProgram : program))
@@ -14766,7 +14789,10 @@ export default function App() {
     const nextPrograms = [...previousPrograms, program];
     setPrograms(nextPrograms);
 
-    void persistProgramHierarchy(program, nextPrograms.length - 1).catch((error) => {
+    void enqueueProgramHierarchyWrite(
+      program.id,
+      () => persistProgramHierarchy(program, nextPrograms.length - 1)
+    ).catch((error) => {
       setPrograms(previousPrograms);
       if (selectedProgramId === program.id) setSelectedProgramId(null);
       showTrackerPersistenceError(`Create program "${program.name}"`, error);
