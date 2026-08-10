@@ -11710,6 +11710,7 @@ export default function App() {
   const trackerExerciseSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const programHierarchySaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const programHierarchyWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const deletingProgramIdsRef = useRef<Set<string>>(new Set());
   const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
 
 
@@ -14749,16 +14750,24 @@ export default function App() {
     previousProgram: Program | null,
     actionLabel = `Save program "${nextProgram.name || "Unnamed program"}"`
   ) => {
+    if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
+
     const existingTimer = programHierarchySaveTimersRef.current.get(nextProgram.id);
     if (existingTimer) clearTimeout(existingTimer);
 
     const timer = setTimeout(() => {
       programHierarchySaveTimersRef.current.delete(nextProgram.id);
+      if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
+
       const position = programs.findIndex((program) => program.id === nextProgram.id);
       void enqueueProgramHierarchyWrite(
         nextProgram.id,
-        () => persistProgramHierarchy(nextProgram, position < 0 ? undefined : position)
+        () =>
+          deletingProgramIdsRef.current.has(nextProgram.id)
+            ? Promise.resolve()
+            : persistProgramHierarchy(nextProgram, position < 0 ? undefined : position)
       ).catch((error) => {
+        if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
         if (previousProgram) {
           setPrograms((current) =>
             current.map((program) => (program.id === previousProgram.id ? previousProgram : program))
@@ -14785,6 +14794,7 @@ export default function App() {
   };
 
   const createProgramInSupabase = (program: Program) => {
+    deletingProgramIdsRef.current.delete(program.id);
     const previousPrograms = programs;
     const nextPrograms = [...previousPrograms, program];
     setPrograms(nextPrograms);
@@ -14801,9 +14811,17 @@ export default function App() {
 
   const deleteProgramFromSupabase = (program: Program) => {
     const previousPrograms = programs;
+
+    const pendingTimer = programHierarchySaveTimersRef.current.get(program.id);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      programHierarchySaveTimersRef.current.delete(program.id);
+    }
+
+    deletingProgramIdsRef.current.add(program.id);
     setPrograms((current) => current.filter((item) => item.id !== program.id));
 
-    void (async () => {
+    void enqueueProgramHierarchyWrite(program.id, async () => {
       if (!supabase) throw new Error("Supabase is not configured.");
       const memberId = program.memberId || selectedMember?.id || authenticatedMemberId;
       if (!memberId) throw new Error("No member is connected to this program.");
@@ -14828,7 +14846,8 @@ export default function App() {
         .eq("member_id", memberId)
         .eq("id", programRow.id);
       if (result.error) throw new Error(`programs delete: ${result.error.message}`);
-    })().catch((error) => {
+    }).catch((error) => {
+      deletingProgramIdsRef.current.delete(program.id);
       setPrograms(previousPrograms);
       showTrackerPersistenceError(`Delete program "${program.name}"`, error);
     });
