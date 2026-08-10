@@ -75,6 +75,7 @@ type Member = {
   memberPlan?: MemberPlan;
   inviteEmail?: string;
   accountRole?: Role;
+  createdAt?: string;
 };
 
 type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearm/Wrist" | "Hand/Grip" | "Legs" | "Upper Body" | "Lower Body" | "Core" | "Cardio" | "Full Body" | "Other";
@@ -1810,6 +1811,7 @@ const mapSupabaseMember = (
     accountRole: member.profile_id
       ? profileById.get(member.profile_id)?.role || "member"
       : "member",
+    createdAt: member.created_at,
   });
 
 
@@ -6006,6 +6008,9 @@ export default function App() {
   const [diagnosticsError, setDiagnosticsError] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [viewArchivedMembers, setViewArchivedMembers] = useState(false);
+  const [memberRoleFilter, setMemberRoleFilter] = useState<"all" | Role>("all");
+  const [memberPlanFilter, setMemberPlanFilter] = useState<"all" | MemberPlan>("all");
+  const [memberSortMode, setMemberSortMode] = useState<"alphaAsc" | "alphaDesc" | "newest" | "oldest">("alphaAsc");
   const [showAllMembers, setShowAllMembers] = useState(false);
   const [workspaceMemberId, setWorkspaceMemberId] = useState<string | null>(null);
   const [isEditingMember, setIsEditingMember] = useState(false);
@@ -6312,13 +6317,34 @@ export default function App() {
 
   const filteredMembers = useMemo(() => {
     const query = memberSearch.trim().toLowerCase();
-    const scopedMembers = members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived));
 
-    if (!query) return showAllMembers ? scopedMembers : scopedMembers.slice(0, 10);
-    return scopedMembers.filter((member) =>
-      member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query)
-    );
-  }, [members, memberSearch, viewArchivedMembers, showAllMembers]);
+    const scopedMembers = members
+      .filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived))
+      .filter((member) => memberRoleFilter === "all" || (member.accountRole || "member") === memberRoleFilter)
+      .filter((member) => memberPlanFilter === "all" || (member.memberPlan || "direct") === memberPlanFilter)
+      .filter((member) => {
+        if (!query) return true;
+        return member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query);
+      })
+      .sort((a, b) => {
+        if (memberSortMode === "alphaAsc") return a.name.localeCompare(b.name);
+        if (memberSortMode === "alphaDesc") return b.name.localeCompare(a.name);
+        const aTime = new Date(a.createdAt || 0).getTime();
+        const bTime = new Date(b.createdAt || 0).getTime();
+        return memberSortMode === "newest" ? bTime - aTime : aTime - bTime;
+      });
+
+    return showAllMembers ? scopedMembers : scopedMembers.slice(0, 10);
+  }, [members, memberSearch, viewArchivedMembers, memberRoleFilter, memberPlanFilter, memberSortMode, showAllMembers]);
+
+  const filteredMemberCount = useMemo(() => {
+    const query = memberSearch.trim().toLowerCase();
+    return members
+      .filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived))
+      .filter((member) => memberRoleFilter === "all" || (member.accountRole || "member") === memberRoleFilter)
+      .filter((member) => memberPlanFilter === "all" || (member.memberPlan || "direct") === memberPlanFilter)
+      .filter((member) => !query || member.name.toLowerCase().includes(query) || member.clientId.toLowerCase().includes(query)).length;
+  }, [members, memberSearch, viewArchivedMembers, memberRoleFilter, memberPlanFilter]);
 
   const ownMember = useMemo(
     () => members.find((member) => member.id === authenticatedMemberId) || null,
@@ -13167,62 +13193,92 @@ export default function App() {
 
               {canUseTrainerWorkspace && screen === "members" && (
                 <SectionCard title="Members" collapsible>
-                  <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-                    <div className="space-y-3">
-                      <div>
-                        <Label>Search Members</Label>
-                        <TextInput value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Search by name or ID" />
-                      </div>
+                  <div className="space-y-3">
+                    <div>
+                      <Label>Search Members</Label>
+                      <TextInput
+                        value={memberSearch}
+                        onChange={(e) => { setMemberSearch(e.target.value); setShowAllMembers(false); }}
+                        placeholder="Search by name or ID"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex gap-2 text-sm">
                         <button
-                          onClick={() => {
-                            setViewArchivedMembers(false);
-                            setShowAllMembers(false);
-                          }}
+                          onClick={() => { setViewArchivedMembers(false); setShowAllMembers(false); }}
                           className={`rounded-full border px-3 py-1 ${!viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
                         >
                           Active
                         </button>
                         <button
-                          onClick={() => {
-                            setViewArchivedMembers(true);
-                            setShowAllMembers(false);
-                          }}
+                          onClick={() => { setViewArchivedMembers(true); setShowAllMembers(false); }}
                           className={`rounded-full border px-3 py-1 ${viewArchivedMembers ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
                         >
                           Archived
                         </button>
                       </div>
-                    </div>
-                    <div className="self-end flex gap-2">
                       <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
                     </div>
-                  </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {filteredMembers.map((member) => (
-                      <div key={member.id} className="rounded-2xl border border-zinc-200 bg-white p-4 text-left transition">
-                        <button onClick={() => openMemberOverview(member.id)} className="w-full text-left">
-                          <div className="font-semibold text-zinc-900">{member.name}</div>
-                        </button>
-                        <div className="mt-3 flex gap-2">
-                          {member.archived ? (
-                            <SmallButton onClick={() => restoreMember(member.id)}>Restore</SmallButton>
-                          ) : (
-                            <>
-                              <SmallButton onClick={() => archiveMember(member.id)}>Archive</SmallButton>
-                              <SmallButton onClick={() => removeMember(member.id)} className="border-red-200 bg-red-600 text-white hover:bg-red-700">Delete</SmallButton>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {!memberSearch.trim() && !showAllMembers && members.filter((member) => (viewArchivedMembers ? Boolean(member.archived) : !member.archived)).length > 10 ? (
-                    <div className="mt-4">
-                      <SmallButton onClick={() => setShowAllMembers(true)}>Show All Clients</SmallButton>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Role</span>
+                        <select value={memberRoleFilter} onChange={(e) => { setMemberRoleFilter(e.target.value as "all" | Role); setShowAllMembers(false); }} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800">
+                          <option value="all">All roles</option><option value="member">Member</option><option value="trainer">Trainer</option><option value="admin">Admin</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Membership</span>
+                        <select value={memberPlanFilter} onChange={(e) => { setMemberPlanFilter(e.target.value as "all" | MemberPlan); setShowAllMembers(false); }} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800">
+                          <option value="all">All memberships</option><option value="basic">Basic</option><option value="direct">Direct</option><option value="premium">Premium</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Sort</span>
+                        <select value={memberSortMode} onChange={(e) => { setMemberSortMode(e.target.value as "alphaAsc" | "alphaDesc" | "newest" | "oldest"); setShowAllMembers(false); }} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800">
+                          <option value="alphaAsc">A–Z</option><option value="alphaDesc">Z–A</option><option value="newest">Newest</option><option value="oldest">Oldest</option>
+                        </select>
+                      </label>
                     </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-2 md:grid-cols-2">
+                    {filteredMembers.map((member) => {
+                      const memberRole = member.accountRole || "member";
+                      const memberPlan = member.memberPlan || "direct";
+                      const roleLabel = memberRole === "admin" ? "Admin" : memberRole === "trainer" ? "Trainer" : "";
+                      const planLabel = memberPlan === "premium" ? "Premium" : memberPlan === "basic" ? "Basic" : "Direct";
+                      return (
+                        <div key={member.id} className="rounded-2xl border border-zinc-200 bg-white px-3 py-2.5 text-left transition">
+                          <div className="flex items-center justify-between gap-3">
+                            <button onClick={() => openMemberOverview(member.id)} className="min-w-0 flex-1 text-left">
+                              <div className="flex min-w-0 items-baseline gap-1.5">
+                                <span className="truncate font-semibold text-zinc-900">{member.name}</span>
+                                {roleLabel ? <span className="shrink-0 text-[10px] font-extrabold uppercase tracking-[0.12em] text-zinc-500">— {roleLabel}</span> : null}
+                              </div>
+                              <div className="mt-1">
+                                <span className="inline-flex rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-700">{planLabel}</span>
+                              </div>
+                            </button>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {member.archived ? (
+                                <button type="button" onClick={() => restoreMember(member.id)} className="rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">Restore</button>
+                              ) : (
+                                <>
+                                  <button type="button" onClick={() => archiveMember(member.id)} className="rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700">Archive</button>
+                                  <button type="button" onClick={() => removeMember(member.id)} className="rounded-lg border border-red-200 bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-700">Delete</button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {!showAllMembers && filteredMemberCount > 10 ? (
+                    <div className="mt-4"><SmallButton onClick={() => setShowAllMembers(true)}>Show All Clients</SmallButton></div>
                   ) : null}
                 </SectionCard>
               )}
