@@ -12251,10 +12251,6 @@ export default function App() {
 
       <div className="relative z-10 mx-auto -mt-10 w-full max-w-[430px] flex-1 px-4">
         <div className="space-y-6 pb-10">
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
-                Layer 2 • Read-only diagnostics • {getDataSourceSummary()}
-              </div>
-
               <div className="rounded-3xl border border-zinc-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <ToggleButton
@@ -13221,22 +13217,22 @@ export default function App() {
                       <PrimaryButton onClick={addMember}>+ Add Client</PrimaryButton>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div className="grid grid-cols-3 gap-2">
                       <label className="block">
                         <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Role</span>
-                        <select value={memberRoleFilter} onChange={(e) => { setMemberRoleFilter(e.target.value as "all" | Role); setShowAllMembers(false); }} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800">
-                          <option value="all">All roles</option><option value="member">Member</option><option value="trainer">Trainer</option><option value="admin">Admin</option>
+                        <select value={memberRoleFilter} onChange={(e) => { setMemberRoleFilter(e.target.value as "all" | Role); setShowAllMembers(false); }} className="w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-2.5 py-2 text-sm text-zinc-800">
+                          <option value="all">All</option><option value="member">Member</option><option value="trainer">Trainer</option><option value="admin">Admin</option>
                         </select>
                       </label>
                       <label className="block">
                         <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Membership</span>
-                        <select value={memberPlanFilter} onChange={(e) => { setMemberPlanFilter(e.target.value as "all" | MemberPlan); setShowAllMembers(false); }} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800">
-                          <option value="all">All memberships</option><option value="basic">Basic</option><option value="direct">Direct</option><option value="premium">Premium</option>
+                        <select value={memberPlanFilter} onChange={(e) => { setMemberPlanFilter(e.target.value as "all" | MemberPlan); setShowAllMembers(false); }} className="w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-2.5 py-2 text-sm text-zinc-800">
+                          <option value="all">All</option><option value="basic">Basic</option><option value="direct">Direct</option><option value="premium">Premium</option>
                         </select>
                       </label>
                       <label className="block">
                         <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Sort</span>
-                        <select value={memberSortMode} onChange={(e) => { setMemberSortMode(e.target.value as "alphaAsc" | "alphaDesc" | "newest" | "oldest"); setShowAllMembers(false); }} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800">
+                        <select value={memberSortMode} onChange={(e) => { setMemberSortMode(e.target.value as "alphaAsc" | "alphaDesc" | "newest" | "oldest"); setShowAllMembers(false); }} className="w-full min-w-0 rounded-xl border border-zinc-300 bg-white px-2.5 py-2 text-sm text-zinc-800">
                           <option value="alphaAsc">A–Z</option><option value="alphaDesc">Z–A</option><option value="newest">Newest</option><option value="oldest">Oldest</option>
                         </select>
                       </label>
