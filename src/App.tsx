@@ -11997,6 +11997,15 @@ export default function App() {
     [authenticatedMemberId, members]
   );
 
+  // Account-access / service-entitlement boundaries:
+  // - Archived applies to former paying members. Staff roles remain able to use
+  //   their business workspace even if their optional personal member record is archived.
+  // - Basic members are Gym Tracker-only; Direct/Premium retain My Programs access.
+  const isArchivedMemberAccessBlocked =
+    role === "member" && Boolean(ownMember?.archived);
+  const isBasicMemberProgramAccessBlocked =
+    role === "member" && ownMember?.memberPlan === "basic";
+
   const workspaceMember = useMemo(
     () => members.find((member) => member.id === workspaceMemberId) || members[0] || null,
     [members, workspaceMemberId]
@@ -17010,6 +17019,10 @@ export default function App() {
 
   const goMemberPrograms = () => {
     resetPersonalProgramRoute();
+    if (isBasicMemberProgramAccessBlocked) {
+      setScreen("openTracker");
+      return;
+    }
     setScreen("programs");
   };
 
@@ -17019,6 +17032,10 @@ export default function App() {
   };
 
   const openProgram = (programId: string) => {
+    if (isBasicMemberProgramAccessBlocked) {
+      setScreen("openTracker");
+      return;
+    }
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
@@ -17912,6 +17929,36 @@ export default function App() {
     );
   }
 
+  if (isArchivedMemberAccessBlocked) {
+    return (
+      <div className="min-h-screen bg-zinc-100 text-zinc-900">
+        <div className="bg-black">
+          <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-center justify-center">
+            <img src={appBanner} alt="Pratt Report banner" className="w-[58%] max-w-[220px] object-contain" />
+          </div>
+        </div>
+
+        <div className="mx-auto -mt-10 w-full max-w-[430px] px-4 pb-10">
+          <div className="rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">Account Status</div>
+            <div className="mt-2 text-xl font-bold text-zinc-900">Membership inactive</div>
+            <div className="mt-3 text-sm leading-6 text-zinc-600">
+              This membership is no longer active. Your account and training history are retained, but app access is disabled until the membership is restored.
+            </div>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              disabled={authBusy}
+              className="mt-5 w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {authBusy ? "Signing out…" : "Sign Out"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
       <div className="relative z-0 bg-black">
@@ -17964,13 +18011,15 @@ export default function App() {
                     </ToggleButton>
                   ) : null}
 
-                  <ToggleButton
-                    className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
-                    active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"}
-                    onClick={goMemberPrograms}
-                  >
-                    My Programs
-                  </ToggleButton>
+                  {!isBasicMemberProgramAccessBlocked ? (
+                    <ToggleButton
+                      className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                      active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"}
+                      onClick={goMemberPrograms}
+                    >
+                      My Programs
+                    </ToggleButton>
+                  ) : null}
 
                   <ToggleButton
                     className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
