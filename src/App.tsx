@@ -1852,14 +1852,6 @@ const DATA_SOURCE_BY_DOMAIN: Record<RuntimeDataDomain, RuntimeDataSource> = {
 const cloneLegacyReference = <T,>(value: T): T =>
   JSON.parse(JSON.stringify(value)) as T;
 
-const assertLegacySource = (domain: RuntimeDataDomain) => {
-  if (DATA_SOURCE_BY_DOMAIN[domain] !== "legacy") {
-    throw new Error(
-      `${domain} is configured for Supabase, but no Supabase adapter has been installed for that domain.`
-    );
-  }
-};
-
 const readLegacyJson = <T,>(key: string, fallback: T): T => {
   if (typeof window === "undefined") return cloneLegacyReference(fallback);
 
