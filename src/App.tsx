@@ -1894,10 +1894,7 @@ const loadLegacyTrackerWorkoutsSnapshot = (): TrackerWorkout[] =>
 const loadLegacyTrackerCyclesSnapshot = (): TrackerWorkoutCycle[] =>
   readLegacyJson<TrackerWorkoutCycle[]>(STORAGE_KEYS.trackerCycles, []);
 
-const getDataSourceSummary = () =>
-  Object.entries(DATA_SOURCE_BY_DOMAIN)
-    .map(([domain, source]) => `${domain}: ${source}`)
-    .join(" • ");
+
 
 const RELAY_TEMPLATE_TEXT = `Program:
 
