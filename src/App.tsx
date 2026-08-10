@@ -1880,31 +1880,13 @@ const writeLegacyJson = (domain: RuntimeDataDomain, key: string, value: unknown)
   window.localStorage.setItem(key, JSON.stringify(value));
 };
 
-const loadProgramsFromDeclaredSource = (): Program[] => {
-  if (DATA_SOURCE_BY_DOMAIN.programs === "supabase") return [];
-  const stored = readLegacyJson<Program[] | null>(STORAGE_KEYS.programs, null);
-  return stored ? mergeProgramsWithBase(stored) : buildInitialPrograms().map(normalizeProgram);
-};
-
-const loadSessionsFromDeclaredSource = (): SavedSession[] => {
-  if (DATA_SOURCE_BY_DOMAIN.sessions === "supabase") return [];
-  return readLegacyJson<SavedSession[]>(STORAGE_KEYS.savedSessions, []);
-};
-
-const loadTrackerExercisesFromDeclaredSource = (): TrackerExercise[] => {
-  if (DATA_SOURCE_BY_DOMAIN.trackerExercises === "supabase") return [];
-  return readLegacyJson<TrackerExercise[]>(STORAGE_KEYS.trackerExercises, []).map(normalizeTrackerExercise);
-};
-
-const loadTrackerWorkoutsFromDeclaredSource = (): TrackerWorkout[] => {
-  if (DATA_SOURCE_BY_DOMAIN.trackerWorkouts === "supabase") return [];
-  return readLegacyJson<TrackerWorkout[]>(STORAGE_KEYS.trackerWorkouts, []).map(normalizeTrackerWorkout);
-};
-
-const loadTrackerCyclesFromDeclaredSource = (): TrackerWorkoutCycle[] => {
-  if (DATA_SOURCE_BY_DOMAIN.trackerCycles === "supabase") return [];
-  return readLegacyJson<TrackerWorkoutCycle[]>(STORAGE_KEYS.trackerCycles, []);
-};
+// Normal runtime is Supabase-only. Legacy browser data is intentionally excluded
+// from application state and remains available only to migration/diagnostics.
+const loadProgramsFromDeclaredSource = (): Program[] => [];
+const loadSessionsFromDeclaredSource = (): SavedSession[] => [];
+const loadTrackerExercisesFromDeclaredSource = (): TrackerExercise[] => [];
+const loadTrackerWorkoutsFromDeclaredSource = (): TrackerWorkout[] => [];
+const loadTrackerCyclesFromDeclaredSource = (): TrackerWorkoutCycle[] => [];
 
 // ===== PERMANENT HYBRID MIGRATION SOURCE =====
 // Normal app screens use DATA_SOURCE_BY_DOMAIN (currently Supabase).
@@ -14342,111 +14324,8 @@ export default function App() {
     return () => { cancelled = true; };
   }, [authenticatedMemberId, supabaseDataReloadToken]);
 
-  useEffect(() => {
-    if (DATA_SOURCE_BY_DOMAIN.members === "legacy") {
-      writeLegacyJson("members", STORAGE_KEYS.members, members);
-    }
-  }, [members]);
-
-  useEffect(() => {
-    if (DATA_SOURCE_BY_DOMAIN.programs === "legacy") {
-      writeLegacyJson("programs", STORAGE_KEYS.programs, programs);
-    }
-  }, [programs]);
-
-  useEffect(() => {
-    if (DATA_SOURCE_BY_DOMAIN.sessions === "legacy") {
-      writeLegacyJson("sessions", STORAGE_KEYS.savedSessions, savedSessions);
-    }
-  }, [savedSessions]);
-
-
-  useEffect(() => {
-    if (DATA_SOURCE_BY_DOMAIN.trackerExercises === "legacy") {
-      writeLegacyJson("trackerExercises", STORAGE_KEYS.trackerExercises, trackerExercises);
-    }
-  }, [trackerExercises]);
-
-  useEffect(() => {
-    if (DATA_SOURCE_BY_DOMAIN.trackerWorkouts === "legacy") {
-      writeLegacyJson("trackerWorkouts", STORAGE_KEYS.trackerWorkouts, trackerWorkouts);
-    }
-  }, [trackerWorkouts]);
-
-  useEffect(() => {
-    if (DATA_SOURCE_BY_DOMAIN.trackerCycles === "legacy") {
-      writeLegacyJson("trackerCycles", STORAGE_KEYS.trackerCycles, trackerCycles);
-    }
-  }, [trackerCycles]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
-
-    const alreadySeededProgram1 = window.localStorage.getItem(STORAGE_KEYS.seeded);
-    if (!alreadySeededProgram1 && members[0] && programs.find((program) => program.id === "program-1")) {
-      const programOne = programs.find((program) => program.id === "program-1");
-      if (!programOne) return;
-
-      const seededSessions = parseImportedSessions(PROGRAM_1_IMPORT_TEMPLATE, programOne, members[0].id);
-      setSavedSessions((prev) => {
-        const hasProgramOne = prev.some((session) => session.programId === programOne.id && session.memberId === members[0].id);
-        return hasProgramOne ? prev : [...prev, ...seededSessions];
-      });
-      window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
-    }
-  }, [members, programs]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
-
-    const alreadySeededProgram2 = window.localStorage.getItem(STORAGE_KEYS.seededProgram2);
-    if (!alreadySeededProgram2 && members[0] && programs.find((program) => program.id === "program-2")) {
-      const programTwo = programs.find((program) => program.id === "program-2");
-      if (!programTwo) return;
-
-      const seededSessions = parseRelayImportedSessions(PROGRAM_2_RELAY_TEMPLATE, programTwo, members[0].id);
-      setSavedSessions((prev) => {
-        const hasProgramTwo = prev.some((session) => session.programId === programTwo.id && session.memberId === members[0].id);
-        return hasProgramTwo ? prev : [...prev, ...seededSessions];
-      });
-      window.localStorage.setItem(STORAGE_KEYS.seededProgram2, "true");
-    }
-  }, [members, programs]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
-
-    const alreadySeededProgram3 = window.localStorage.getItem(STORAGE_KEYS.seededProgram3);
-    if (!alreadySeededProgram3 && members[0] && programs.find((program) => program.id === "program-3")) {
-      const programThree = programs.find((program) => program.id === "program-3");
-      if (!programThree) return;
-
-      const seededSessions = parseRelayImportedSessions(PROGRAM_3_RELAY_TEMPLATE, programThree, members[0].id);
-      setSavedSessions((prev) => {
-        const hasProgramThree = prev.some((session) => session.programId === programThree.id && session.memberId === members[0].id);
-        return hasProgramThree ? prev : [...prev, ...seededSessions];
-      });
-      window.localStorage.setItem(STORAGE_KEYS.seededProgram3, "true");
-    }
-  }, [members, programs]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || DATA_SOURCE_BY_DOMAIN.sessions !== "legacy") return;
-
-    const alreadySeededProgram4 = window.localStorage.getItem(STORAGE_KEYS.seededProgram4);
-    if (!alreadySeededProgram4 && members[0] && programs.find((program) => program.id === "program-4")) {
-      const programFour = programs.find((program) => program.id === "program-4");
-      if (!programFour) return;
-
-      const seededSessions = buildProgramFourSeedSessions(members[0].id);
-      setSavedSessions((prev) => {
-        const hasProgramFour = prev.some((session) => session.programId === programFour.id && session.memberId === members[0].id);
-        return hasProgramFour ? prev : [...prev, ...seededSessions];
-      });
-      window.localStorage.setItem(STORAGE_KEYS.seededProgram4, "true");
-    }
-  }, [members, programs]);
-
+  // Legacy browser mirroring and Program 1-4 auto-seeding are disabled in
+  // normal runtime. Diagnostics/migration still read immutable legacy snapshots.
 
   useEffect(() => {
     if (!selectedProgram || !selectedRoutine || !selectedMember) {
@@ -16661,19 +16540,6 @@ export default function App() {
     );
   };
 
-  const reorderTrackerExercises = (draggedId: string, targetId: string) => {
-    if (draggedId === targetId) return;
-    setTrackerExercises((current) => {
-      const draggedIndex = current.findIndex((exercise) => exercise.id === draggedId);
-      const targetIndex = current.findIndex((exercise) => exercise.id === targetId);
-      if (draggedIndex < 0 || targetIndex < 0) return current;
-      const next = [...current];
-      const [dragged] = next.splice(draggedIndex, 1);
-      next.splice(targetIndex, 0, dragged);
-      return next;
-    });
-  };
-
   const reorderWorkoutExercises = (workoutId: string, draggedSlotId: string, targetSlotId: string) => {
     if (draggedSlotId === targetSlotId) return;
     const workout = trackerWorkouts.find((item) => item.id === workoutId);
@@ -17424,43 +17290,83 @@ export default function App() {
     }
   };
 
+  const replaceProgramSessionsInSupabase = async (
+    program: Program,
+    memberId: string,
+    importedSessions: SavedSession[]
+  ) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+
+    // Validate hierarchy before deleting the currently stored program sessions.
+    for (const session of importedSessions) {
+      if (session.programId !== program.id || session.memberId !== memberId) {
+        throw new Error("Imported session ownership does not match the selected program/member.");
+      }
+      await getProgramHierarchyDbRowsForSession(session);
+    }
+
+    const programRow = await getProgramDbRow(program.id, memberId);
+    if (!programRow) throw new Error(`Program mapping missing for ${program.id}.`);
+
+    const existingResult = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("program_id", programRow.id);
+
+    if (existingResult.error) throw new Error(`sessions: ${existingResult.error.message}`);
+    const existingIds = (existingResult.data || []).map((row) => String(row.id));
+
+    if (existingIds.length) {
+      const entryDelete = await supabase
+        .from("session_entries")
+        .delete()
+        .eq("member_id", memberId)
+        .in("session_id", existingIds);
+      if (entryDelete.error) throw new Error(`session_entries delete: ${entryDelete.error.message}`);
+
+      const sessionDelete = await supabase
+        .from("sessions")
+        .delete()
+        .eq("member_id", memberId)
+        .eq("program_id", programRow.id);
+      if (sessionDelete.error) throw new Error(`sessions delete: ${sessionDelete.error.message}`);
+    }
+
+    for (const session of importedSessions) {
+      await persistProgramSession(session);
+    }
+  };
+
   const importProgramData = () => {
     if (!selectedProgram || !selectedMember || !importText.trim()) return;
     const importedSessions = parseAnyImportedSessions(importText, selectedProgram, selectedMember.id);
     if (!importedSessions.length) return;
 
-    setSavedSessions((prev) => [
-      ...prev.filter(
-        (session) => !(session.programId === selectedProgram.id && session.memberId === selectedMember.id)
+    const program = selectedProgram;
+    const member = selectedMember;
+    const previousSessions = savedSessions;
+    const nextSessions = [
+      ...previousSessions.filter(
+        (session) => !(session.programId === program.id && session.memberId === member.id)
       ),
       ...importedSessions,
-    ]);
+    ];
 
-    if (typeof window !== "undefined") {
-      if (selectedProgram.id === "program-1") {
-        window.localStorage.setItem(STORAGE_KEYS.seeded, "true");
-      }
-      if (selectedProgram.id === "program-2") {
-        window.localStorage.setItem(STORAGE_KEYS.seededProgram2, "true");
-      }
-      if (selectedProgram.id === "program-3") {
-        window.localStorage.setItem(STORAGE_KEYS.seededProgram3, "true");
-      }
-      if (selectedProgram.id === "program-4") {
-        window.localStorage.setItem(STORAGE_KEYS.seededProgram4, "true");
-      }
-    }
+    setSavedSessions(nextSessions);
+
+    void replaceProgramSessionsInSupabase(program, member.id, importedSessions)
+      .then(() => setSupabaseDataReloadToken((value) => value + 1))
+      .catch((error) => {
+        setSavedSessions(previousSessions);
+        showTrackerPersistenceError(`Import program data for "${program.name}"`, error);
+      });
   };
 
   const clearStoredSessions = () => {
-    setSavedSessions([]);
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEYS.savedSessions);
-      window.localStorage.removeItem(STORAGE_KEYS.seeded);
-      window.localStorage.removeItem(STORAGE_KEYS.seededProgram2);
-      window.localStorage.removeItem(STORAGE_KEYS.seededProgram3);
-      window.localStorage.removeItem(STORAGE_KEYS.seededProgram4);
-    }
+    window.alert(
+      "The browser-only Clear Stored Sessions action is disabled. Supabase session history must be changed through targeted session tools so cloud data cannot be hidden only on this device."
+    );
   };
 
 
@@ -20044,14 +19950,6 @@ export default function App() {
                             return (
                               <div
                                 key={exercise.id}
-                                draggable
-                                onDragStart={() => setDraggedTrackerExerciseId(exercise.id)}
-                                onDragOver={(event) => event.preventDefault()}
-                                onDrop={() => {
-                                  if (draggedTrackerExerciseId) reorderTrackerExercises(draggedTrackerExerciseId, exercise.id);
-                                  setDraggedTrackerExerciseId(null);
-                                }}
-                                onDragEnd={() => setDraggedTrackerExerciseId(null)}
                                 className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3"
                               >
                                 <div className="flex items-center justify-between gap-3">

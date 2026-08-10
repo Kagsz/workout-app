@@ -11997,6 +11997,15 @@ export default function App() {
     [authenticatedMemberId, members]
   );
 
+  // Account-access / service-entitlement boundaries:
+  // - Archived applies to former paying members. Staff roles remain able to use
+  //   their business workspace even if their optional personal member record is archived.
+  // - Basic members are Gym Tracker-only; Direct/Premium retain My Programs access.
+  const isArchivedMemberAccessBlocked =
+    role === "member" && Boolean(ownMember?.archived);
+  const isBasicMemberProgramAccessBlocked =
+    role === "member" && ownMember?.memberPlan === "basic";
+
   const workspaceMember = useMemo(
     () => members.find((member) => member.id === workspaceMemberId) || members[0] || null,
     [members, workspaceMemberId]
@@ -16844,19 +16853,50 @@ export default function App() {
   }, [canUseTrainerWorkspace, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
 
   const addMember = () => {
-    window.alert("Client creation will be connected through the controlled admin account workflow after Layer 1B identity verification.");
+    window.alert("Client creation remains on the controlled account-creation workflow so auth, profile, and member identity are created together.");
   };
 
   const removeMember = (_memberId: string) => {
-    window.alert("Client deletion is disabled during Layer 1B identity verification.");
+    window.alert("Permanent client deletion remains disabled here because it can affect account identity and historical training data.");
   };
 
-  const archiveMember = (_memberId: string) => {
-    window.alert("Client archiving is disabled during Layer 1B identity verification.");
+  const persistMemberArchivedState = async (memberId: string, archived: boolean) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const result = await supabase
+      .from("members")
+      .update({ archived })
+      .eq("id", memberId)
+      .select("id,archived")
+      .single();
+
+    if (result.error) throw new Error(`members: ${result.error.message}`);
+    return result.data;
   };
 
-  const restoreMember = (_memberId: string) => {
-    window.alert("Client restoration is disabled during Layer 1B identity verification.");
+  const archiveMember = (memberId: string) => {
+    if (role !== "admin") return;
+    const previousMembers = members;
+    setMembers((current) =>
+      current.map((member) => (member.id === memberId ? { ...member, archived: true } : member))
+    );
+
+    void persistMemberArchivedState(memberId, true).catch((error) => {
+      setMembers(previousMembers);
+      showTrackerPersistenceError("Archive client", error);
+    });
+  };
+
+  const restoreMember = (memberId: string) => {
+    if (role !== "admin") return;
+    const previousMembers = members;
+    setMembers((current) =>
+      current.map((member) => (member.id === memberId ? { ...member, archived: false } : member))
+    );
+
+    void persistMemberArchivedState(memberId, false).catch((error) => {
+      setMembers(previousMembers);
+      showTrackerPersistenceError("Restore client", error);
+    });
   };
 
   const startEditingSelectedMember = () => {
@@ -16884,27 +16924,105 @@ export default function App() {
     const nextName = editedMemberName.trim();
     const nextClientId = editedMemberClientId.trim();
     const nextInviteEmail = editedMemberInviteEmail.trim();
+    const numericClientId = Number(nextClientId);
+
     if (!nextName || !nextClientId) return;
+    if (!Number.isInteger(numericClientId) || numericClientId <= 0) {
+      window.alert("Client ID must be a positive whole number.");
+      return;
+    }
+
+    const previousMembers = members;
+    const previousProfileRow = profileRow;
+    const previousRole = role;
+    const memberId = selectedMember.id;
+    const optimisticMember: Member = {
+      ...selectedMember,
+      name: nextName,
+      clientId: nextClientId,
+      inviteEmail: nextInviteEmail,
+      accountRole: editedMemberRole,
+      memberPlan: editedMemberPlan,
+    };
 
     setMembers((current) =>
-      current.map((member) =>
-        member.id === selectedMember.id
-          ? {
-              ...member,
-              name: nextName,
-              clientId: nextClientId,
-              inviteEmail: nextInviteEmail,
-              accountRole: editedMemberRole,
-              memberPlan: editedMemberPlan,
-            }
-          : member
-      )
+      current.map((member) => (member.id === memberId ? optimisticMember : member))
     );
     setIsEditingMember(false);
+
+    void (async () => {
+      if (!supabase) throw new Error("Supabase is not configured.");
+
+      // Resolve the member's account identity first. A member can exist without a
+      // profile, so member business fields and account-role fields are deliberately
+      // persisted to their respective tables instead of assuming every row has auth.
+      const identityResult = await supabase
+        .from("members")
+        .select("id,profile_id")
+        .eq("id", memberId)
+        .single();
+      if (identityResult.error) throw new Error(`members identity: ${identityResult.error.message}`);
+
+      const profileId = identityResult.data?.profile_id
+        ? String(identityResult.data.profile_id)
+        : null;
+
+      const memberUpdate = await supabase
+        .from("members")
+        .update({
+          name: nextName,
+          pratt_client_id: numericClientId,
+          member_plan: editedMemberPlan,
+          invite_email: nextInviteEmail || null,
+        })
+        .eq("id", memberId)
+        .select("id,name,pratt_client_id,member_plan,invite_email")
+        .single();
+
+      if (memberUpdate.error) throw new Error(`members: ${memberUpdate.error.message}`);
+
+      if (profileId) {
+        const profileUpdate = await supabase
+          .from("profiles")
+          .update({
+            display_name: nextName,
+            role: editedMemberRole,
+          })
+          .eq("id", profileId)
+          .select("id,email,display_name,role,created_at,updated_at")
+          .single();
+
+        if (profileUpdate.error) throw new Error(`profiles: ${profileUpdate.error.message}`);
+
+        // If the admin edited their own linked member, keep the live shell in sync
+        // with the newly persisted profile immediately.
+        if (authUser?.id === profileId) {
+          const nextProfile = profileUpdate.data as PrattProfileRow;
+          setProfileRow(nextProfile);
+          setRole(nextProfile.role);
+        }
+      } else if (editedMemberRole !== "member") {
+        throw new Error("This client has no linked login profile, so an account role cannot be assigned yet.");
+      }
+
+      // Re-read identity so every admin/trainer/member view receives the same
+      // authoritative values and profile-derived role after the targeted write.
+      if (authUser) await loadSupabaseIdentity(authUser);
+    })().catch((error) => {
+      setMembers(previousMembers);
+      setProfileRow(previousProfileRow);
+      setRole(previousRole);
+      setIsEditingMember(true);
+      showTrackerPersistenceError(`Save client "${selectedMember.name}"`, error);
+    });
   };
 
   const goMemberPrograms = () => {
     resetPersonalProgramRoute();
+    if (isBasicMemberProgramAccessBlocked) {
+      setScreen("openTracker");
+      return;
+    }
     setScreen("programs");
   };
 
@@ -16914,6 +17032,10 @@ export default function App() {
   };
 
   const openProgram = (programId: string) => {
+    if (isBasicMemberProgramAccessBlocked) {
+      setScreen("openTracker");
+      return;
+    }
     setSelectedProgramId(programId);
     setSelectedRoutineId(null);
     setSelectedBlockId(null);
@@ -17807,6 +17929,36 @@ export default function App() {
     );
   }
 
+  if (isArchivedMemberAccessBlocked) {
+    return (
+      <div className="min-h-screen bg-zinc-100 text-zinc-900">
+        <div className="bg-black">
+          <div className="mx-auto flex h-[168px] w-full max-w-[430px] items-center justify-center">
+            <img src={appBanner} alt="Pratt Report banner" className="w-[58%] max-w-[220px] object-contain" />
+          </div>
+        </div>
+
+        <div className="mx-auto -mt-10 w-full max-w-[430px] px-4 pb-10">
+          <div className="rounded-3xl border border-zinc-200 bg-white p-6 text-center shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">Account Status</div>
+            <div className="mt-2 text-xl font-bold text-zinc-900">Membership inactive</div>
+            <div className="mt-3 text-sm leading-6 text-zinc-600">
+              This membership is no longer active. Your account and training history are retained, but app access is disabled until the membership is restored.
+            </div>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              disabled={authBusy}
+              className="mt-5 w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {authBusy ? "Signing out…" : "Sign Out"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900 flex flex-col">
       <div className="relative z-0 bg-black">
@@ -17859,13 +18011,15 @@ export default function App() {
                     </ToggleButton>
                   ) : null}
 
-                  <ToggleButton
-                    className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
-                    active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"}
-                    onClick={goMemberPrograms}
-                  >
-                    My Programs
-                  </ToggleButton>
+                  {!isBasicMemberProgramAccessBlocked ? (
+                    <ToggleButton
+                      className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
+                      active={screen === "programs" || screen === "routines" || screen === "routine" || screen === "memberInput" || screen === "graph"}
+                      onClick={goMemberPrograms}
+                    >
+                      My Programs
+                    </ToggleButton>
+                  ) : null}
 
                   <ToggleButton
                     className="shrink-0 whitespace-nowrap px-3 text-center text-xs"
