@@ -11708,6 +11708,9 @@ export default function App() {
   const [trackerExercises, setTrackerExercises] = useState<TrackerExercise[]>(loadTrackerExercisesFromDeclaredSource);
   const [trackerWorkouts, setTrackerWorkouts] = useState<TrackerWorkout[]>(loadTrackerWorkoutsFromDeclaredSource);
   const trackerExerciseSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const programHierarchySaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const programHierarchyWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+  const deletingProgramIdsRef = useRef<Set<string>>(new Set());
   const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
 
 
@@ -14445,8 +14448,409 @@ export default function App() {
     setSessionDraft(createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id));
   }, [selectedProgram?.id, selectedRoutine?.id, selectedMember?.id]);
 
+  const normalizeProgramStartedAtForDb = (value: string) => {
+    const raw = String(value || "").trim();
+    if (!raw) return new Date().toISOString().slice(0, 10);
+    const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      const [, year, month, day] = isoMatch;
+      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime())
+      ? new Date().toISOString().slice(0, 10)
+      : parsed.toISOString().slice(0, 10);
+  };
+
+  const getProgramDbRow = async (programId: string, memberId: string) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const result = await supabase
+      .from("programs")
+      .select("id")
+      .eq("member_id", memberId)
+      .eq("legacy_app_id", programId)
+      .limit(1);
+    if (result.error) throw new Error(`programs: ${result.error.message}`);
+    return result.data?.[0] || null;
+  };
+
+  const persistProgramHierarchy = async (program: Program, programPosition?: number) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const memberId = program.memberId || selectedMember?.id || authenticatedMemberId;
+    if (!memberId) throw new Error("No member is connected to this program.");
+
+    const existingProgram = await getProgramDbRow(program.id, memberId);
+    const programPayload = {
+      member_id: memberId,
+      legacy_app_id: program.id,
+      name: program.name || "Unnamed program",
+      started_at: normalizeProgramStartedAtForDb(program.startedAt),
+      status: program.status || "active",
+      notes: program.notes || "",
+      program_length: program.programLength ?? null,
+      input_mode: program.inputMode || "trainerInput",
+      position: Math.max(0, programPosition ?? programs.findIndex((item) => item.id === program.id)),
+    };
+
+    const programResult = existingProgram
+      ? await supabase.from("programs").update(programPayload).eq("id", existingProgram.id).select("id").single()
+      : await supabase.from("programs").insert(programPayload).select("id").single();
+
+    if (programResult.error || !programResult.data?.id) {
+      throw new Error(`programs: ${programResult.error?.message || "Program ID was not returned."}`);
+    }
+    const programDbId = String(programResult.data.id);
+
+    const existingRoutineResult = await supabase
+      .from("routines")
+      .select("id, legacy_app_id, position")
+      .eq("member_id", memberId)
+      .eq("program_id", programDbId);
+    if (existingRoutineResult.error) throw new Error(`routines: ${existingRoutineResult.error.message}`);
+    const existingRoutineRows = existingRoutineResult.data || [];
+
+    // Stage current DB positions outside the normal range so reorder/swap updates
+    // never collide with unique parent+position constraints.
+    for (let index = 0; index < existingRoutineRows.length; index += 1) {
+      const stageResult = await supabase
+        .from("routines")
+        .update({ position: 1000000 + index })
+        .eq("id", existingRoutineRows[index].id)
+        .eq("member_id", memberId);
+      if (stageResult.error) throw new Error(`routines reorder: ${stageResult.error.message}`);
+    }
+
+    const retainedRoutineDbIds = new Set<string>();
+
+    for (let routinePosition = 0; routinePosition < program.routines.length; routinePosition += 1) {
+      const routine = program.routines[routinePosition];
+      const routineLegacyId = `${program.id}::${routine.id}`;
+      const existingRoutine = existingRoutineRows.find(
+        (row) => String(row.legacy_app_id || "") === routineLegacyId
+      );
+
+      const routinePayload = {
+        member_id: memberId,
+        program_id: programDbId,
+        legacy_app_id: routineLegacyId,
+        label: routine.label || `Day ${routinePosition + 1}`,
+        position: routinePosition,
+      };
+
+      const routineResult = existingRoutine
+        ? await supabase.from("routines").update(routinePayload).eq("id", existingRoutine.id).select("id").single()
+        : await supabase.from("routines").insert(routinePayload).select("id").single();
+
+      if (routineResult.error || !routineResult.data?.id) {
+        throw new Error(`routines: ${routineResult.error?.message || "Routine ID was not returned."}`);
+      }
+      const routineDbId = String(routineResult.data.id);
+      retainedRoutineDbIds.add(routineDbId);
+
+      const existingBlockResult = await supabase
+        .from("blocks")
+        .select("id, legacy_app_id, position")
+        .eq("member_id", memberId)
+        .eq("routine_id", routineDbId);
+      if (existingBlockResult.error) throw new Error(`blocks: ${existingBlockResult.error.message}`);
+      const existingBlockRows = existingBlockResult.data || [];
+
+      for (let index = 0; index < existingBlockRows.length; index += 1) {
+        const stageResult = await supabase
+          .from("blocks")
+          .update({ position: 1000000 + index })
+          .eq("id", existingBlockRows[index].id)
+          .eq("member_id", memberId);
+        if (stageResult.error) throw new Error(`blocks reorder: ${stageResult.error.message}`);
+      }
+
+      const retainedBlockDbIds = new Set<string>();
+
+      for (let blockPosition = 0; blockPosition < routine.blocks.length; blockPosition += 1) {
+        const block = routine.blocks[blockPosition];
+        const blockLegacyId = `${program.id}::${routine.id}::${block.id}`;
+        const existingBlock = existingBlockRows.find(
+          (row) => String(row.legacy_app_id || "") === blockLegacyId
+        );
+
+        const blockPayload = {
+          member_id: memberId,
+          routine_id: routineDbId,
+          legacy_app_id: blockLegacyId,
+          block_type: block.type,
+          title: block.title || `Block ${blockPosition + 1}`,
+          duration: block.duration || "",
+          notes: block.notes || "",
+          interaction_mode: block.interactionMode || (block.type === "paired" ? "alternating" : "na"),
+          position: blockPosition,
+        };
+
+        const blockResult = existingBlock
+          ? await supabase.from("blocks").update(blockPayload).eq("id", existingBlock.id).select("id").single()
+          : await supabase.from("blocks").insert(blockPayload).select("id").single();
+
+        if (blockResult.error || !blockResult.data?.id) {
+          throw new Error(`blocks: ${blockResult.error?.message || "Block ID was not returned."}`);
+        }
+        const blockDbId = String(blockResult.data.id);
+        retainedBlockDbIds.add(blockDbId);
+
+        const existingExerciseResult = await supabase
+          .from("program_exercises")
+          .select("id, legacy_app_id, position")
+          .eq("member_id", memberId)
+          .eq("block_id", blockDbId);
+        if (existingExerciseResult.error) {
+          throw new Error(`program_exercises: ${existingExerciseResult.error.message}`);
+        }
+        const existingExerciseRows = existingExerciseResult.data || [];
+
+        for (let index = 0; index < existingExerciseRows.length; index += 1) {
+          const stageResult = await supabase
+            .from("program_exercises")
+            .update({ position: 1000000 + index })
+            .eq("id", existingExerciseRows[index].id)
+            .eq("member_id", memberId);
+          if (stageResult.error) {
+            throw new Error(`program_exercises reorder: ${stageResult.error.message}`);
+          }
+        }
+
+        const retainedExerciseDbIds = new Set<string>();
+
+        for (let exercisePosition = 0; exercisePosition < block.exercises.length; exercisePosition += 1) {
+          const exercise = block.exercises[exercisePosition];
+          const exerciseLegacyId = `${program.id}::${routine.id}::${block.id}::${exercise.id}`;
+          const existingExercise = existingExerciseRows.find(
+            (row) => String(row.legacy_app_id || "") === exerciseLegacyId
+          );
+
+          const exercisePayload = {
+            member_id: memberId,
+            block_id: blockDbId,
+            legacy_app_id: exerciseLegacyId,
+            name: exercise.name || "Unnamed exercise",
+            target: exercise.target || "",
+            metric: exercise.metric || "",
+            premium_fields: exercise.premiumFields || [],
+            position: exercisePosition,
+          };
+
+          const exerciseResult = existingExercise
+            ? await supabase
+                .from("program_exercises")
+                .update(exercisePayload)
+                .eq("id", existingExercise.id)
+                .select("id")
+                .single()
+            : await supabase
+                .from("program_exercises")
+                .insert(exercisePayload)
+                .select("id")
+                .single();
+
+          if (exerciseResult.error || !exerciseResult.data?.id) {
+            throw new Error(
+              `program_exercises: ${exerciseResult.error?.message || "Exercise ID was not returned."}`
+            );
+          }
+          retainedExerciseDbIds.add(String(exerciseResult.data.id));
+        }
+
+        const staleExerciseIds = existingExerciseRows
+          .map((row) => String(row.id))
+          .filter((id) => !retainedExerciseDbIds.has(id));
+        if (staleExerciseIds.length) {
+          const referencedResult = await supabase
+            .from("session_entries")
+            .select("exercise_id")
+            .eq("member_id", memberId)
+            .in("exercise_id", staleExerciseIds)
+            .limit(1);
+          if (referencedResult.error) throw new Error(`session_entries: ${referencedResult.error.message}`);
+          if (referencedResult.data?.length) {
+            throw new Error("Cannot delete a program exercise that is referenced by saved session history.");
+          }
+          const deleteResult = await supabase
+            .from("program_exercises")
+            .delete()
+            .eq("member_id", memberId)
+            .in("id", staleExerciseIds);
+          if (deleteResult.error) throw new Error(`program_exercises delete: ${deleteResult.error.message}`);
+        }
+      }
+
+      const staleBlockIds = existingBlockRows
+        .map((row) => String(row.id))
+        .filter((id) => !retainedBlockDbIds.has(id));
+      if (staleBlockIds.length) {
+        const referencedResult = await supabase
+          .from("session_entries")
+          .select("block_id")
+          .eq("member_id", memberId)
+          .in("block_id", staleBlockIds)
+          .limit(1);
+        if (referencedResult.error) throw new Error(`session_entries: ${referencedResult.error.message}`);
+        if (referencedResult.data?.length) {
+          throw new Error("Cannot delete a program block that is referenced by saved session history.");
+        }
+        const deleteResult = await supabase
+          .from("blocks")
+          .delete()
+          .eq("member_id", memberId)
+          .in("id", staleBlockIds);
+        if (deleteResult.error) throw new Error(`blocks delete: ${deleteResult.error.message}`);
+      }
+    }
+
+    const staleRoutineIds = existingRoutineRows
+      .map((row) => String(row.id))
+      .filter((id) => !retainedRoutineDbIds.has(id));
+    if (staleRoutineIds.length) {
+      const referencedResult = await supabase
+        .from("sessions")
+        .select("routine_id")
+        .eq("member_id", memberId)
+        .in("routine_id", staleRoutineIds)
+        .limit(1);
+      if (referencedResult.error) throw new Error(`sessions: ${referencedResult.error.message}`);
+      if (referencedResult.data?.length) {
+        throw new Error("Cannot delete a routine/day that is referenced by saved session history.");
+      }
+      const deleteResult = await supabase
+        .from("routines")
+        .delete()
+        .eq("member_id", memberId)
+        .in("id", staleRoutineIds);
+      if (deleteResult.error) throw new Error(`routines delete: ${deleteResult.error.message}`);
+    }
+  };
+
+  const enqueueProgramHierarchyWrite = (
+    programId: string,
+    write: () => Promise<void>
+  ) => {
+    const previous = programHierarchyWriteQueueRef.current.get(programId) || Promise.resolve();
+
+    const next = previous
+      .catch(() => undefined)
+      .then(write)
+      .finally(() => {
+        if (programHierarchyWriteQueueRef.current.get(programId) === next) {
+          programHierarchyWriteQueueRef.current.delete(programId);
+        }
+      });
+
+    programHierarchyWriteQueueRef.current.set(programId, next);
+    return next;
+  };
+
+  const scheduleProgramHierarchySave = (
+    nextProgram: Program,
+    previousProgram: Program | null,
+    actionLabel = `Save program "${nextProgram.name || "Unnamed program"}"`
+  ) => {
+    if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
+
+    const existingTimer = programHierarchySaveTimersRef.current.get(nextProgram.id);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(() => {
+      programHierarchySaveTimersRef.current.delete(nextProgram.id);
+      if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
+
+      const position = programs.findIndex((program) => program.id === nextProgram.id);
+      void enqueueProgramHierarchyWrite(
+        nextProgram.id,
+        () =>
+          deletingProgramIdsRef.current.has(nextProgram.id)
+            ? Promise.resolve()
+            : persistProgramHierarchy(nextProgram, position < 0 ? undefined : position)
+      ).catch((error) => {
+        if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
+        if (previousProgram) {
+          setPrograms((current) =>
+            current.map((program) => (program.id === previousProgram.id ? previousProgram : program))
+          );
+        }
+        showTrackerPersistenceError(actionLabel, error);
+      });
+    }, 450);
+
+    programHierarchySaveTimersRef.current.set(nextProgram.id, timer);
+  };
+
   const updatePrograms = (updater: (current: Program[]) => Program[]) => {
-    setPrograms((prev) => updater(prev));
+    const previousPrograms = programs;
+    const nextPrograms = updater(previousPrograms);
+    setPrograms(nextPrograms);
+
+    for (const nextProgram of nextPrograms) {
+      const previousProgram = previousPrograms.find((program) => program.id === nextProgram.id) || null;
+      if (previousProgram !== nextProgram) {
+        scheduleProgramHierarchySave(nextProgram, previousProgram);
+      }
+    }
+  };
+
+  const createProgramInSupabase = (program: Program) => {
+    deletingProgramIdsRef.current.delete(program.id);
+    const previousPrograms = programs;
+    const nextPrograms = [...previousPrograms, program];
+    setPrograms(nextPrograms);
+
+    void enqueueProgramHierarchyWrite(
+      program.id,
+      () => persistProgramHierarchy(program, nextPrograms.length - 1)
+    ).catch((error) => {
+      setPrograms(previousPrograms);
+      if (selectedProgramId === program.id) setSelectedProgramId(null);
+      showTrackerPersistenceError(`Create program "${program.name}"`, error);
+    });
+  };
+
+  const deleteProgramFromSupabase = (program: Program) => {
+    const previousPrograms = programs;
+
+    const pendingTimer = programHierarchySaveTimersRef.current.get(program.id);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      programHierarchySaveTimersRef.current.delete(program.id);
+    }
+
+    deletingProgramIdsRef.current.add(program.id);
+    setPrograms((current) => current.filter((item) => item.id !== program.id));
+
+    void enqueueProgramHierarchyWrite(program.id, async () => {
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const memberId = program.memberId || selectedMember?.id || authenticatedMemberId;
+      if (!memberId) throw new Error("No member is connected to this program.");
+
+      const programRow = await getProgramDbRow(program.id, memberId);
+      if (!programRow) return;
+
+      const sessionReference = await supabase
+        .from("sessions")
+        .select("id")
+        .eq("member_id", memberId)
+        .eq("program_id", programRow.id)
+        .limit(1);
+      if (sessionReference.error) throw new Error(`sessions: ${sessionReference.error.message}`);
+      if (sessionReference.data?.length) {
+        throw new Error("Cannot delete a program that has saved session history.");
+      }
+
+      const result = await supabase
+        .from("programs")
+        .delete()
+        .eq("member_id", memberId)
+        .eq("id", programRow.id);
+      if (result.error) throw new Error(`programs delete: ${result.error.message}`);
+    }).catch((error) => {
+      deletingProgramIdsRef.current.delete(program.id);
+      setPrograms(previousPrograms);
+      showTrackerPersistenceError(`Delete program "${program.name}"`, error);
+    });
   };
 
   const addRoutine = () => {
@@ -18600,7 +19004,7 @@ export default function App() {
                             inputMode: getDefaultProgramInputModeForMember(selectedMember),
                             memberId: selectedMember?.id,
                           };
-                          setPrograms((prev) => [...prev, newProgram]);
+                          createProgramInSupabase(newProgram);
                           setSelectedProgramId(newProgram.id);
                           setSelectedRoutineId(newProgram.routines[0]?.id || null);
                           setSelectedBlockId(newProgram.routines[0]?.blocks[0]?.id || null);
@@ -18643,7 +19047,7 @@ export default function App() {
                             {program.status !== "closed" ? (
                               <SmallButton
                                 onClick={() => {
-                                  setPrograms((prev) =>
+                                  updatePrograms((prev) =>
                                     prev.map((item) =>
                                       item.id === program.id
                                         ? { ...item, status: item.status === "paused" ? "active" : "paused" }
@@ -18661,7 +19065,7 @@ export default function App() {
                                 onClick={() => {
                                   const confirmClose = window.confirm("Are you sure you want to close this program? This action cannot be undone.");
                                   if (!confirmClose) return;
-                                  setPrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
+                                  updatePrograms((prev) => prev.map((item) => item.id === program.id ? { ...item, status: "closed" } : item));
                                 }}
                                 className="border-red-200 bg-red-600 text-white hover:bg-red-700"
                               >
@@ -18672,7 +19076,7 @@ export default function App() {
                                 onClick={() => {
                                   const confirmDelete = window.confirm("Are you sure you want to delete this program? This action cannot be undone.");
                                   if (!confirmDelete) return;
-                                  setPrograms((prev) => prev.filter((item) => item.id !== program.id));
+                                  deleteProgramFromSupabase(program);
                                   if (selectedProgramId === program.id) {
                                     setSelectedProgramId(null);
                                   }

@@ -16844,19 +16844,50 @@ export default function App() {
   }, [canUseTrainerWorkspace, screen, builderSource, selectedMember, selectedProgram, selectedRoutine]);
 
   const addMember = () => {
-    window.alert("Client creation will be connected through the controlled admin account workflow after Layer 1B identity verification.");
+    window.alert("Client creation remains on the controlled account-creation workflow so auth, profile, and member identity are created together.");
   };
 
   const removeMember = (_memberId: string) => {
-    window.alert("Client deletion is disabled during Layer 1B identity verification.");
+    window.alert("Permanent client deletion remains disabled here because it can affect account identity and historical training data.");
   };
 
-  const archiveMember = (_memberId: string) => {
-    window.alert("Client archiving is disabled during Layer 1B identity verification.");
+  const persistMemberArchivedState = async (memberId: string, archived: boolean) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const result = await supabase
+      .from("members")
+      .update({ archived })
+      .eq("id", memberId)
+      .select("id,archived")
+      .single();
+
+    if (result.error) throw new Error(`members: ${result.error.message}`);
+    return result.data;
   };
 
-  const restoreMember = (_memberId: string) => {
-    window.alert("Client restoration is disabled during Layer 1B identity verification.");
+  const archiveMember = (memberId: string) => {
+    if (role !== "admin") return;
+    const previousMembers = members;
+    setMembers((current) =>
+      current.map((member) => (member.id === memberId ? { ...member, archived: true } : member))
+    );
+
+    void persistMemberArchivedState(memberId, true).catch((error) => {
+      setMembers(previousMembers);
+      showTrackerPersistenceError("Archive client", error);
+    });
+  };
+
+  const restoreMember = (memberId: string) => {
+    if (role !== "admin") return;
+    const previousMembers = members;
+    setMembers((current) =>
+      current.map((member) => (member.id === memberId ? { ...member, archived: false } : member))
+    );
+
+    void persistMemberArchivedState(memberId, false).catch((error) => {
+      setMembers(previousMembers);
+      showTrackerPersistenceError("Restore client", error);
+    });
   };
 
   const startEditingSelectedMember = () => {
@@ -16884,23 +16915,97 @@ export default function App() {
     const nextName = editedMemberName.trim();
     const nextClientId = editedMemberClientId.trim();
     const nextInviteEmail = editedMemberInviteEmail.trim();
+    const numericClientId = Number(nextClientId);
+
     if (!nextName || !nextClientId) return;
+    if (!Number.isInteger(numericClientId) || numericClientId <= 0) {
+      window.alert("Client ID must be a positive whole number.");
+      return;
+    }
+
+    const previousMembers = members;
+    const previousProfileRow = profileRow;
+    const previousRole = role;
+    const memberId = selectedMember.id;
+    const optimisticMember: Member = {
+      ...selectedMember,
+      name: nextName,
+      clientId: nextClientId,
+      inviteEmail: nextInviteEmail,
+      accountRole: editedMemberRole,
+      memberPlan: editedMemberPlan,
+    };
 
     setMembers((current) =>
-      current.map((member) =>
-        member.id === selectedMember.id
-          ? {
-              ...member,
-              name: nextName,
-              clientId: nextClientId,
-              inviteEmail: nextInviteEmail,
-              accountRole: editedMemberRole,
-              memberPlan: editedMemberPlan,
-            }
-          : member
-      )
+      current.map((member) => (member.id === memberId ? optimisticMember : member))
     );
     setIsEditingMember(false);
+
+    void (async () => {
+      if (!supabase) throw new Error("Supabase is not configured.");
+
+      // Resolve the member's account identity first. A member can exist without a
+      // profile, so member business fields and account-role fields are deliberately
+      // persisted to their respective tables instead of assuming every row has auth.
+      const identityResult = await supabase
+        .from("members")
+        .select("id,profile_id")
+        .eq("id", memberId)
+        .single();
+      if (identityResult.error) throw new Error(`members identity: ${identityResult.error.message}`);
+
+      const profileId = identityResult.data?.profile_id
+        ? String(identityResult.data.profile_id)
+        : null;
+
+      const memberUpdate = await supabase
+        .from("members")
+        .update({
+          name: nextName,
+          pratt_client_id: numericClientId,
+          member_plan: editedMemberPlan,
+          invite_email: nextInviteEmail || null,
+        })
+        .eq("id", memberId)
+        .select("id,name,pratt_client_id,member_plan,invite_email")
+        .single();
+
+      if (memberUpdate.error) throw new Error(`members: ${memberUpdate.error.message}`);
+
+      if (profileId) {
+        const profileUpdate = await supabase
+          .from("profiles")
+          .update({
+            display_name: nextName,
+            role: editedMemberRole,
+          })
+          .eq("id", profileId)
+          .select("id,email,display_name,role,created_at,updated_at")
+          .single();
+
+        if (profileUpdate.error) throw new Error(`profiles: ${profileUpdate.error.message}`);
+
+        // If the admin edited their own linked member, keep the live shell in sync
+        // with the newly persisted profile immediately.
+        if (authUser?.id === profileId) {
+          const nextProfile = profileUpdate.data as PrattProfileRow;
+          setProfileRow(nextProfile);
+          setRole(nextProfile.role);
+        }
+      } else if (editedMemberRole !== "member") {
+        throw new Error("This client has no linked login profile, so an account role cannot be assigned yet.");
+      }
+
+      // Re-read identity so every admin/trainer/member view receives the same
+      // authoritative values and profile-derived role after the targeted write.
+      if (authUser) await loadSupabaseIdentity(authUser);
+    })().catch((error) => {
+      setMembers(previousMembers);
+      setProfileRow(previousProfileRow);
+      setRole(previousRole);
+      setIsEditingMember(true);
+      showTrackerPersistenceError(`Save client "${selectedMember.name}"`, error);
+    });
   };
 
   const goMemberPrograms = () => {
