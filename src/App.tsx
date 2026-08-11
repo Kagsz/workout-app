@@ -7666,9 +7666,23 @@ export default function App() {
 
   const getCycleNextWorkoutId = (cycle: TrackerWorkoutCycle | null | undefined) => {
     if (!cycle?.workoutIds.length) return null;
+
     const gapId = getCycleGapWorkoutId(cycle);
     if (gapId) return null;
-    if (cycle.nextWorkoutId && cycle.workoutIds.includes(cycle.nextWorkoutId)) return cycle.nextWorkoutId;
+
+    if (!cycle.startedAt || cycle.completedAt) {
+      return cycle.workoutIds[0] || null;
+    }
+
+    for (const workoutId of cycle.workoutIds) {
+      const workout = trackerWorkoutById.get(workoutId);
+      if (getCycleWorkoutFirstIncompleteSlotId(cycle, workout)) return workoutId;
+    }
+
+    if (cycle.nextWorkoutId && cycle.workoutIds.includes(cycle.nextWorkoutId)) {
+      return cycle.nextWorkoutId;
+    }
+
     return cycle.workoutIds[0] || null;
   };
 
@@ -10253,6 +10267,33 @@ export default function App() {
         current.map((workout) => (workout.id === previousWorkout.id ? nextWorkout : workout))
       );
 
+      if (trackerWorkoutReturnCycleId) {
+        const cycle = trackerCycles.find((item) => item.id === trackerWorkoutReturnCycleId);
+        if (cycle) {
+          const cycleStartedAt = cycle.startedAt || new Date().toISOString();
+          const workoutIndex = cycle.workoutIds.indexOf(previousWorkout.id);
+          const nextOrderedWorkoutId =
+            workoutIndex >= 0 && cycle.workoutIds.length
+              ? cycle.workoutIds[(workoutIndex + 1) % cycle.workoutIds.length]
+              : cycle.workoutIds[0];
+
+          const shouldAdvanceCycle = Boolean(nextWorkout.completedAt);
+          applyTrackerCycleChange(
+            cycle.id,
+            (current) => ({
+              ...current,
+              startedAt: current.startedAt || cycleStartedAt,
+              completedAt: undefined,
+              nextWorkoutId: shouldAdvanceCycle
+                ? nextOrderedWorkoutId || current.nextWorkoutId
+                : previousWorkout.id,
+            }),
+            "metadata",
+            `Update active cycle "${cycle.name}"`
+          );
+        }
+      }
+
       void (async () => {
         await persistTrackerWorkoutEntry(nextWorkout, pendingTrackerWorkoutSlotId, entry);
         await persistTrackerWorkoutMetadata(nextWorkout);
@@ -10326,6 +10367,21 @@ export default function App() {
   };
 
   const workoutHasAnyData = (workout: TrackerWorkout | null | undefined) => Boolean(workout?.startedAt || workout?.completedAt || normalizeTrackerWorkout(workout as TrackerWorkout).exerciseSlots?.some((slot) => (slot.entries || []).length));
+
+  const renameTrackerWorkout = (workoutId: string) => {
+    const workout = trackerWorkouts.find((item) => item.id === workoutId);
+    if (!workout) return;
+
+    const nextName = window.prompt("Workout name", workout.name)?.trim();
+    if (!nextName || nextName === workout.name) return;
+
+    applyTrackerWorkoutChange(
+      workoutId,
+      (current) => ({ ...current, name: nextName }),
+      "metadata",
+      `Rename workout "${workout.name}" to "${nextName}"`
+    );
+  };
 
   const archiveTrackerWorkout = (workoutId: string) => {
     const workout = trackerWorkouts.find((item) => item.id === workoutId);
@@ -10554,6 +10610,21 @@ export default function App() {
     return nextCycle;
   };
 
+  const renameTrackerCycle = (cycleId: string) => {
+    const cycle = trackerCycles.find((item) => item.id === cycleId);
+    if (!cycle) return;
+
+    const nextName = window.prompt("Cycle name", cycle.name)?.trim();
+    if (!nextName || nextName === cycle.name) return;
+
+    applyTrackerCycleChange(
+      cycleId,
+      (current) => ({ ...current, name: nextName }),
+      "metadata",
+      `Rename cycle "${cycle.name}" to "${nextName}"`
+    );
+  };
+
   const archiveTrackerCycle = (cycleId: string) => {
     const cycle = trackerCycles.find((item) => item.id === cycleId);
     if (cycle && !window.confirm(`Archive ${cycle.name}?`)) return;
@@ -10688,12 +10759,12 @@ export default function App() {
     const cycle = trackerCycles.find((item) => item.id === cycleId);
     applyTrackerCycleChange(
       cycleId,
-      (current) => {
-        const validNext = current.nextWorkoutId && current.workoutIds.includes(current.nextWorkoutId)
-          ? current.nextWorkoutId
-          : current.workoutIds[0];
-        return { ...current, startedAt: now, completedAt: undefined, nextWorkoutId: validNext };
-      },
+      (current) => ({
+        ...current,
+        startedAt: now,
+        completedAt: undefined,
+        nextWorkoutId: current.workoutIds[0],
+      }),
       "metadata",
       `Start cycle "${cycle?.name || "Unnamed cycle"}"`
     );
@@ -10830,7 +10901,13 @@ export default function App() {
         const nextWorkoutIds = [...current.workoutIds];
         const [moved] = nextWorkoutIds.splice(index, 1);
         nextWorkoutIds.splice(nextIndex, 0, moved);
-        return { ...current, workoutIds: nextWorkoutIds };
+        return {
+          ...current,
+          workoutIds: nextWorkoutIds,
+          nextWorkoutId: current.startedAt && !current.completedAt
+            ? current.nextWorkoutId
+            : nextWorkoutIds[0],
+        };
       },
       "structure",
       `Reorder workouts in "${cycle?.name || "Unnamed cycle"}"`
@@ -13358,7 +13435,7 @@ export default function App() {
               )}
 
               {canUseTrainerWorkspace && screen === "memberOverview" && selectedMember && (
-                <div className="space-y-4">
+                <div className="space-y-2.5">
                   <SectionCard title="Client Overview" collapsible>
                     <div className="space-y-3">
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -13368,11 +13445,6 @@ export default function App() {
                             <div className="mt-1 text-xs text-zinc-500">Identity and access at a glance.</div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            {selectedMember.inviteEmail?.trim() ? (
-                              <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
-                                Email on file
-                              </div>
-                            ) : null}
                             {role === "admin" ? (
                               isEditingMember ? (
                                 <>
@@ -13388,7 +13460,7 @@ export default function App() {
 
                         {isEditingMember && role === "admin" ? (
                           <div className="mt-4 space-y-4">
-                            <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
                                 <input
@@ -13469,20 +13541,20 @@ export default function App() {
                               </div>
                             </div>
 
-                            <div className="flex flex-wrap gap-2">
-                              <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-700">
+                            <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5">
+                              <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-zinc-200 bg-zinc-100 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-zinc-700">
                                 ID {selectedMember.clientId}
                               </span>
-                              <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-700">
+                              <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-zinc-200 bg-zinc-100 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-zinc-700">
                                 {(selectedMember.accountRole || "member").replace(/^./, (value) => value.toUpperCase())}
                               </span>
-                              <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-700">
+                              <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-zinc-200 bg-zinc-100 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-zinc-700">
                                 {(selectedMember.memberPlan || "direct").replace(/^./, (value) => value.toUpperCase())}
                               </span>
                               <button
                                 type="button"
                                 onClick={() => setShowMemberProgramInputChooser((current) => !current)}
-                                className="inline-flex items-center rounded-full border border-zinc-900 bg-zinc-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white"
+                                className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-zinc-900 bg-zinc-900 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] text-white"
                               >
                                 Input {selectedMember.programInputEnabled ? "Enabled" : "Disabled"}
                               </button>
@@ -13519,7 +13591,7 @@ export default function App() {
 
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                         <div className="mb-3 text-sm font-semibold text-zinc-900">Program Actions</div>
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="grid grid-cols-3 gap-2">
                           <PrimaryButton onClick={createProgramForSelectedMember}>Create Program</PrimaryButton>
                           <SmallButton onClick={goAdminPrograms}>Edit Program</SmallButton>
                           <SmallButton onClick={openSessionResultsEditor}>Edit Session Results</SmallButton>
@@ -14572,14 +14644,16 @@ export default function App() {
                                 const cycleGapWorkoutId = getCycleGapWorkoutId(cycle);
                                 const hasIncomplete = Boolean(cycleGapWorkoutId);
                                 const cycleNextWorkoutId = getCycleNextWorkoutId(cycle);
+                                const isActiveCycle = Boolean(cycle.startedAt && !cycle.completedAt);
                                 return (
-                                  <div key={cycle.id} className={`rounded-2xl border p-3 ${hasIncomplete ? "border-amber-300 bg-amber-50" : "border-zinc-200 bg-zinc-50"}`}>
+                                  <div key={cycle.id} className={`rounded-2xl border p-3 ${hasIncomplete ? "border-amber-300 bg-amber-50" : isActiveCycle ? "border-sky-300 bg-sky-50" : "border-zinc-200 bg-zinc-50"}`}>
                                     <button onClick={() => toggleExpandedTrackerCycle(cycle.id)} className="flex w-full items-center justify-between gap-3 text-left">
                                       <div className="flex min-w-0 items-center gap-2">
                                         <span className="text-zinc-400">{isExpanded ? "▼" : "▶"}</span>
                                         <div>
                                           <div className="flex flex-wrap items-center gap-2">
                                             <div className="text-sm font-semibold text-zinc-900">{cycle.name}</div>
+                                            {isActiveCycle ? <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700">Active Cycle</span> : null}
                                             {hasIncomplete ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Incomplete First</span> : null}
                                           </div>
                                           <div className="text-xs text-zinc-500">{cycle.workoutIds.length} workouts</div>
@@ -14612,7 +14686,11 @@ export default function App() {
                                             const workout = trackerWorkoutById.get(workoutId);
                                             if (!workout) return null;
                                             return (
-                                              <div key={`${cycle.id}-${workoutId}-${index}`} onClick={() => openTrackerWorkout(workout.id, cycle.id)} className="cursor-pointer rounded-xl border border-zinc-200 bg-white p-2 transition hover:border-zinc-400">
+                                              <div
+                                                key={`${cycle.id}-${workoutId}-${index}`}
+                                                onClick={() => openTrackerWorkout(workout.id, cycle.id)}
+                                                className={`cursor-pointer rounded-xl border p-2 transition hover:border-zinc-400 ${cycleNextWorkoutId === workout.id && isActiveCycle ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
+                                              >
                                                 <div className="flex items-center justify-between gap-2">
                                                   <div className="min-w-0">
                                                     <div className="flex flex-wrap items-center gap-2">
@@ -14641,6 +14719,7 @@ export default function App() {
                                           </button>
                                           {expandedTrackerOptionsIds.includes(`cycle-options-${cycle.id}`) ? (
                                             <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
+                                              <SmallButton onClick={() => renameTrackerCycle(cycle.id)}>Edit Cycle</SmallButton>
                                               {cycle.startedAt && !cycle.completedAt ? <SmallButton onClick={() => markTrackerCycleComplete(cycle.id)}>Mark Cycle Complete</SmallButton> : null}
                                               <SmallButton onClick={() => archiveTrackerCycle(cycle.id)}>Archive Cycle</SmallButton>
                                               <button onClick={() => deleteTrackerCyclePermanently(cycle.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete Cycle</button>
@@ -14887,6 +14966,7 @@ export default function App() {
                       </button>
                       {expandedTrackerOptionsIds.includes(`workout-options-${selectedTrackerWorkout.id}`) ? (
                         <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
+                          <SmallButton onClick={() => renameTrackerWorkout(selectedTrackerWorkout.id)}>Edit Workout</SmallButton>
                           <SmallButton onClick={() => archiveTrackerWorkout(selectedTrackerWorkout.id)}>Archive Workout</SmallButton>
                           <button onClick={() => deleteTrackerWorkoutPermanently(selectedTrackerWorkout.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete Workout</button>
                         </div>

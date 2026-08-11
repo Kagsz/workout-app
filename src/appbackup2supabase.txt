@@ -6009,6 +6009,7 @@ export default function App() {
   const [editedMemberRole, setEditedMemberRole] = useState<Role>("member");
   const [editedMemberPlan, setEditedMemberPlan] = useState<MemberPlan>("direct");
   const [editedMemberProgramInputEnabled, setEditedMemberProgramInputEnabled] = useState(true);
+  const [showMemberProgramInputChooser, setShowMemberProgramInputChooser] = useState(false);
   const [role, setRole] = useState<Role>("member");
   const canUseTrainerWorkspace = role === "admin" || role === "trainer";
   const profileButtonLabel = role === "admin" ? "A" : role === "trainer" ? "T" : "M";
@@ -8057,6 +8058,7 @@ export default function App() {
     setEditedMemberRole(selectedMember.accountRole || "member");
     setEditedMemberPlan(selectedMember.memberPlan || "direct");
     setEditedMemberProgramInputEnabled(selectedMember.programInputEnabled !== false);
+    setShowMemberProgramInputChooser(false);
     setIsEditingMember(false);
   }, [selectedMember?.id]);
 
@@ -11001,6 +11003,40 @@ export default function App() {
     setScreen("adminPrograms");
   };
 
+  const createProgramForSelectedMember = () => {
+    if (!selectedMember) return;
+
+    const nextProgramIndex = programs.length + 1;
+    const newProgram: Program = {
+      id: uid(),
+      name: `Program ${nextProgramIndex}`,
+      startedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      status: "active",
+      routines: [createRoutine(0)],
+      notes: "",
+      programLength: DEFAULT_PROGRAM_LENGTH,
+      memberId: selectedMember.id,
+    };
+
+    createProgramInSupabase(newProgram);
+    setSelectedProgramId(newProgram.id);
+    setSelectedRoutineId(newProgram.routines[0]?.id || null);
+    setSelectedBlockId(newProgram.routines[0]?.blocks[0]?.id || null);
+    setBuilderSource("memberOverview");
+    setScreen("builder");
+  };
+
+  const openSessionResultsEditor = () => {
+    if (activeAdminProgram) {
+      setSelectedProgramId(activeAdminProgram.id);
+    }
+    setAdminDashRoutineFilter("all");
+    setSelectedRoutineId(null);
+    setAdminDashSessionNumber("");
+    setSessionDraft(null);
+    setScreen("adminDash");
+  };
+
   const goBack = () => {
     if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") {
@@ -11067,8 +11103,8 @@ export default function App() {
     if (canUseTrainerWorkspace) {
       if (screen === "memberOverview") return "Back to Members";
       if (screen === "adminPrograms") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
-      if (screen === "programView") return "Back to All Programs";
-      if (screen === "builder") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to All Programs";
+      if (screen === "programView") return selectedMember ? `Back to ${selectedMember.name}` : "Back";
+      if (screen === "builder") return selectedProgram ? `Back to ${selectedProgram.name}` : "Back to Program Selection";
       if (screen === "adminDash" || screen === "input") return selectedProgram ? `Back to ${selectedProgram.name}` : selectedMember ? `Back to ${selectedMember.name}` : "Back to Members";
       return "";
     }
@@ -11139,6 +11175,7 @@ export default function App() {
     setEditedMemberRole(selectedMember.accountRole || "member");
     setEditedMemberPlan(selectedMember.memberPlan || "direct");
     setEditedMemberProgramInputEnabled(selectedMember.programInputEnabled !== false);
+    setShowMemberProgramInputChooser(false);
     setIsEditingMember(true);
   };
 
@@ -13321,19 +13358,21 @@ export default function App() {
               )}
 
               {canUseTrainerWorkspace && screen === "memberOverview" && selectedMember && (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   <SectionCard title="Client Overview" collapsible>
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="text-sm font-semibold text-zinc-900">Client Account</div>
-                            <div className="mt-1 text-xs text-zinc-500">Identity, account access, and member access level.</div>
+                            <div className="mt-1 text-xs text-zinc-500">Identity and access at a glance.</div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
-                              {selectedMember.inviteEmail?.trim() ? "Email on file" : "Not connected"}
-                            </div>
+                            {selectedMember.inviteEmail?.trim() ? (
+                              <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600">
+                                Email on file
+                              </div>
+                            ) : null}
                             {role === "admin" ? (
                               isEditingMember ? (
                                 <>
@@ -13343,44 +13382,33 @@ export default function App() {
                               ) : (
                                 <SmallButton onClick={startEditingSelectedMember}>Edit</SmallButton>
                               )
-                            ) : (
-                              <div className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-500">Read only</div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
 
-                        <div className="mt-4 space-y-4">
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <div>
-                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
-                              {isEditingMember && role === "admin" ? (
+                        {isEditingMember && role === "admin" ? (
+                          <div className="mt-4 space-y-4">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
                                 <input
                                   value={editedMemberName}
                                   onChange={(event) => setEditedMemberName(event.target.value)}
                                   className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                                 />
-                              ) : (
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">{selectedMember.name}</div>
-                              )}
-                            </div>
-
-                            <div>
-                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
-                              {isEditingMember && role === "admin" ? (
+                              </div>
+                              <div>
+                                <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Client ID</div>
                                 <input
                                   value={editedMemberClientId}
                                   onChange={(event) => setEditedMemberClientId(event.target.value)}
                                   className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                                 />
-                              ) : (
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">{selectedMember.clientId}</div>
-                              )}
+                              </div>
                             </div>
-                          </div>
 
-                          <div>
-                            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite / Login Email</div>
-                            {isEditingMember && role === "admin" ? (
+                            <div>
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Invite / Login Email</div>
                               <input
                                 type="email"
                                 value={editedMemberInviteEmail}
@@ -13388,32 +13416,19 @@ export default function App() {
                                 placeholder="member@example.com"
                                 className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                               />
-                            ) : (
-                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-                                {selectedMember.inviteEmail?.trim() || "No login email on file"}
-                              </div>
-                            )}
-                          </div>
+                            </div>
 
-                          <div>
-                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Account Role</div>
-                            {isEditingMember && role === "admin" ? (
+                            <div>
+                              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Account Role</div>
                               <div className="grid gap-2 sm:grid-cols-3">
                                 <ToggleButton active={editedMemberRole === "member"} onClick={() => setEditedMemberRole("member")}>Member</ToggleButton>
                                 <ToggleButton active={editedMemberRole === "trainer"} onClick={() => setEditedMemberRole("trainer")}>Trainer</ToggleButton>
                                 <ToggleButton active={editedMemberRole === "admin"} onClick={() => setEditedMemberRole("admin")}>Admin</ToggleButton>
                               </div>
-                            ) : (
-                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
-                                {(selectedMember.accountRole || "member").replace(/^./, (value) => value.toUpperCase())}
-                              </div>
-                            )}
-                          </div>
+                            </div>
 
-                          <div>
-                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Member Type</div>
-                            <div className="mb-3 text-xs text-zinc-500">Controls what this member can access in Member View.</div>
-                            {isEditingMember && role === "admin" ? (
+                            <div>
+                              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Member Type</div>
                               <div className="grid gap-2 sm:grid-cols-3">
                                 <ToggleButton active={editedMemberPlan === "basic"} onClick={() => setEditedMemberPlan("basic")}>Basic Member</ToggleButton>
                                 <ToggleButton
@@ -13435,97 +13450,110 @@ export default function App() {
                                   Premium Member
                                 </ToggleButton>
                               </div>
-                            ) : (
-                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
-                                {getMemberPlanLabel(selectedMember.memberPlan)}
-                              </div>
-                            )}
-                          </div>
-
-                          <div>
-                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Program Data Input</div>
-                            <div className="mb-3 text-xs text-zinc-500">
-                              Allows this member to enter their own program results. New Direct members default to Disabled; Premium defaults to Enabled.
                             </div>
-                            {isEditingMember && role === "admin" ? (
-                              <div className="grid grid-cols-2 gap-2">
-                                <ToggleButton active={!editedMemberProgramInputEnabled} onClick={() => setEditedMemberProgramInputEnabled(false)}>Disabled</ToggleButton>
-                                <ToggleButton active={editedMemberProgramInputEnabled} onClick={() => setEditedMemberProgramInputEnabled(true)}>Enabled</ToggleButton>
-                              </div>
-                            ) : (
-                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-700">
-                                {selectedMember.programInputEnabled ? "Enabled" : "Disabled"}
-                              </div>
-                            )}
                           </div>
-                        </div>
+                        ) : (
+                          <div className="mt-4 space-y-3">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Name</div>
+                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-900">
+                                  {selectedMember.name}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Email</div>
+                                <div className="truncate rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+                                  {selectedMember.inviteEmail?.trim() || "No login email on file"}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-700">
+                                ID {selectedMember.clientId}
+                              </span>
+                              <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-700">
+                                {(selectedMember.accountRole || "member").replace(/^./, (value) => value.toUpperCase())}
+                              </span>
+                              <span className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-700">
+                                {(selectedMember.memberPlan || "direct").replace(/^./, (value) => value.toUpperCase())}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setShowMemberProgramInputChooser((current) => !current)}
+                                className="inline-flex items-center rounded-full border border-zinc-900 bg-zinc-900 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white"
+                              >
+                                Input {selectedMember.programInputEnabled ? "Enabled" : "Disabled"}
+                              </button>
+                            </div>
+
+                            {showMemberProgramInputChooser ? (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                <div className="mb-2 text-xs font-semibold text-zinc-700">Program Data Input</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <ToggleButton
+                                    active={!selectedMember.programInputEnabled}
+                                    onClick={() => {
+                                      setMemberProgramInputAccess(selectedMember.id, false);
+                                      setShowMemberProgramInputChooser(false);
+                                    }}
+                                  >
+                                    Disabled
+                                  </ToggleButton>
+                                  <ToggleButton
+                                    active={Boolean(selectedMember.programInputEnabled)}
+                                    onClick={() => {
+                                      setMemberProgramInputAccess(selectedMember.id, true);
+                                      setShowMemberProgramInputChooser(false);
+                                    }}
+                                  >
+                                    Enabled
+                                  </ToggleButton>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
 
                       <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-zinc-900">Member Program Input</div>
-                            <div className="mt-1 text-xs text-zinc-500">Trainer-controlled permission for member-side program data entry.</div>
-                          </div>
-                          <div className="flex gap-2">
-                            <ToggleButton active={!selectedMember.programInputEnabled} onClick={() => setMemberProgramInputAccess(selectedMember.id, false)}>Disabled</ToggleButton>
-                            <ToggleButton active={Boolean(selectedMember.programInputEnabled)} onClick={() => setMemberProgramInputAccess(selectedMember.id, true)}>Enabled</ToggleButton>
-                          </div>
+                        <div className="mb-3 text-sm font-semibold text-zinc-900">Program Actions</div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <PrimaryButton onClick={createProgramForSelectedMember}>Create Program</PrimaryButton>
+                          <SmallButton onClick={goAdminPrograms}>Edit Program</SmallButton>
+                          <SmallButton onClick={openSessionResultsEditor}>Edit Session Results</SmallButton>
                         </div>
                       </div>
 
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                          <div className="text-sm font-semibold text-zinc-900">Active Program</div>
-                          {activeAdminProgram ? (
-                            <>
-                              <div className="mt-2 text-sm font-medium text-zinc-700">{activeAdminProgram.name}</div>
-                              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-600">
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{activeAdminProgram.routines.length}</div>
-                                  <div>Routines</div>
-                                </div>
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramBlockCount(activeAdminProgram)}</div>
-                                  <div>Total Blocks</div>
-                                </div>
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramLength(activeAdminProgram)}</div>
-                                  <div>Sessions / Routine</div>
-                                </div>
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
-                                  <div>Total Sessions</div>
-                                </div>
+                      {activeAdminProgram ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedProgramId(activeAdminProgram.id);
+                            setSelectedRoutineId(activeAdminProgram.routines[0]?.id || null);
+                            setBuilderSource("memberOverview");
+                            setScreen("programView");
+                          }}
+                          className="w-full rounded-2xl border border-zinc-200 bg-white p-4 text-left transition hover:border-zinc-400 hover:bg-zinc-50"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Active Program</div>
+                              <div className="mt-1 text-base font-semibold text-zinc-900">{activeAdminProgram.name}</div>
+                              <div className="mt-1 text-xs text-zinc-500">
+                                {getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)} sessions
                               </div>
-                              <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
-                                {String(activeAdminProgram.notes || "").trim() || "No program notes yet."}
-                              </div>
-                              <PrimaryButton
-                                onClick={() => {
-                                  setSelectedProgramId(activeAdminProgram.id);
-                                  setSelectedRoutineId(activeAdminProgram.routines[0]?.id || null);
-                                  setBuilderSource("memberOverview");
-                                  setScreen("programView");
-                                }}
-                                className="mt-3 w-full"
-                              >
-                                Open Active Program
-                              </PrimaryButton>
-                            </>
-                          ) : (
-                            <div className="mt-2 text-sm text-zinc-500">No Active Program</div>
-                          )}
-                        </div>
-
+                            </div>
+                            <div className="text-sm font-semibold text-zinc-600">Open ›</div>
+                          </div>
+                        </button>
+                      ) : (
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                          <div className="text-sm font-semibold text-zinc-900">All Programs</div>
-                          <div className="mt-2 text-sm text-zinc-600">View every program for this member and start a new one.</div>
-                          <PrimaryButton onClick={goAdminPrograms} className="mt-3 w-full">
-                            View All Programs
-                          </PrimaryButton>
+                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Active Program</div>
+                          <div className="mt-1 text-sm text-zinc-500">No Active Program</div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </SectionCard>
                 </div>
@@ -13533,33 +13561,8 @@ export default function App() {
 
               {canUseTrainerWorkspace && screen === "adminPrograms" && selectedMember && (
                 <div className="space-y-6">
-                  <SectionCard title="All Programs" collapsible>
+                  <SectionCard title="Select Program to Edit" collapsible>
                     <div className="space-y-3">
-                      <PrimaryButton
-                        onClick={() => {
-                          const nextProgramIndex = programs.length + 1;
-                          const newProgram: Program = {
-                            id: uid(),
-                            name: `Program ${nextProgramIndex}`,
-                            startedAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-                            status: "active",
-                            routines: [createRoutine(0)],
-                            notes: "",
-                            programLength: DEFAULT_PROGRAM_LENGTH,
-                            memberId: selectedMember?.id,
-                          };
-                          createProgramInSupabase(newProgram);
-                          setSelectedProgramId(newProgram.id);
-                          setSelectedRoutineId(newProgram.routines[0]?.id || null);
-                          setSelectedBlockId(newProgram.routines[0]?.blocks[0]?.id || null);
-                          setBuilderSource("adminPrograms");
-                          setScreen("builder");
-                        }}
-                        className="w-full"
-                      >
-                        + New Program
-                      </PrimaryButton>
-
                       {adminSortedPrograms.map((program) => (
                         <div key={program.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
                           <div className="flex items-center justify-between gap-3">
@@ -13569,7 +13572,7 @@ export default function App() {
                                 setSelectedRoutineId(program.routines[0]?.id || null);
                                 setSelectedBlockId(program.routines[0]?.blocks[0]?.id || null);
                                 setBuilderSource("adminPrograms");
-                                setScreen("programView");
+                                setScreen("builder");
                               }}
                               className="text-left"
                             >
@@ -13685,7 +13688,7 @@ export default function App() {
                             setScreen("adminDash");
                           }}
                         >
-                          Open Trainer Dash
+                          Edit Session Results
                         </SmallButton>
                       </div>
                     </div>
