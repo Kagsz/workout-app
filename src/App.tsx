@@ -10915,7 +10915,7 @@ export default function App() {
           ...current,
           workoutIds: nextWorkoutIds,
           nextWorkoutId: current.startedAt && !current.completedAt
-            ? getCycleNextWorkoutId({ ...current, workoutIds: nextWorkoutIds })
+            ? getCycleNextWorkoutId({ ...current, workoutIds: nextWorkoutIds }) ?? undefined
             : nextWorkoutIds[0],
         };
       },
