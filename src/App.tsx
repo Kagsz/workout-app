@@ -132,6 +132,12 @@ type TrackerWorkoutCycle = {
   createdAt: string;
 };
 
+type TrackerDragPayload =
+  | { kind: "workoutExercise"; itemId: string; containerId: string }
+  | { kind: "cycleWorkout"; itemId: string; containerId: string }
+  | { kind: "workout"; itemId: string }
+  | { kind: "cycle"; itemId: string };
+
 type TrackerParsedMetricValue = {
   rawValue: string;
   numericValue: number | null;
@@ -917,9 +923,9 @@ const TRACKER_TUTORIAL_STEPS: TrackerTutorialStep[] = [
     title: "Build Cycles",
     body: "Build workout rotations using cycles.",
     detail: "Add workouts from your library, arrange them in order, and choose which workout is next.",
-    focus: "Create Cycle + Set Next Up",
+    focus: "Create Cycle + automatic Next Up",
     imageSrc: TRACKER_TUTORIAL_IMAGES.build_cycles,
-    imageAlt: "Cycle builder showing create cycle, add workout, ordering, and Set Next Up controls",
+    imageAlt: "Cycle builder showing cycle creation, workout ordering, and automatic Next Up progression",
   },
   {
     title: "Follow Your Routine",
@@ -6086,7 +6092,9 @@ export default function App() {
   const [trackerDataEditValues, setTrackerDataEditValues] = useState<Record<string, string>>({});
   const [graphViewerExerciseId, setGraphViewerExerciseId] = useState<string | null>(null);
   const [graphViewerWorkoutSlotId, setGraphViewerWorkoutSlotId] = useState<string | null>(null);
-  const [draggedWorkoutExerciseId, setDraggedWorkoutExerciseId] = useState<string | null>(null);
+  const [trackerDragPayload, setTrackerDragPayload] = useState<TrackerDragPayload | null>(null);
+  const [trackerDragOverTrash, setTrackerDragOverTrash] = useState(false);
+  const trackerDragPayloadRef = useRef<TrackerDragPayload | null>(null);
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
   const [premiumInputFocusedBlockId, setPremiumInputFocusedBlockId] = useState<string | null>(null);
@@ -10383,9 +10391,9 @@ export default function App() {
     );
   };
 
-  const archiveTrackerWorkout = (workoutId: string) => {
+  const archiveTrackerWorkout = (workoutId: string, skipConfirm = false) => {
     const workout = trackerWorkouts.find((item) => item.id === workoutId);
-    if (workout && !window.confirm(`Archive ${workout.name}?`)) return;
+    if (workout && !skipConfirm && !window.confirm(`Archive ${workout.name}?`)) return;
     applyTrackerWorkoutChange(
       workoutId,
       (current) => ({ ...current, archived: true }),
@@ -10397,6 +10405,7 @@ export default function App() {
       setScreen("openTracker");
       setTrackerTab("workouts");
     }
+    if (trackerWorkoutReturnCycleId) setTrackerWorkoutReturnCycleId(null);
   };
 
   const restoreTrackerWorkout = (workoutId: string) => {
@@ -10625,15 +10634,22 @@ export default function App() {
     );
   };
 
-  const archiveTrackerCycle = (cycleId: string) => {
+  const archiveTrackerCycle = (cycleId: string, skipConfirm = false) => {
     const cycle = trackerCycles.find((item) => item.id === cycleId);
-    if (cycle && !window.confirm(`Archive ${cycle.name}?`)) return;
+    if (cycle && !skipConfirm && !window.confirm(`Archive ${cycle.name}?`)) return;
     applyTrackerCycleChange(
       cycleId,
       (current) => ({ ...current, archived: true }),
       "metadata",
       `Archive cycle "${cycle?.name || "Unnamed cycle"}"`
     );
+    if (selectedTrackerCycleId === cycleId) setSelectedTrackerCycleId(null);
+    if (trackerWorkoutReturnCycleId === cycleId) {
+      setTrackerWorkoutReturnCycleId(null);
+      setSelectedTrackerWorkoutId(null);
+      setScreen("openTracker");
+      setTrackerTab("cycles");
+    }
   };
 
   const restoreTrackerCycle = (cycleId: string) => {
@@ -10781,16 +10797,6 @@ export default function App() {
     );
   };
 
-  const setCycleNextWorkout = (cycleId: string, workoutId: string) => {
-    const cycle = trackerCycles.find((item) => item.id === cycleId);
-    applyTrackerCycleChange(
-      cycleId,
-      (current) => ({ ...current, nextWorkoutId: workoutId, completedAt: undefined }),
-      "metadata",
-      `Set next workout for "${cycle?.name || "Unnamed cycle"}"`
-    );
-  };
-
   const addTrackerCycle = () => {
     if (!selectedMember) return;
     const name = newCycleName.trim();
@@ -10890,22 +10896,26 @@ export default function App() {
     );
   };
 
-  const moveCycleWorkout = (cycleId: string, workoutId: string, direction: -1 | 1) => {
+  const reorderCycleWorkoutToTarget = (cycleId: string, draggedWorkoutId: string, targetWorkoutId: string) => {
+    if (draggedWorkoutId === targetWorkoutId) return;
     const cycle = trackerCycles.find((item) => item.id === cycleId);
+
     applyTrackerCycleChange(
       cycleId,
       (current) => {
-        const index = current.workoutIds.indexOf(workoutId);
-        const nextIndex = index + direction;
-        if (index < 0 || nextIndex < 0 || nextIndex >= current.workoutIds.length) return current;
+        const draggedIndex = current.workoutIds.indexOf(draggedWorkoutId);
+        const targetIndex = current.workoutIds.indexOf(targetWorkoutId);
+        if (draggedIndex < 0 || targetIndex < 0) return current;
+
         const nextWorkoutIds = [...current.workoutIds];
-        const [moved] = nextWorkoutIds.splice(index, 1);
-        nextWorkoutIds.splice(nextIndex, 0, moved);
+        const [moved] = nextWorkoutIds.splice(draggedIndex, 1);
+        nextWorkoutIds.splice(targetIndex, 0, moved);
+
         return {
           ...current,
           workoutIds: nextWorkoutIds,
           nextWorkoutId: current.startedAt && !current.completedAt
-            ? current.nextWorkoutId
+            ? getCycleNextWorkoutId({ ...current, workoutIds: nextWorkoutIds })
             : nextWorkoutIds[0],
         };
       },
@@ -11005,6 +11015,82 @@ export default function App() {
   };
 
 
+  const beginTrackerDrag = (
+    event: React.PointerEvent<HTMLElement>,
+    payload: TrackerDragPayload
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    trackerDragPayloadRef.current = payload;
+    setTrackerDragPayload(payload);
+    setTrackerDragOverTrash(false);
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is best-effort; drag still resolves from pointer coordinates.
+    }
+  };
+
+  const moveTrackerDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (!trackerDragPayloadRef.current || typeof document === "undefined") return;
+    const target = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+    setTrackerDragOverTrash(Boolean(target?.closest('[data-tracker-trash-target="true"]')));
+  };
+
+  const finishTrackerDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const payload = trackerDragPayloadRef.current;
+    if (!payload) return;
+
+    const target = typeof document !== "undefined"
+      ? document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+      : null;
+    const droppedOnTrash = Boolean(target?.closest('[data-tracker-trash-target="true"]'));
+
+    if (droppedOnTrash) {
+      if (payload.kind === "workoutExercise") {
+        removeExerciseFromWorkout(payload.containerId, payload.itemId);
+      } else if (payload.kind === "cycleWorkout") {
+        removeWorkoutFromCycle(payload.containerId, payload.itemId);
+      } else if (payload.kind === "workout") {
+        archiveTrackerWorkout(payload.itemId, true);
+      } else if (payload.kind === "cycle") {
+        archiveTrackerCycle(payload.itemId, true);
+      }
+    } else if (payload.kind === "workoutExercise") {
+      const dropTarget = target?.closest("[data-workout-slot-id]") as HTMLElement | null;
+      const targetSlotId = dropTarget?.dataset.workoutSlotId || "";
+      const targetWorkoutId = dropTarget?.dataset.workoutId || "";
+      if (targetSlotId && targetWorkoutId === payload.containerId) {
+        reorderWorkoutExercises(payload.containerId, payload.itemId, targetSlotId);
+      }
+    } else if (payload.kind === "cycleWorkout") {
+      const dropTarget = target?.closest("[data-cycle-workout-id]") as HTMLElement | null;
+      const targetWorkoutId = dropTarget?.dataset.cycleWorkoutId || "";
+      const targetCycleId = dropTarget?.dataset.cycleId || "";
+      if (targetWorkoutId && targetCycleId === payload.containerId) {
+        reorderCycleWorkoutToTarget(payload.containerId, payload.itemId, targetWorkoutId);
+      }
+    }
+
+    trackerDragPayloadRef.current = null;
+    setTrackerDragPayload(null);
+    setTrackerDragOverTrash(false);
+  };
+
+  const cancelTrackerDrag = () => {
+    trackerDragPayloadRef.current = null;
+    setTrackerDragPayload(null);
+    setTrackerDragOverTrash(false);
+  };
+
+  const trackerGripProps = (payload: TrackerDragPayload) => ({
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => beginTrackerDrag(event, payload),
+    onPointerMove: moveTrackerDrag,
+    onPointerUp: finishTrackerDrag,
+    onPointerCancel: cancelTrackerDrag,
+  });
+
   const renderTrackerWorkoutCard = (workout: TrackerWorkout, cycleNextWorkoutId?: string | null, cycleContext?: TrackerWorkoutCycle | null) => {
     const normalized = normalizeTrackerWorkout(workout);
     const workoutSlots = normalized.exerciseSlots || [];
@@ -11023,6 +11109,17 @@ export default function App() {
     return (
       <div key={normalized.id} className={`rounded-2xl border p-3 ${cardClass}`}>
         <div className="flex items-center justify-between gap-3">
+          {!cycleContext ? (
+            <button
+              type="button"
+              aria-label={`Drag ${normalized.name}`}
+              title="Drag to archive"
+              className="touch-none cursor-grab select-none px-1 py-2 text-lg font-bold text-zinc-400 active:cursor-grabbing"
+              {...trackerGripProps({ kind: "workout", itemId: normalized.id })}
+            >
+              ☰
+            </button>
+          ) : null}
           <button onClick={() => openTrackerWorkout(normalized.id, cycleContext?.id || null)} className="flex flex-1 items-center gap-2 text-left">
             <span className="text-zinc-400">▶</span>
             <div>
@@ -11037,7 +11134,6 @@ export default function App() {
             </div>
           </button>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {cycleContext ? <SmallButton onClick={(event) => { event.stopPropagation(); setCycleNextWorkout(cycleContext.id, normalized.id); }}>Set Next Up</SmallButton> : null}
             {!cycleContext ? renderTrackerCircuitControl(normalized, true) : null}
             {!cycleContext ? <SmallButton onClick={(event) => { event.stopPropagation(); startTrackerWorkout(normalized.id); }}>{"Start"}</SmallButton> : null}
           </div>
@@ -14647,7 +14743,17 @@ export default function App() {
                                 const isActiveCycle = Boolean(cycle.startedAt && !cycle.completedAt);
                                 return (
                                   <div key={cycle.id} className={`rounded-2xl border p-3 ${hasIncomplete ? "border-amber-300 bg-amber-50" : isActiveCycle ? "border-sky-300 bg-sky-50" : "border-zinc-200 bg-zinc-50"}`}>
-                                    <button onClick={() => toggleExpandedTrackerCycle(cycle.id)} className="flex w-full items-center justify-between gap-3 text-left">
+                                    <div className="flex items-start gap-2">
+                                      <button
+                                        type="button"
+                                        aria-label={`Drag ${cycle.name}`}
+                                        title="Drag to archive"
+                                        className="touch-none cursor-grab select-none px-1 py-2 text-lg font-bold text-zinc-400 active:cursor-grabbing"
+                                        {...trackerGripProps({ kind: "cycle", itemId: cycle.id })}
+                                      >
+                                        ☰
+                                      </button>
+                                      <button onClick={() => toggleExpandedTrackerCycle(cycle.id)} className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left">
                                       <div className="flex min-w-0 items-center gap-2">
                                         <span className="text-zinc-400">{isExpanded ? "▼" : "▶"}</span>
                                         <div>
@@ -14663,6 +14769,7 @@ export default function App() {
                                         <SmallButton onClick={() => startTrackerCycle(cycle.id)}>{cycle.startedAt && !cycle.completedAt ? "Resume Cycle" : "Start Cycle"}</SmallButton>
                                       </span>
                                     </button>
+                                    </div>
                                     {isExpanded ? (
                                       <div className="mt-3 space-y-3">
                                         <div className="space-y-2">
@@ -14688,22 +14795,28 @@ export default function App() {
                                             return (
                                               <div
                                                 key={`${cycle.id}-${workoutId}-${index}`}
+                                                data-cycle-workout-id={workout.id}
+                                                data-cycle-id={cycle.id}
                                                 onClick={() => openTrackerWorkout(workout.id, cycle.id)}
                                                 className={`cursor-pointer rounded-xl border p-2 transition hover:border-zinc-400 ${cycleNextWorkoutId === workout.id && isActiveCycle ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
                                               >
-                                                <div className="flex items-center justify-between gap-2">
-                                                  <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                  <button
+                                                    type="button"
+                                                    aria-label={`Drag ${workout.name}`}
+                                                    title="Drag to reorder or remove from cycle"
+                                                    className="touch-none cursor-grab select-none px-1 py-2 text-lg font-bold text-zinc-400 active:cursor-grabbing"
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    {...trackerGripProps({ kind: "cycleWorkout", itemId: workout.id, containerId: cycle.id })}
+                                                  >
+                                                    ☰
+                                                  </button>
+                                                  <div className="min-w-0 flex-1">
                                                     <div className="flex flex-wrap items-center gap-2">
                                                       <span className="text-sm font-semibold text-zinc-900">{index + 1}. {workout.name}</span>
                                                       {cycleGapWorkoutId === workout.id ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">Incomplete</span> : null}
                                                       {cycleNextWorkoutId === workout.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                                     </div>
-                                                  </div>
-                                                  <div className="flex flex-wrap justify-end gap-1">
-                                                    <SmallButton onClick={(event) => { event.stopPropagation(); setCycleNextWorkout(cycle.id, workout.id); }}>Set Next Up</SmallButton>
-                                                    <SmallButton onClick={(event) => { event.stopPropagation(); moveCycleWorkout(cycle.id, workout.id, -1); }} disabled={index === 0}>↑</SmallButton>
-                                                    <SmallButton onClick={(event) => { event.stopPropagation(); moveCycleWorkout(cycle.id, workout.id, 1); }} disabled={index === cycle.workoutIds.length - 1}>↓</SmallButton>
-                                                    <SmallButton onClick={(event) => { event.stopPropagation(); removeWorkoutFromCycle(cycle.id, workout.id); }}>Remove</SmallButton>
                                                   </div>
                                                 </div>
                                               </div>
@@ -14721,8 +14834,6 @@ export default function App() {
                                             <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
                                               <SmallButton onClick={() => renameTrackerCycle(cycle.id)}>Edit Cycle</SmallButton>
                                               {cycle.startedAt && !cycle.completedAt ? <SmallButton onClick={() => markTrackerCycleComplete(cycle.id)}>Mark Cycle Complete</SmallButton> : null}
-                                              <SmallButton onClick={() => archiveTrackerCycle(cycle.id)}>Archive Cycle</SmallButton>
-                                              <button onClick={() => deleteTrackerCyclePermanently(cycle.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete Cycle</button>
                                             </div>
                                           ) : null}
                                         </div>
@@ -14920,19 +15031,21 @@ export default function App() {
                               <div
                                 key={slot.id}
                                 id={isNextWorkoutSlot ? "tracker-workout-slot-next-up" : undefined}
-                                draggable
-                                onDragStart={() => setDraggedWorkoutExerciseId(slot.id)}
-                                onDragOver={(event) => event.preventDefault()}
-                                onDrop={() => {
-                                  if (draggedWorkoutExerciseId) reorderWorkoutExercises(selectedTrackerWorkout.id, draggedWorkoutExerciseId, slot.id);
-                                  setDraggedWorkoutExerciseId(null);
-                                }}
-                                onDragEnd={() => setDraggedWorkoutExerciseId(null)}
+                                data-workout-slot-id={slot.id}
+                                data-workout-id={selectedTrackerWorkout.id}
                                 className={`rounded-2xl border p-3 ${isNextWorkoutSlot ? (selectedWorkoutGuidance.tone === "amber" ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50") : (isCompleteThisSession ? "border-zinc-200 bg-zinc-50" : "border-zinc-200 bg-white")}`}
                               >
                                 <div className="space-y-3">
                                   <div className="flex items-start gap-2">
-                                    <span className="cursor-grab pt-0.5 text-zinc-400" title="Drag to reorder">☰</span>
+                                    <button
+                                      type="button"
+                                      aria-label={`Drag ${exercise.name}`}
+                                      title="Drag to reorder or remove from workout"
+                                      className="touch-none cursor-grab select-none px-1 py-1 text-lg font-bold text-zinc-400 active:cursor-grabbing"
+                                      {...trackerGripProps({ kind: "workoutExercise", itemId: slot.id, containerId: selectedTrackerWorkout.id })}
+                                    >
+                                      ☰
+                                    </button>
                                     <button onClick={() => toggleExpandedWorkoutSlot(slot.id)} className="flex min-w-0 flex-1 items-start gap-2 text-left">
                                       <span className="pt-0.5 text-zinc-400">{isWorkoutSlotExpanded ? "▼" : "▶"}</span>
                                       <div className="min-w-0 flex-1">
@@ -14967,8 +15080,6 @@ export default function App() {
                       {expandedTrackerOptionsIds.includes(`workout-options-${selectedTrackerWorkout.id}`) ? (
                         <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-3">
                           <SmallButton onClick={() => renameTrackerWorkout(selectedTrackerWorkout.id)}>Edit Workout</SmallButton>
-                          <SmallButton onClick={() => archiveTrackerWorkout(selectedTrackerWorkout.id)}>Archive Workout</SmallButton>
-                          <button onClick={() => deleteTrackerWorkoutPermanently(selectedTrackerWorkout.id)} className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">Delete Workout</button>
                         </div>
                       ) : null}
                     </div>
@@ -14984,6 +15095,24 @@ export default function App() {
                   </div>
                 </SectionCard>
               )}
+
+              {trackerDragPayload ? (
+                <div
+                  data-tracker-trash-target="true"
+                  className={`fixed right-4 top-4 z-[70] flex h-20 w-20 items-center justify-center rounded-2xl border-2 text-center shadow-xl transition ${
+                    trackerDragOverTrash
+                      ? "scale-110 border-red-700 bg-red-600 text-white"
+                      : "border-red-300 bg-red-50 text-red-700"
+                  }`}
+                >
+                  <div className="pointer-events-none">
+                    <div className="text-2xl">🗑️</div>
+                    <div className="mt-1 text-[10px] font-bold uppercase tracking-wide">
+                      {trackerDragPayload.kind === "workoutExercise" || trackerDragPayload.kind === "cycleWorkout" ? "Remove" : "Archive"}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <TrackerTutorialModal
                 isOpen={showTrackerTutorial}
