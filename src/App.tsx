@@ -17,7 +17,7 @@ type Role = "admin" | "trainer" | "member";
 type Screen = "account" | "diagnostics" | "members" | "memberOverview" | "adminPrograms" | "programView" | "builder" | "input" | "adminDash" | "memberHome" | "openTracker" | "trackerWorkouts" | "trackerWorkoutBuilder" | "trainerSupport" | "memberInput" | "programs" | "routines" | "routine" | "graph";
 type BuilderSource = "memberOverview" | "adminPrograms";
 type MemberPlan = "basic" | "direct" | "premium";
-type ProgramInputMode = "trainerInput" | "memberInput";
+type ProgramInputMode = "trainerInput" | "memberInput" | "eitherInput";
 type BlockType = "paired" | "single";
 type GraphAxis = "date" | "session";
 
@@ -948,10 +948,12 @@ const DEFAULT_PROGRAM_LENGTH = 8;
 const getDefaultProgramInputModeForMember = (member?: Member | null): ProgramInputMode =>
   (member?.memberPlan || "direct") === "premium" ? "memberInput" : "trainerInput";
 
-const getProgramInputMode = (program: Program | null | undefined, member?: Member | null): ProgramInputMode => program?.inputMode || getDefaultProgramInputModeForMember(member);
-
-const canMemberEnterProgramResults = (program: Program | null | undefined, member?: Member | null) =>
-  !!program && !!member && (member.memberPlan === "premium" || getProgramInputMode(program, member) === "memberInput");
+const getProgramInputMode = (program: Program | null | undefined, member?: Member | null): ProgramInputMode =>
+  program?.inputMode === "memberInput" || program?.inputMode === "eitherInput"
+    ? program.inputMode
+    : program?.inputMode === "trainerInput"
+      ? "trainerInput"
+      : getDefaultProgramInputModeForMember(member);
 
 const MUSCLE_GROUP_OPTIONS: MuscleGroup[] = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Forearm/Wrist", "Hand/Grip", "Legs", "Upper Body", "Lower Body", "Core", "Cardio", "Full Body", "Other"];
 const MUSCLE_GROUP_ANATOMICAL_ORDER: MuscleGroup[] = ["Shoulders", "Chest", "Back", "Upper Body", "Biceps", "Triceps", "Forearm/Wrist", "Hand/Grip", "Core", "Full Body", "Lower Body", "Legs", "Cardio", "Other"];
@@ -6096,6 +6098,7 @@ export default function App() {
   const [memberInputDraft, setMemberInputDraft] = useState<SessionDraft | null>(null);
   const [editingMemberInputSessionId, setEditingMemberInputSessionId] = useState<string | null>(null);
   const [premiumInputFocusedBlockId, setPremiumInputFocusedBlockId] = useState<string | null>(null);
+  const [pendingProgramBlockConfirmationId, setPendingProgramBlockConfirmationId] = useState<string | null>(null);
   const [premiumMetricPicker, setPremiumMetricPicker] = useState<{ routineId: string; blockId: string; exerciseId: string; fieldId: string; query: string } | null>(null);
   const [premiumModePicker, setPremiumModePicker] = useState<{ routineId: string; blockId: string; exerciseId: string; fieldId: string } | null>(null);
   const [showTrackerTutorial, setShowTrackerTutorial] = useState(false);
@@ -8107,30 +8110,59 @@ export default function App() {
 
 
 
-  const premiumProgramInputActive = canMemberEnterProgramResults(selectedProgram, selectedMember);
+  const activeProgramInputMode = getProgramInputMode(selectedProgram, selectedMember);
+  const isTrainerSideProgramInput = role === "admin" || role === "trainer";
+  const canCurrentUserEnterProgramResults =
+    !!selectedProgram &&
+    !!selectedMember &&
+    (isTrainerSideProgramInput
+      ? activeProgramInputMode === "trainerInput" || activeProgramInputMode === "eitherInput"
+      : activeProgramInputMode === "memberInput" || activeProgramInputMode === "eitherInput");
+  const canCurrentUserEditSavedProgramResults = isTrainerSideProgramInput;
 
   const getSessionSortTime = (session: SavedSession) =>
     Math.max(getSafeDateTime(session.date || ""), getSafeDateTime(session.createdAt || ""));
 
-  const getBlockOutcomeValue = (block: Block, entry?: SessionExerciseInput) => {
-    if (!entry) return "";
-    return block.type === "single" ? String(entry.performance || "").trim() : String(entry.setsCompleted || "").trim();
-  };
-
   const isBlockCompleteInSession = (block: Block, session?: SavedSession | null) => {
     if (!session) return false;
-
     const savedBlock = session.blocks.find((item) => item.blockId === block.id);
     if (!savedBlock) return false;
 
     return block.exercises.every((exercise) => {
       const savedEntry = savedBlock.entries.find((entry) => entry.exerciseId === exercise.id);
-      return !!getBlockOutcomeValue(block, savedEntry);
+      if (!savedEntry) return false;
+      const inputFields = getExerciseInputFields(exercise, block.type);
+      if (!inputFields.length) return true;
+      return inputFields.every((field) =>
+        String(getSessionEntryValueForMetric(savedEntry, field.metric, block.type) || "").trim().length > 0
+      );
     });
   };
 
+  const isProgramSessionComplete = (program: Program, session: SavedSession) => {
+    const routine = program.routines.find((item) => item.id === session.routineId);
+    return !!routine && routine.blocks.every((block) => isBlockCompleteInSession(block, session));
+  };
+
+  const getCompletedProgramSessionCount = (program: Program, memberId?: string | null) =>
+    savedSessions.filter(
+      (session) =>
+        session.programId === program.id &&
+        (!memberId || session.memberId === memberId) &&
+        isProgramSessionComplete(program, session)
+    ).length;
+
+  const getCompletedRoutineSessionCount = (program: Program, routineId: string, memberId?: string | null) =>
+    savedSessions.filter(
+      (session) =>
+        session.programId === program.id &&
+        session.routineId === routineId &&
+        (!memberId || session.memberId === memberId) &&
+        isProgramSessionComplete(program, session)
+    ).length;
+
   const selectedProgramPlannedTotal = selectedProgram ? getProgramPlannedSessionTotal(selectedProgram) : 0;
-  const selectedProgramCompletedTotal = selectedProgram ? getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id) : 0;
+  const selectedProgramCompletedTotal = selectedProgram ? getCompletedProgramSessionCount(selectedProgram, selectedMember?.id) : 0;
   const selectedProgramIsComplete = selectedProgramPlannedTotal > 0 && selectedProgramCompletedTotal >= selectedProgramPlannedTotal;
 
   const nextRoutineId = useMemo(() => {
@@ -8139,7 +8171,12 @@ export default function App() {
     if (selectedProgramIsComplete) return null;
 
     const memberProgramSessions = savedSessions
-      .filter((session) => session.programId === selectedProgram.id && session.memberId === selectedMember.id)
+      .filter(
+        (session) =>
+          session.programId === selectedProgram.id &&
+          session.memberId === selectedMember.id &&
+          isProgramSessionComplete(selectedProgram, session)
+      )
       .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a));
 
     const latestSession = memberProgramSessions[0];
@@ -8152,7 +8189,7 @@ export default function App() {
   }, [savedSessions, selectedMember, selectedProgram, selectedProgramIsComplete]);
 
   const latestSelectedRoutineSession = useMemo(() => {
-    if (!premiumProgramInputActive || !selectedProgram || !selectedRoutine || !selectedMember) return null;
+    if (!selectedProgram || !selectedRoutine || !selectedMember) return null;
 
     return savedSessions
       .filter(
@@ -8162,14 +8199,14 @@ export default function App() {
           session.memberId === selectedMember.id
       )
       .sort((a, b) => getSessionSortTime(b) - getSessionSortTime(a))[0] || null;
-  }, [premiumProgramInputActive, savedSessions, selectedMember, selectedProgram, selectedRoutine]);
+  }, [savedSessions, selectedMember, selectedProgram, selectedRoutine]);
 
-  const premiumNextBlockId = useMemo(() => {
-    if (!premiumProgramInputActive || !selectedRoutine || !selectedRoutine.blocks.length) return null;
-
-    const firstIncompleteBlock = selectedRoutine.blocks.find((block) => !isBlockCompleteInSession(block, latestSelectedRoutineSession));
-    return firstIncompleteBlock?.id || null;
-  }, [premiumProgramInputActive, selectedRoutine, latestSelectedRoutineSession]);
+  const activeSelectedRoutineInputSession =
+    latestSelectedRoutineSession &&
+    selectedRoutine &&
+    !selectedRoutine.blocks.every((block) => isBlockCompleteInSession(block, latestSelectedRoutineSession))
+      ? latestSelectedRoutineSession
+      : null;
 
   const graphData = useMemo<GraphSeries[]>(() => {
     if (!selectedBlock || !selectedRoutine || !selectedProgram || !selectedMember) return [];
@@ -8563,7 +8600,7 @@ export default function App() {
               notes: String(row.notes || ""),
               memberId,
               programLength: row.program_length == null ? undefined : Number(row.program_length),
-              inputMode: row.input_mode === "memberInput" ? "memberInput" : "trainerInput",
+              inputMode: row.input_mode === "memberInput" ? "memberInput" : row.input_mode === "eitherInput" ? "eitherInput" : "trainerInput",
             });
           });
 
@@ -11548,7 +11585,7 @@ export default function App() {
       };
     }
 
-    const nextSessionNumber = String(getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember.id) + 1);
+    const nextSessionNumber = String(getCompletedProgramSessionCount(selectedProgram, selectedMember.id) + 1);
     const draft = createSessionDraft(selectedProgram.id, selectedRoutine, selectedMember.id);
     return {
       ...draft,
@@ -11576,17 +11613,11 @@ export default function App() {
     const draft = createMemberInputDraft(existingSession || null);
     if (!draft) return;
 
-    const nextFocusBlockId = focusBlockId || premiumNextBlockId || selectedRoutine?.blocks[0]?.id || null;
     setMemberInputDraft(draft);
     setEditingMemberInputSessionId(existingSession?.id || null);
-    setPremiumInputFocusedBlockId(nextFocusBlockId);
+    setPremiumInputFocusedBlockId(focusBlockId || selectedRoutine?.blocks[0]?.id || null);
+    setPendingProgramBlockConfirmationId(null);
     setScreen("memberInput");
-
-    if (nextFocusBlockId && typeof window !== "undefined") {
-      window.setTimeout(() => {
-        document.getElementById(`premium-input-block-${nextFocusBlockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 120);
-    }
   };
 
   const updateMemberInputDraftField = (field: "date" | "sessionNumber", value: string) => {
@@ -11615,7 +11646,7 @@ export default function App() {
     });
   };
 
-  const saveMemberInputSession = (focusNextBlock = false, sourceBlockId?: string) => {
+  const saveMemberInputSession = () => {
     if (!memberInputDraft || !selectedProgram || !selectedRoutine || !selectedMember) return;
 
     const trimmedDate = memberInputDraft.date.trim();
@@ -11645,18 +11676,27 @@ export default function App() {
 
     setEditingMemberInputSessionId(savedSession.id);
     setMemberInputDraft(createMemberInputDraft(savedSession));
+    setPendingProgramBlockConfirmationId(null);
+    setScreen("routine");
+  };
 
-    if (focusNextBlock) {
-      const currentIndex = selectedRoutine.blocks.findIndex((block) => block.id === sourceBlockId);
-      const nextBlock = selectedRoutine.blocks[currentIndex + 1] || selectedRoutine.blocks[0] || null;
-      const nextBlockId = nextBlock?.id || null;
-      setPremiumInputFocusedBlockId(nextBlockId);
-      if (nextBlockId && typeof window !== "undefined") {
-        window.setTimeout(() => {
-          document.getElementById(`premium-input-block-${nextBlockId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 120);
-      }
+  const requestProgramBlockConfirmation = (blockId: string) => {
+    if (!memberInputDraft || !selectedRoutine) return;
+    const block = selectedRoutine.blocks.find((item) => item.id === blockId);
+    const draftBlock = memberInputDraft.blocks.find((item) => item.blockId === blockId);
+    if (!block || !draftBlock) return;
+
+    const hasAllRequiredInputs = block.exercises.every((exercise) => {
+      const draftEntry = draftBlock.entries.find((entry) => entry.exerciseId === exercise.id);
+      return getExerciseInputFields(exercise, block.type).every((field) =>
+        String(getSessionEntryValueForMetric(draftEntry, field.metric, block.type) || "").trim().length > 0
+      );
+    });
+    if (!hasAllRequiredInputs) {
+      window.alert("Complete all input fields in this block before continuing.");
+      return;
     }
+    setPendingProgramBlockConfirmationId(blockId);
   };
 
   const replaceProgramSessionsInSupabase = async (
@@ -13404,7 +13444,7 @@ export default function App() {
                                   <div>Sessions / Routine</div>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                  <div className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
+                                  <div className="font-semibold text-zinc-900">{getCompletedProgramSessionCount(activeAdminProgram, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)}</div>
                                   <div>Total Sessions</div>
                                 </div>
                               </div>
@@ -13486,7 +13526,7 @@ export default function App() {
                             >
                               <div className="font-semibold text-zinc-900">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getCompletedProgramSessionCount(program, selectedMember.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </button>
                             <div className={`text-xs font-semibold uppercase tracking-wide ${
                               program.status === "active"
@@ -13572,7 +13612,7 @@ export default function App() {
                           <div>Sessions / Routine</div>
                         </div>
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
-                          <div className="text-base font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
+                          <div className="text-base font-semibold text-zinc-900">{getCompletedProgramSessionCount(selectedProgram, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</div>
                           <div>Total Sessions</div>
                         </div>
                       </div>
@@ -13674,8 +13714,9 @@ export default function App() {
                             >
                               <option value="trainerInput">Trainer Input</option>
                               <option value="memberInput">Member Input</option>
+                              <option value="eitherInput">Either</option>
                             </select>
-                            <div className="mt-1 text-xs text-zinc-500">Direct members typically use Trainer Input. Premium members can use Member Input.</div>
+                            <div className="mt-1 text-xs text-zinc-500">Choose who may enter results for this program: Trainer, Member, or Either.</div>
                           </div>
                           <div>
                             <Label>Program Notes</Label>
@@ -14147,7 +14188,7 @@ export default function App() {
                               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Current Program</div>
                               <div className="mt-1 text-lg font-semibold text-zinc-900">{activeAdminProgram.name}</div>
                               <div className="mt-1 text-sm text-zinc-500">
-                                {getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)} sessions complete
+                                {getCompletedProgramSessionCount(activeAdminProgram, selectedMember.id)} / {getProgramPlannedSessionTotal(activeAdminProgram)} sessions complete
                               </div>
                             </div>
                             <div className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
@@ -14162,7 +14203,7 @@ export default function App() {
                                 width: `${Math.min(
                                   100,
                                   Math.round(
-                                    (getProgramSessionCount(savedSessions, activeAdminProgram.id, selectedMember.id) /
+                                    (getCompletedProgramSessionCount(activeAdminProgram, selectedMember.id) /
                                       Math.max(1, getProgramPlannedSessionTotal(activeAdminProgram))) *
                                       100
                                   )
@@ -15201,7 +15242,7 @@ export default function App() {
                             <div>
                               <div className="text-lg font-semibold">{program.name}</div>
                               <div className="text-sm text-zinc-500">Started {program.startedAt}</div>
-                              <div className="mt-1 text-xs text-zinc-500">Progress: {getProgramSessionCount(savedSessions, program.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
+                              <div className="mt-1 text-xs text-zinc-500">Progress: {getCompletedProgramSessionCount(program, selectedMember?.id)} / {getProgramPlannedSessionTotal(program)} sessions</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -15220,7 +15261,7 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="text-sm text-zinc-600">Members choose a routine inside the selected program.</div>
                     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-                      Program Progress: <span className="font-semibold text-zinc-900">{getProgramSessionCount(savedSessions, selectedProgram.id, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
+                      Program Progress: <span className="font-semibold text-zinc-900">{getCompletedProgramSessionCount(selectedProgram, selectedMember?.id)} / {getProgramPlannedSessionTotal(selectedProgram)}</span> sessions complete • <span className="font-semibold text-zinc-900">{getProgramLength(selectedProgram)}</span> sessions per routine
                     </div>
                     {selectedProgramIsComplete ? (
                       <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">Program Complete</div>
@@ -15241,7 +15282,7 @@ export default function App() {
                                   {isNextRoutine ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
                                 </div>
                                 <div className="text-sm text-zinc-500">{routine.blocks.length} blocks</div>
-                                <div className="mt-1 text-xs text-zinc-500">Progress: {getRoutineSessionCount(savedSessions, selectedProgram.id, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
+                                <div className="mt-1 text-xs text-zinc-500">Progress: {getCompletedRoutineSessionCount(selectedProgram, routine.id, selectedMember?.id)} / {getProgramLength(selectedProgram)} sessions</div>
                               </div>
                               <div className="flex flex-col items-end gap-1">
                                 <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Status</div>
@@ -15256,148 +15297,201 @@ export default function App() {
                 </SectionCard>
               )}
 
-              {screen === "routine" && selectedRoutine && (
+              {screen === "routine" && selectedRoutine && selectedProgram && (
                 <SectionCard title={selectedRoutine.label}>
                   <div className="space-y-3">
-                    {selectedRoutine.blocks.map((block) =>
-                      canMemberEnterProgramResults(selectedProgram, selectedMember) ? (() => {
-                        const isNextBlock = premiumProgramInputActive && block.id === premiumNextBlockId;
-                        return (
-                          <div key={block.id} className={`w-full rounded-2xl border p-4 text-left ${isNextBlock ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-zinc-50"}`}>
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="text-lg font-semibold">{block.title}</div>
-                                  {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
-                                  {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
-                                  {isNextBlock ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
-                                </div>
-                                <div className="mt-2 space-y-1 text-sm text-zinc-600">
-                                  {block.exercises.map((exercise, index) => (
-                                    <div key={exercise.id}>Exercise {index + 1}: {exercise.name} — Target: {getExerciseTargetFields(exercise, block.type).map(formatPremiumFieldLabel).join(" • ") || `${exercise.target || "—"} ${exercise.metric || ""}`.trim()}</div>
-                                  ))}
-                                </div>
-                                {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
+                    {selectedRoutine.blocks.map((block) => {
+                      const blockHasSavedData = !!activeSelectedRoutineInputSession && isBlockCompleteInSession(block, activeSelectedRoutineInputSession);
+                      const canOpenInput =
+                        canCurrentUserEnterProgramResults ||
+                        (blockHasSavedData && canCurrentUserEditSavedProgramResults);
+                      const inputLabel =
+                        blockHasSavedData && !canCurrentUserEditSavedProgramResults ? "View Data" : blockHasSavedData ? "Edit Data" : "Input Data";
+
+                      return (
+                        <div key={block.id} className="w-full overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50">
+                          <div className="grid grid-cols-[minmax(0,1fr)_104px]">
+                            <div className="p-4 text-left">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-lg font-semibold">{block.title}</div>
+                                {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                                {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
                               </div>
-                            </div>
-                            <div className="mt-3 grid grid-cols-2 gap-2">
-                              <SmallButton onClick={() => openMemberInputScreen(latestSelectedRoutineSession, block.id)}>Input Data</SmallButton>
-                              <SmallButton onClick={() => openGraph(selectedRoutine.id, block.id)}>View Graph</SmallButton>
-                            </div>
-                          </div>
-                        );
-                      })() : (
-                        <button key={block.id} onClick={() => openGraph(selectedRoutine.id, block.id)} className="w-full rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-400 hover:bg-white">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-lg font-semibold">{block.title}</div>
                               <div className="mt-2 space-y-1 text-sm text-zinc-600">
-                                {block.exercises.map((exercise) => (
-                                  <div key={exercise.id}>{exercise.name} — Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                {block.exercises.map((exercise, index) => (
+                                  <div key={exercise.id}>
+                                    {block.exercises.length > 1 ? `Exercise ${index + 1}: ` : ""}
+                                    {exercise.name} — Target: {getExerciseTargetFields(exercise, block.type).map(formatPremiumFieldLabel).join(" • ") || `${exercise.target || "—"} ${exercise.metric || ""}`.trim()}
+                                  </div>
                                 ))}
                               </div>
                               {!!block.notes && <div className="mt-3 text-sm text-zinc-500">{block.notes}</div>}
                             </div>
-                            <div className="text-sm font-medium text-zinc-600">Tap to view graph</div>
+
+                            <div className="grid grid-rows-2 border-l border-zinc-200 bg-white">
+                              <button
+                                type="button"
+                                onClick={() => openGraph(selectedRoutine.id, block.id)}
+                                className="flex min-h-[64px] items-center justify-center border-b border-zinc-200 px-2 text-center text-sm font-bold text-zinc-800 transition hover:bg-zinc-100"
+                              >
+                                View Graph
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!canOpenInput}
+                                onClick={() => openMemberInputScreen(activeSelectedRoutineInputSession, block.id)}
+                                className="flex min-h-[64px] items-center justify-center px-2 text-center text-sm font-bold text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:text-zinc-300"
+                              >
+                                {canOpenInput ? inputLabel : "No Input"}
+                              </button>
+                            </div>
                           </div>
-                        </button>
-                      )
-                    )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </SectionCard>
               )}
-
 
               {screen === "memberInput" && selectedProgram && selectedRoutine && memberInputDraft && (
-                <SectionCard title={`${selectedRoutine.label} Results`}>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-[minmax(0,2fr)_minmax(80px,1fr)] gap-3">
-                      <div>
-                        <Label>Date</Label>
-                        <TextInput
-                          type="date"
-                          value={memberInputDraft.date}
-                          onChange={(e) => updateMemberInputDraftField("date", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label>Session #</Label>
-                        <TextInput
-                          value={memberInputDraft.sessionNumber}
-                          onChange={(e) => updateMemberInputDraftField("sessionNumber", e.target.value)}
-                          placeholder="Session number"
-                        />
-                      </div>
-                    </div>
+                <SectionCard title={`${selectedRoutine.label} • Data Input`}>
+                  {(() => {
+                    const block = selectedRoutine.blocks.find((item) => item.id === premiumInputFocusedBlockId) || null;
+                    const draftBlock = block ? memberInputDraft.blocks.find((item) => item.blockId === block.id) : null;
+                    const savedSession = savedSessions.find((session) => session.id === editingMemberInputSessionId) || null;
+                    const savedBlockExists = !!block && isBlockCompleteInSession(block, savedSession);
+                    const memberViewOnly = role === "member" && savedBlockExists;
 
-                    {getExistingMemberInputSession(memberInputDraft) ? (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                        Session #{memberInputDraft.sessionNumber} already has a saved entry for this routine. Saving from this screen will intentionally update that existing session.
-                      </div>
-                    ) : null}
+                    if (!block || !draftBlock) {
+                      return <div className="text-sm text-zinc-500">Select a block from the Day screen.</div>;
+                    }
 
-                    <div className="space-y-4">
-                      {selectedRoutine.blocks.map((block) => {
-                        const draftBlock = memberInputDraft.blocks.find((item) => item.blockId === block.id);
-                        return (
-                          <div
-                            key={block.id}
-                            id={`premium-input-block-${block.id}`}
-                            className={`rounded-2xl border p-4 ${premiumInputFocusedBlockId === block.id ? "border-emerald-300 bg-emerald-50" : "border-zinc-200 bg-white"}`}
-                          >
-                            <div className="mb-3 flex flex-wrap items-center gap-2">
-                              <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
-                              {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
-                              {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
-                              {premiumInputFocusedBlockId === block.id ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">Next Up</span> : null}
-                              {!!block.notes && <div className="basis-full text-sm text-zinc-500">{block.notes}</div>}
-                            </div>
-
-                            <div className="space-y-3">
-                              {block.exercises.map((exercise) => {
-                                const draftEntry = draftBlock?.entries.find((entry) => entry.exerciseId === exercise.id);
-                                return (
-                                  <div key={exercise.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                                    <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
-                                    <div className="mt-2 space-y-1 text-sm text-zinc-600">
-                                      {getExerciseTargetFields(exercise, block.type).length ? (
-                                        getExerciseTargetFields(exercise, block.type).map((field) => (
-                                          <div key={field.id}>Target: {formatPremiumFieldLabel(field)}</div>
-                                        ))
-                                      ) : (
-                                        <div>Target: {exercise.target || "—"} {exercise.metric || ""}</div>
-                                      )}
-                                    </div>
-                                    <div className="mt-3 grid grid-cols-2 gap-3">
-                                      {getExerciseInputFields(exercise, block.type).map((field) => (
-                                        <div key={field.id}>
-                                          <Label>{field.metric || "Outcome"}</Label>
-                                          <TextInput
-                                            value={getSessionEntryValueForMetric(draftEntry, field.metric, block.type)}
-                                            onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value, field.metric)}
-                                            placeholder={`${field.metric || "Outcome"} input`}
-                                          />
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            <div className="mt-4">
-                              <SmallButton onClick={() => saveMemberInputSession(true, block.id)} className="w-full">
-                                Save Block / Next Block
-                              </SmallButton>
-                            </div>
+                    return (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-[minmax(0,2fr)_minmax(80px,1fr)] gap-3">
+                          <div>
+                            <Label>Date</Label>
+                            <TextInput
+                              type="date"
+                              value={memberInputDraft.date}
+                              readOnly={memberViewOnly}
+                              onChange={(e) => updateMemberInputDraftField("date", e.target.value)}
+                            />
                           </div>
-                        );
-                      })}
-                    </div>
+                          <div>
+                            <Label>Session #</Label>
+                            <TextInput value={memberInputDraft.sessionNumber} readOnly />
+                          </div>
+                        </div>
 
-                    <PrimaryButton onClick={() => saveMemberInputSession(false)} className="w-full">Save Results</PrimaryButton>
-                  </div>
+                        {memberViewOnly ? (
+                          <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                            Saved program data is view-only for members. A trainer can make corrections if needed.
+                          </div>
+                        ) : null}
+
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="mb-3 flex flex-wrap items-center gap-2">
+                            <div className="text-lg font-semibold text-zinc-900">{block.title}</div>
+                            {formatDurationShort(block.duration) ? <span className="text-sm font-semibold text-zinc-500">{formatDurationShort(block.duration)}</span> : null}
+                            {getBlockInteractionLabel(block) ? <span className="text-sm font-semibold text-zinc-500">{getBlockInteractionLabel(block)}</span> : null}
+                            {!!block.notes && <div className="basis-full text-sm text-zinc-500">{block.notes}</div>}
+                          </div>
+
+                          <div className="space-y-3">
+                            {block.exercises.map((exercise) => {
+                              const draftEntry = draftBlock.entries.find((entry) => entry.exerciseId === exercise.id);
+                              return (
+                                <div key={exercise.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                                  <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                  <div className="mt-2 space-y-1 text-sm text-zinc-600">
+                                    {getExerciseTargetFields(exercise, block.type).length ? (
+                                      getExerciseTargetFields(exercise, block.type).map((field) => (
+                                        <div key={field.id}>{field.metric || "Target"}: <span className="font-semibold">{field.value || "—"}</span></div>
+                                      ))
+                                    ) : (
+                                      <div>Target: {exercise.target || "—"} {exercise.metric || ""}</div>
+                                    )}
+                                  </div>
+                                  <div className="mt-3 grid grid-cols-2 gap-3">
+                                    {getExerciseInputFields(exercise, block.type).map((field) => (
+                                      <div key={field.id}>
+                                        <Label>{field.metric || "Outcome"}</Label>
+                                        <TextInput
+                                          value={getSessionEntryValueForMetric(draftEntry, field.metric, block.type)}
+                                          readOnly={memberViewOnly}
+                                          onChange={(e) => updateMemberInputOutcome(block.id, exercise.id, e.target.value, field.metric)}
+                                          placeholder={`${field.metric || "Outcome"} input`}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <SmallButton onClick={() => { setPendingProgramBlockConfirmationId(null); setScreen("routine"); }}>Cancel</SmallButton>
+                          {!memberViewOnly ? (
+                            <PrimaryButton onClick={() => requestProgramBlockConfirmation(block.id)}>Enter</PrimaryButton>
+                          ) : (
+                            <PrimaryButton onClick={() => setScreen("routine")}>Done</PrimaryButton>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </SectionCard>
               )}
+
+              {pendingProgramBlockConfirmationId && memberInputDraft && selectedRoutine && (() => {
+                const block = selectedRoutine.blocks.find((item) => item.id === pendingProgramBlockConfirmationId);
+                const draftBlock = memberInputDraft.blocks.find((item) => item.blockId === pendingProgramBlockConfirmationId);
+                if (!block || !draftBlock) return null;
+
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5">
+                    <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl">
+                      <div className="text-lg font-bold text-zinc-900">Confirm Entry</div>
+                      <div className="mt-1 text-sm text-zinc-500">Are these inputs correct?</div>
+                      <div className="mt-4 rounded-2xl bg-zinc-50 p-4">
+                        <div className="mb-1 font-semibold text-zinc-900">{block.title}</div>
+                        <div className="mb-3 text-sm text-zinc-600">Date: {memberInputDraft.date} • Session #{memberInputDraft.sessionNumber}</div>
+                        <div className="space-y-3">
+                          {block.exercises.map((exercise) => {
+                            const entry = draftBlock.entries.find((item) => item.exerciseId === exercise.id);
+                            return (
+                              <div key={exercise.id} className="border-t border-zinc-200 pt-2 first:border-t-0 first:pt-0">
+                                <div className="text-sm font-semibold text-zinc-900">{exercise.name}</div>
+                                <div className="mt-1 space-y-1 text-sm text-zinc-700">
+                                  {getExerciseTargetFields(exercise, block.type).map((field) => (
+                                    <div key={field.id} className="flex justify-between gap-3">
+                                      <span>{field.metric || "Target"}</span>
+                                      <span className="font-semibold">{field.value || "—"}</span>
+                                    </div>
+                                  ))}
+                                  {getExerciseInputFields(exercise, block.type).map((field) => (
+                                    <div key={field.id} className="flex justify-between gap-3">
+                                      <span>{field.metric || "Outcome"}</span>
+                                      <span className="font-semibold">{getSessionEntryValueForMetric(entry, field.metric, block.type) || "—"}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="mt-5 grid grid-cols-2 gap-3">
+                        <SmallButton onClick={() => setPendingProgramBlockConfirmationId(null)}>Cancel</SmallButton>
+                        <PrimaryButton onClick={saveMemberInputSession}>Confirm</PrimaryButton>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {screen === "graph" && selectedRoutine && selectedBlock && (
                 <SectionCard title={`${selectedRoutine.label} • ${selectedBlock.title}`}>
