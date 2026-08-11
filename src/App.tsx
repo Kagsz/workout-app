@@ -1394,35 +1394,6 @@ const normalizeProgram = (program: Program): Program => ({
 const getProgramPlannedSessionTotal = (program: Program | null | undefined) =>
   getProgramLength(program) * (program?.routines.length || 0);
 
-const getProgramSessionCount = (sessions: SavedSession[], programId: string, memberId?: string | null) => {
-  const sessionNumbers = new Set<string>();
-
-  sessions.forEach((session) => {
-    if (session.programId !== programId) return;
-    if (memberId && session.memberId !== memberId) return;
-
-    const normalized = String(session.sessionNumber || "").trim();
-    sessionNumbers.add(normalized || session.id);
-  });
-
-  return sessionNumbers.size;
-};
-
-const getRoutineSessionCount = (sessions: SavedSession[], programId: string, routineId: string, memberId?: string | null) => {
-  const sessionNumbers = new Set<string>();
-
-  sessions.forEach((session) => {
-    if (session.programId !== programId) return;
-    if (session.routineId !== routineId) return;
-    if (memberId && session.memberId !== memberId) return;
-
-    const normalized = String(session.sessionNumber || "").trim();
-    sessionNumbers.add(normalized || session.id);
-  });
-
-  return sessionNumbers.size;
-};
-
 // ===== HELPERS =====
 
 const uid = () => Math.random().toString(36).slice(2, 9);
