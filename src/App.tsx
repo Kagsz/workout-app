@@ -9752,7 +9752,8 @@ export default function App() {
 
     const existingResult = await supabase
       .from("tracker_workout_slots")
-      .select("id, legacy_app_id, position")
+      .select("id, legacy_app_id")
+      .eq("member_id", memberId)
       .eq("workout_id", workoutRow.id);
     if (existingResult.error) throw new Error(existingResult.error.message);
 
@@ -9764,17 +9765,14 @@ export default function App() {
     // Move every existing slot to a unique temporary position before assigning
     // the final order. Temporary positions must remain non-negative because the
     // database enforces a position check constraint.
-    const highestExistingPosition = (existingResult.data || []).reduce(
-      (highest, row) => Math.max(highest, Number(row.position) || 0),
-      0
-    );
-    const temporaryPositionBase = Math.max(1000000, highestExistingPosition + (existingResult.data || []).length + 1);
+    const temporaryPositionBase = 1000000;
     for (let index = 0; index < (existingResult.data || []).length; index += 1) {
       const existingSlot = (existingResult.data || [])[index];
       const temporaryPosition = temporaryPositionBase + index;
       const temporaryResult = await supabase
         .from("tracker_workout_slots")
         .update({ position: temporaryPosition })
+        .eq("member_id", memberId)
         .eq("workout_id", workoutRow.id)
         .eq("id", existingSlot.id);
       if (temporaryResult.error) throw new Error(temporaryResult.error.message);
@@ -9822,6 +9820,7 @@ export default function App() {
       const deleteResult = await supabase
         .from("tracker_workout_slots")
         .delete()
+        .eq("member_id", memberId)
         .eq("workout_id", workoutRow.id)
         .in("id", removedSlotIds);
       if (deleteResult.error) throw new Error(deleteResult.error.message);
@@ -10495,11 +10494,15 @@ export default function App() {
     const workout = trackerWorkouts.find((item) => item.id === workoutId);
     if (!workout) return;
     const nextName = editingTrackerWorkoutName.trim();
-    if (!nextName || !editingTrackerWorkoutMuscleGroup) return;
+    if (!nextName) return;
 
     applyTrackerWorkoutChange(
       workoutId,
-      (current) => ({ ...current, name: nextName, muscleGroup: editingTrackerWorkoutMuscleGroup }),
+      (current) => ({
+        ...current,
+        name: nextName,
+        muscleGroup: editingTrackerWorkoutMuscleGroup || current.muscleGroup,
+      }),
       "metadata",
       `Edit workout "${workout.name}"`
     );
@@ -10657,11 +10660,7 @@ export default function App() {
 
     // Stage existing rows at high positive positions so swaps/reorders cannot
     // collide with the cycle/workout unique position constraint.
-    const highestExistingPosition = (existingResult.data || []).reduce(
-      (highest, row) => Math.max(highest, Number(row.position) || 0),
-      0
-    );
-    const temporaryPositionBase = Math.max(1000000, highestExistingPosition + (existingResult.data || []).length + 1);
+    const temporaryPositionBase = 1000000;
     for (let index = 0; index < (existingResult.data || []).length; index += 1) {
       const existingRelation = (existingResult.data || [])[index];
       const temporaryResult = await supabase
@@ -11358,7 +11357,7 @@ export default function App() {
               {isEditing ? (
                 <>
                   <SmallButton onClick={cancelTrackerWorkoutEdit}>Cancel</SmallButton>
-                  <PrimaryButton onClick={() => saveTrackerWorkoutEdit(normalized.id)} disabled={!editingTrackerWorkoutName.trim() || !editingTrackerWorkoutMuscleGroup}>Done</PrimaryButton>
+                  <PrimaryButton onClick={() => saveTrackerWorkoutEdit(normalized.id)} disabled={!editingTrackerWorkoutName.trim()}>Done</PrimaryButton>
                 </>
               ) : (
                 <>
