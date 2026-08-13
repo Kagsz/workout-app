@@ -9753,7 +9753,6 @@ export default function App() {
     const existingResult = await supabase
       .from("tracker_workout_slots")
       .select("id, legacy_app_id, position")
-      .eq("member_id", memberId)
       .eq("workout_id", workoutRow.id);
     if (existingResult.error) throw new Error(existingResult.error.message);
 
@@ -9776,7 +9775,6 @@ export default function App() {
       const temporaryResult = await supabase
         .from("tracker_workout_slots")
         .update({ position: temporaryPosition })
-        .eq("member_id", memberId)
         .eq("workout_id", workoutRow.id)
         .eq("id", existingSlot.id);
       if (temporaryResult.error) throw new Error(temporaryResult.error.message);
@@ -9824,7 +9822,6 @@ export default function App() {
       const deleteResult = await supabase
         .from("tracker_workout_slots")
         .delete()
-        .eq("member_id", memberId)
         .eq("workout_id", workoutRow.id)
         .in("id", removedSlotIds);
       if (deleteResult.error) throw new Error(deleteResult.error.message);
