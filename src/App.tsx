@@ -10521,21 +10521,6 @@ export default function App() {
 
   const workoutHasAnyData = (workout: TrackerWorkout | null | undefined) => Boolean(workout?.startedAt || workout?.completedAt || normalizeTrackerWorkout(workout as TrackerWorkout).exerciseSlots?.some((slot) => (slot.entries || []).length));
 
-  const renameTrackerWorkout = (workoutId: string) => {
-    const workout = trackerWorkouts.find((item) => item.id === workoutId);
-    if (!workout) return;
-
-    const nextName = window.prompt("Workout name", workout.name)?.trim();
-    if (!nextName || nextName === workout.name) return;
-
-    applyTrackerWorkoutChange(
-      workoutId,
-      (current) => ({ ...current, name: nextName }),
-      "metadata",
-      `Rename workout "${workout.name}" to "${nextName}"`
-    );
-  };
-
   const archiveTrackerWorkout = (workoutId: string, skipConfirm = false) => {
     const workout = trackerWorkouts.find((item) => item.id === workoutId);
     if (workout && !skipConfirm && !window.confirm(`Archive ${workout.name}?`)) return;
@@ -15407,7 +15392,7 @@ export default function App() {
                   <div className="pointer-events-none">
                     <div className="text-2xl">🗑️</div>
                     <div className="mt-1 text-[10px] font-bold uppercase tracking-wide">
-                      {trackerDragPayload.kind === "workoutExercise" || trackerDragPayload.kind === "cycleWorkout" ? "Remove" : "Archive"}
+                      {trackerDragPayload.kind === "cycleWorkout" ? "Remove" : "Archive"}
                     </div>
                   </div>
                 </div>
