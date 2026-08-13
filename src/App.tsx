@@ -9752,7 +9752,7 @@ export default function App() {
 
     const existingResult = await supabase
       .from("tracker_workout_slots")
-      .select("id, legacy_app_id")
+      .select("id, legacy_app_id, position")
       .eq("member_id", memberId)
       .eq("workout_id", workoutRow.id);
     if (existingResult.error) throw new Error(existingResult.error.message);
@@ -9765,7 +9765,11 @@ export default function App() {
     // Move every existing slot to a unique temporary position before assigning
     // the final order. Temporary positions must remain non-negative because the
     // database enforces a position check constraint.
-    const temporaryPositionBase = 1000000;
+    const highestExistingPosition = (existingResult.data || []).reduce(
+      (highest, row) => Math.max(highest, Number(row.position) || 0),
+      0
+    );
+    const temporaryPositionBase = Math.max(1000000, highestExistingPosition + (existingResult.data || []).length + 1);
     for (let index = 0; index < (existingResult.data || []).length; index += 1) {
       const existingSlot = (existingResult.data || [])[index];
       const temporaryPosition = temporaryPositionBase + index;
@@ -10656,7 +10660,11 @@ export default function App() {
 
     // Stage existing rows at high positive positions so swaps/reorders cannot
     // collide with the cycle/workout unique position constraint.
-    const temporaryPositionBase = 1000000;
+    const highestExistingPosition = (existingResult.data || []).reduce(
+      (highest, row) => Math.max(highest, Number(row.position) || 0),
+      0
+    );
+    const temporaryPositionBase = Math.max(1000000, highestExistingPosition + (existingResult.data || []).length + 1);
     for (let index = 0; index < (existingResult.data || []).length; index += 1) {
       const existingRelation = (existingResult.data || [])[index];
       const temporaryResult = await supabase
