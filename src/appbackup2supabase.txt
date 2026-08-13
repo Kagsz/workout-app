@@ -110,6 +110,8 @@ type TrackerWorkout = {
   id: string;
   memberId: string;
   name: string;
+  muscleGroup?: MuscleGroup;
+  position?: number;
   exerciseIds: string[];
   exerciseSlots?: TrackerWorkoutExerciseSlot[];
   startedAt?: string;
@@ -192,6 +194,18 @@ type TrackerExerciseSortMode =
   | "muscleToeHead";
 
 type TrackerWorkoutSortMode =
+  | "manual"
+  | "recent"
+  | "mostUsed"
+  | "alphaAsc"
+  | "alphaDesc"
+  | "newest"
+  | "oldest"
+  | "muscleHeadToe"
+  | "muscleToeHead";
+
+type TrackerCycleSortMode =
+  | "recent"
   | "alphaAsc"
   | "alphaDesc"
   | "newest"
@@ -6062,6 +6076,7 @@ export default function App() {
   const [newTrackerExerciseName, setNewTrackerExerciseName] = useState("");
   const [newTrackerExerciseMuscleGroup, setNewTrackerExerciseMuscleGroup] = useState<MuscleGroup>("Chest");
   const [newWorkoutName, setNewWorkoutName] = useState("");
+  const [newWorkoutMuscleGroup, setNewWorkoutMuscleGroup] = useState<MuscleGroup | "">("");
   const [newCycleName, setNewCycleName] = useState("");
   const [selectedWorkoutExerciseId, setSelectedWorkoutExerciseId] = useState("");
   const [selectedCycleWorkoutId, setSelectedCycleWorkoutId] = useState("");
@@ -6070,7 +6085,11 @@ export default function App() {
   const [trackerWorkoutReturnCycleId, setTrackerWorkoutReturnCycleId] = useState<string | null>(null);
   const [trackerTab, setTrackerTab] = useState<"exercises" | "workouts" | "cycles">("exercises");
   const [trackerExerciseSortMode, setTrackerExerciseSortMode] = useState<TrackerExerciseSortMode>("newest");
-  const [trackerWorkoutSortMode, setTrackerWorkoutSortMode] = useState<TrackerWorkoutSortMode>("newest");
+  const [trackerExerciseSearch, setTrackerExerciseSearch] = useState("");
+  const [trackerWorkoutSortMode, setTrackerWorkoutSortMode] = useState<TrackerWorkoutSortMode>("recent");
+  const [trackerWorkoutSearch, setTrackerWorkoutSearch] = useState("");
+  const [trackerCycleSortMode, setTrackerCycleSortMode] = useState<TrackerCycleSortMode>("recent");
+  const [trackerCycleSearch, setTrackerCycleSearch] = useState("");
   const [bulkExerciseWorkoutId, setBulkExerciseWorkoutId] = useState<string | null>(null);
   const [selectedBulkExerciseIds, setSelectedBulkExerciseIds] = useState<string[]>([]);
   const [bulkWorkoutCycleId, setBulkWorkoutCycleId] = useState<string | null>(null);
@@ -7310,6 +7329,8 @@ export default function App() {
           legacy_source_owner: sourceOwner(workout.memberId),
           legacy_app_id: workout.id,
           name: workout.name || "Unnamed workout",
+          muscle_group: workout.muscleGroup || null,
+          position: workout.position ?? null,
           started_at: parseTimestamp(workout.startedAt),
           completed_at: parseTimestamp(workout.completedAt),
           circuit_target: workout.circuitTarget ?? null,
@@ -7550,6 +7571,14 @@ export default function App() {
     return sortedExercises;
   }, [trackerExercises, selectedMember?.id, trackerExerciseSortMode]);
 
+  const visibleTrackerExercises = useMemo(() => {
+    const query = trackerExerciseSearch.trim().toLowerCase();
+    if (!query) return activeTrackerExercises;
+    return activeTrackerExercises.filter((exercise) =>
+      `${exercise.name} ${exercise.muscleGroup}`.toLowerCase().includes(query)
+    );
+  }, [activeTrackerExercises, trackerExerciseSearch]);
+
   const archivedTrackerExercises = useMemo(
     () =>
       trackerExercises
@@ -7563,30 +7592,90 @@ export default function App() {
       trackerWorkouts
         .map(normalizeTrackerWorkout)
         .filter((workout) => workout.memberId === selectedMember?.id && !workout.archived)
-        .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
+        .sort((a, b) => {
+          const aPosition = Number.isFinite(Number(a.position)) ? Number(a.position) : Number.MAX_SAFE_INTEGER;
+          const bPosition = Number.isFinite(Number(b.position)) ? Number(b.position) : Number.MAX_SAFE_INTEGER;
+          return aPosition - bPosition || getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt);
+        }),
     [trackerWorkouts, selectedMember?.id]
   );
+
+  const getWorkoutLastUsedTime = (workout: TrackerWorkout) => {
+    const slotEntryTimes = (workout.exerciseSlots || [])
+      .flatMap((slot) => slot.entries || [])
+      .map((entry) => getSafeDateTime(entry.createdAt || entry.entryDate || ""));
+    return Math.max(
+      getSafeDateTime(workout.completedAt || ""),
+      getSafeDateTime(workout.startedAt || ""),
+      ...slotEntryTimes,
+      0
+    );
+  };
+
+  const getWorkoutUsageCount = (workout: TrackerWorkout) =>
+    (workout.exerciseSlots || []).reduce((total, slot) => total + (slot.entries || []).length, 0);
 
   const sortedTrackerWorkoutOptions = useMemo(() => {
     const sortedWorkouts = [...activeTrackerWorkouts];
 
     sortedWorkouts.sort((a, b) => {
+      if (trackerWorkoutSortMode === "manual") {
+        const aPosition = Number.isFinite(Number(a.position)) ? Number(a.position) : Number.MAX_SAFE_INTEGER;
+        const bPosition = Number.isFinite(Number(b.position)) ? Number(b.position) : Number.MAX_SAFE_INTEGER;
+        return aPosition - bPosition || getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt);
+      }
+      if (trackerWorkoutSortMode === "recent") return getWorkoutLastUsedTime(b) - getWorkoutLastUsedTime(a) || b.name.localeCompare(a.name);
+      if (trackerWorkoutSortMode === "mostUsed") return getWorkoutUsageCount(b) - getWorkoutUsageCount(a) || getWorkoutLastUsedTime(b) - getWorkoutLastUsedTime(a);
       if (trackerWorkoutSortMode === "alphaAsc") return a.name.localeCompare(b.name);
       if (trackerWorkoutSortMode === "alphaDesc") return b.name.localeCompare(a.name);
       if (trackerWorkoutSortMode === "oldest") return getSafeDateTime(a.createdAt) - getSafeDateTime(b.createdAt);
+      if (trackerWorkoutSortMode === "muscleHeadToe") {
+        const aGroup = a.muscleGroup ? getMuscleGroupSortIndex(a.muscleGroup) : Number.MAX_SAFE_INTEGER;
+        const bGroup = b.muscleGroup ? getMuscleGroupSortIndex(b.muscleGroup) : Number.MAX_SAFE_INTEGER;
+        return aGroup - bGroup || a.name.localeCompare(b.name);
+      }
+      if (trackerWorkoutSortMode === "muscleToeHead") {
+        const aGroup = a.muscleGroup ? getMuscleGroupSortIndex(a.muscleGroup) : -1;
+        const bGroup = b.muscleGroup ? getMuscleGroupSortIndex(b.muscleGroup) : -1;
+        return bGroup - aGroup || a.name.localeCompare(b.name);
+      }
       return getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt);
     });
 
     return sortedWorkouts;
   }, [activeTrackerWorkouts, trackerWorkoutSortMode]);
 
+  const visibleTrackerWorkouts = useMemo(() => {
+    const query = trackerWorkoutSearch.trim().toLowerCase();
+    if (!query) return sortedTrackerWorkoutOptions;
+    return sortedTrackerWorkoutOptions.filter((workout) =>
+      `${workout.name} ${workout.muscleGroup || ""}`.toLowerCase().includes(query)
+    );
+  }, [sortedTrackerWorkoutOptions, trackerWorkoutSearch]);
+
   const activeTrackerCycles = useMemo(
     () =>
       trackerCycles
-        .filter((cycle) => cycle.memberId === selectedMember?.id && !cycle.archived)
-        .sort((a, b) => getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt)),
+        .filter((cycle) => cycle.memberId === selectedMember?.id && !cycle.archived),
     [trackerCycles, selectedMember?.id]
   );
+
+  const visibleTrackerCycles = useMemo(() => {
+    const query = trackerCycleSearch.trim().toLowerCase();
+    const cycles = activeTrackerCycles.filter((cycle) => !query || cycle.name.toLowerCase().includes(query));
+
+    return [...cycles].sort((a, b) => {
+      if (trackerCycleSortMode === "alphaAsc") return a.name.localeCompare(b.name);
+      if (trackerCycleSortMode === "alphaDesc") return b.name.localeCompare(a.name);
+      if (trackerCycleSortMode === "oldest") return getSafeDateTime(a.createdAt) - getSafeDateTime(b.createdAt);
+      if (trackerCycleSortMode === "recent") {
+        return Math.max(getSafeDateTime(b.completedAt || ""), getSafeDateTime(b.startedAt || ""), 0)
+          - Math.max(getSafeDateTime(a.completedAt || ""), getSafeDateTime(a.startedAt || ""), 0)
+          || getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt);
+      }
+      return getSafeDateTime(b.createdAt) - getSafeDateTime(a.createdAt);
+    });
+  }, [activeTrackerCycles, trackerCycleSearch, trackerCycleSortMode]);
 
   const archivedTrackerWorkouts = useMemo(
     () => trackerWorkouts.map(normalizeTrackerWorkout).filter((workout) => workout.memberId === selectedMember?.id && workout.archived),
@@ -8675,7 +8764,13 @@ export default function App() {
           appWorkoutIdByDbId.set(row.id, workoutId);
           const slots = slotsByWorkout.get(row.id) || [];
           return normalizeTrackerWorkout({
-            id: workoutId, memberId, name: String(row.name || "Unnamed workout"), exerciseIds: slots.map((slot) => slot.exerciseId), exerciseSlots: slots,
+            id: workoutId,
+            memberId,
+            name: String(row.name || "Unnamed workout"),
+            muscleGroup: row.muscle_group ? String(row.muscle_group) as MuscleGroup : undefined,
+            position: row.position == null ? undefined : Number(row.position),
+            exerciseIds: slots.map((slot) => slot.exerciseId),
+            exerciseSlots: slots,
             startedAt: row.started_at || undefined, completedAt: row.completed_at || undefined,
             circuitTarget: row.circuit_target == null ? undefined : Number(row.circuit_target),
             currentCircuit: row.current_circuit == null ? undefined : Number(row.current_circuit),
@@ -9533,6 +9628,8 @@ export default function App() {
       member_id: memberId,
       legacy_app_id: normalized.id,
       name: normalized.name || "Unnamed workout",
+      muscle_group: normalized.muscleGroup || null,
+      position: normalized.position ?? null,
       started_at: normalized.startedAt || null,
       completed_at: normalized.completedAt || null,
       circuit_target: normalized.circuitTarget ?? null,
@@ -10349,6 +10446,8 @@ export default function App() {
       id: uid(),
       memberId: selectedMember.id,
       name,
+      muscleGroup: newWorkoutMuscleGroup || undefined,
+      position: activeTrackerWorkouts.length,
       exerciseIds: [],
       exerciseSlots: [],
       archived: false,
@@ -10358,6 +10457,7 @@ export default function App() {
     setTrackerWorkouts((current) => [workout, ...current]);
     setSelectedTrackerWorkoutId(workout.id);
     setNewWorkoutName("");
+    setNewWorkoutMuscleGroup("");
 
     void persistTrackerWorkoutMetadata(workout).catch((error) => {
       setTrackerWorkouts((current) => current.filter((item) => item.id !== workout.id));
@@ -11015,6 +11115,35 @@ export default function App() {
   };
 
 
+  const reorderTopLevelWorkoutToTarget = (draggedWorkoutId: string, targetWorkoutId: string) => {
+    if (draggedWorkoutId === targetWorkoutId) return;
+    if (trackerWorkoutSortMode !== "manual" || trackerWorkoutSearch.trim()) return;
+
+    const ordered = [...sortedTrackerWorkoutOptions];
+    const draggedIndex = ordered.findIndex((workout) => workout.id === draggedWorkoutId);
+    const targetIndex = ordered.findIndex((workout) => workout.id === targetWorkoutId);
+    if (draggedIndex < 0 || targetIndex < 0) return;
+
+    const [moved] = ordered.splice(draggedIndex, 1);
+    ordered.splice(targetIndex, 0, moved);
+    const positionById = new Map(ordered.map((workout, index) => [workout.id, index]));
+
+    const previous = trackerWorkouts;
+    const next = trackerWorkouts.map((workout) =>
+      positionById.has(workout.id) ? { ...workout, position: positionById.get(workout.id) } : workout
+    );
+    setTrackerWorkouts(next);
+
+    void Promise.all(
+      next
+        .filter((workout) => positionById.has(workout.id))
+        .map((workout) => persistTrackerWorkoutMetadata(workout))
+    ).catch((error) => {
+      setTrackerWorkouts(previous);
+      showTrackerPersistenceError("Reorder workouts", error);
+    });
+  };
+
   const beginTrackerDrag = (
     event: React.PointerEvent<HTMLElement>,
     payload: TrackerDragPayload
@@ -11071,6 +11200,10 @@ export default function App() {
       if (targetWorkoutId && targetCycleId === payload.containerId) {
         reorderCycleWorkoutToTarget(payload.containerId, payload.itemId, targetWorkoutId);
       }
+    } else if (payload.kind === "workout") {
+      const dropTarget = target?.closest("[data-workout-card-id]") as HTMLElement | null;
+      const targetWorkoutId = dropTarget?.dataset.workoutCardId || "";
+      if (targetWorkoutId) reorderTopLevelWorkoutToTarget(payload.itemId, targetWorkoutId);
     }
 
     trackerDragPayloadRef.current = null;
@@ -11107,13 +11240,17 @@ export default function App() {
           : "border-zinc-200 bg-zinc-50";
 
     return (
-      <div key={normalized.id} className={`rounded-2xl border p-3 ${cardClass}`}>
+      <div
+        key={normalized.id}
+        data-workout-card-id={!cycleContext ? normalized.id : undefined}
+        className={`rounded-2xl border p-3 ${cardClass}`}
+      >
         <div className="flex items-center justify-between gap-3">
           {!cycleContext ? (
             <button
               type="button"
               aria-label={`Drag ${normalized.name}`}
-              title="Drag to archive"
+              title={trackerWorkoutSortMode === "manual" && !trackerWorkoutSearch.trim() ? "Drag to reorder or archive" : "Drag to archive"}
               className="touch-none cursor-grab select-none px-1 py-2 text-lg font-bold text-zinc-400 active:cursor-grabbing"
               {...trackerGripProps({ kind: "workout", itemId: normalized.id })}
             >
@@ -11130,7 +11267,9 @@ export default function App() {
                 {isActiveWorkout && !isComplete ? <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700">Active Workout</span> : null}
                 {isComplete ? <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">Complete</span> : null}
               </div>
-              <div className="text-xs text-zinc-500">{workoutSlots.length} exercises</div>
+              <div className="text-xs text-zinc-500">
+                {normalized.muscleGroup ? `${normalized.muscleGroup} • ` : ""}{workoutSlots.length} exercises
+              </div>
             </div>
           </button>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -14556,30 +14695,40 @@ export default function App() {
                       <div className="mb-3 flex items-start justify-between gap-3">
                         <div>
                           <div className="text-sm font-semibold text-zinc-900">Exercise Library</div>
-                          <div className="text-xs text-zinc-500">Custom exercises only. Program exercises are separate.</div>
                         </div>
                         <div className="text-xs text-zinc-500">{activeTrackerExercises.length}</div>
                       </div>
 
-                      <label className="mb-3 block space-y-1">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sort Exercises</div>
-                        <select
-                          value={trackerExerciseSortMode}
-                          onChange={(event) => setTrackerExerciseSortMode(event.target.value as TrackerExerciseSortMode)}
-                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                        >
-                          <option value="alphaAsc">A → Z</option>
-                          <option value="alphaDesc">Z → A</option>
-                          <option value="newest">Newest Added</option>
-                          <option value="oldest">Oldest Added</option>
-                          <option value="muscleHeadToe">Muscle Group: Head → Toe</option>
-                          <option value="muscleToeHead">Muscle Group: Toe → Head</option>
-                        </select>
-                      </label>
+                      <div className="mb-3 grid grid-cols-2 gap-2">
+                        <label className="space-y-1">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Search</div>
+                          <input
+                            value={trackerExerciseSearch}
+                            onChange={(event) => setTrackerExerciseSearch(event.target.value)}
+                            placeholder="Find exercise"
+                            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                          />
+                        </label>
+                        <label className="space-y-1">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sort</div>
+                          <select
+                            value={trackerExerciseSortMode}
+                            onChange={(event) => setTrackerExerciseSortMode(event.target.value as TrackerExerciseSortMode)}
+                            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                          >
+                            <option value="alphaAsc">A → Z</option>
+                            <option value="alphaDesc">Z → A</option>
+                            <option value="newest">Newest Added</option>
+                            <option value="oldest">Oldest Added</option>
+                            <option value="muscleHeadToe">Muscle: Head → Toe</option>
+                            <option value="muscleToeHead">Muscle: Toe → Head</option>
+                          </select>
+                        </label>
+                      </div>
 
                       <div className="space-y-3">
-                        {activeTrackerExercises.length ? (
-                          activeTrackerExercises.map((exercise) => {
+                        {visibleTrackerExercises.length ? (
+                          visibleTrackerExercises.map((exercise) => {
                             const isExpanded = expandedTrackerExerciseIds.includes(exercise.id);
 
                             return (
@@ -14643,21 +14792,28 @@ export default function App() {
                         <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                           <div className="mb-3 text-sm font-semibold text-zinc-900">New Workout</div>
                           <div className="space-y-3">
-                            <input
-                              value={newWorkoutName}
-                              onChange={(event) => setNewWorkoutName(event.target.value)}
-                              placeholder="Workout name"
-                              className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                            />
+                            <div className="grid grid-cols-[minmax(0,1fr)_150px] gap-2">
+                              <input
+                                value={newWorkoutName}
+                                onChange={(event) => setNewWorkoutName(event.target.value)}
+                                placeholder="Workout name"
+                                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                              />
+                              <select
+                                value={newWorkoutMuscleGroup}
+                                onChange={(event) => setNewWorkoutMuscleGroup(event.target.value as MuscleGroup | "")}
+                                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                              >
+                                <option value="">No Category</option>
+                                {MUSCLE_GROUP_OPTIONS.map((group) => <option key={group} value={group}>{group}</option>)}
+                              </select>
+                            </div>
                             <div className="flex flex-wrap gap-2">
                               {WORKOUT_QUICK_FILL_OPTIONS.map((option) => (
                                 <SmallButton key={option} onClick={() => setNewWorkoutName(option)}>{option}</SmallButton>
                               ))}
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <PrimaryButton onClick={addTrackerWorkout} disabled={!newWorkoutName.trim()}>Create Workout</PrimaryButton>
-                              <SmallButton onClick={() => setTrackerTab("cycles")}>Create Cycle</SmallButton>
-                            </div>
+                            <PrimaryButton onClick={addTrackerWorkout} disabled={!newWorkoutName.trim()}>Create Workout</PrimaryButton>
                           </div>
                         </div>
 
@@ -14669,9 +14825,32 @@ export default function App() {
                             </div>
                             <div className="text-xs text-zinc-500">{activeTrackerWorkouts.length}</div>
                           </div>
+                          <div className="mb-3 grid grid-cols-2 gap-2">
+                            <label className="space-y-1">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Search</div>
+                              <input value={trackerWorkoutSearch} onChange={(event) => setTrackerWorkoutSearch(event.target.value)} placeholder="Find workout" className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500" />
+                            </label>
+                            <label className="space-y-1">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sort</div>
+                              <select value={trackerWorkoutSortMode} onChange={(event) => setTrackerWorkoutSortMode(event.target.value as TrackerWorkoutSortMode)} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500">
+                                <option value="manual">Manual Order</option>
+                                <option value="recent">Recently Used</option>
+                                <option value="mostUsed">Most Used</option>
+                                <option value="alphaAsc">A → Z</option>
+                                <option value="alphaDesc">Z → A</option>
+                                <option value="newest">Newest Added</option>
+                                <option value="oldest">Oldest Added</option>
+                                <option value="muscleHeadToe">Muscle: Head → Toe</option>
+                                <option value="muscleToeHead">Muscle: Toe → Head</option>
+                              </select>
+                            </label>
+                          </div>
+                          {trackerWorkoutSortMode === "manual" && trackerWorkoutSearch.trim() ? (
+                            <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-500">Clear Search to drag workouts into a manual order.</div>
+                          ) : null}
                           <div className="space-y-3">
-                            {activeTrackerWorkouts.length ? (
-                              activeTrackerWorkouts.map((workout) => renderTrackerWorkoutCard(workout))
+                            {visibleTrackerWorkouts.length ? (
+                              visibleTrackerWorkouts.map((workout) => renderTrackerWorkoutCard(workout))
                             ) : (
                               <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No workouts yet. Create one above.</div>
                             )}
@@ -14733,9 +14912,25 @@ export default function App() {
                             <div className="text-xs text-zinc-500">{activeTrackerCycles.length}</div>
                           </div>
                           {selectedTrackerCycle ? <div className="mb-3 rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-500">Selected cycle: <span className="font-semibold text-zinc-700">{selectedTrackerCycle.name}</span></div> : null}
+                          <div className="mb-3 grid grid-cols-2 gap-2">
+                            <label className="space-y-1">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Search</div>
+                              <input value={trackerCycleSearch} onChange={(event) => setTrackerCycleSearch(event.target.value)} placeholder="Find cycle" className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500" />
+                            </label>
+                            <label className="space-y-1">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Sort</div>
+                              <select value={trackerCycleSortMode} onChange={(event) => setTrackerCycleSortMode(event.target.value as TrackerCycleSortMode)} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500">
+                                <option value="recent">Recently Used</option>
+                                <option value="alphaAsc">A → Z</option>
+                                <option value="alphaDesc">Z → A</option>
+                                <option value="newest">Newest Added</option>
+                                <option value="oldest">Oldest Added</option>
+                              </select>
+                            </label>
+                          </div>
                           <div className="space-y-3">
-                            {activeTrackerCycles.length ? (
-                              activeTrackerCycles.map((cycle) => {
+                            {visibleTrackerCycles.length ? (
+                              visibleTrackerCycles.map((cycle) => {
                                 const isExpanded = expandedTrackerCycleIds.includes(cycle.id);
                                 const cycleGapWorkoutId = getCycleGapWorkoutId(cycle);
                                 const hasIncomplete = Boolean(cycleGapWorkoutId);
@@ -14882,24 +15077,31 @@ export default function App() {
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4">
                       <div className="mb-3 text-sm font-semibold text-zinc-900">New Workout</div>
                       <div className="space-y-3">
-                        <input
-                          value={newWorkoutName}
-                          onChange={(event) => setNewWorkoutName(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") addTrackerWorkout();
-                          }}
-                          placeholder="Workout name"
-                          className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
-                        />
+                        <div className="grid grid-cols-[minmax(0,1fr)_150px] gap-2">
+                          <input
+                            value={newWorkoutName}
+                            onChange={(event) => setNewWorkoutName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") addTrackerWorkout();
+                            }}
+                            placeholder="Workout name"
+                            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                          />
+                          <select
+                            value={newWorkoutMuscleGroup}
+                            onChange={(event) => setNewWorkoutMuscleGroup(event.target.value as MuscleGroup | "")}
+                            className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+                          >
+                            <option value="">No Category</option>
+                            {MUSCLE_GROUP_OPTIONS.map((group) => <option key={group} value={group}>{group}</option>)}
+                          </select>
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {WORKOUT_QUICK_FILL_OPTIONS.map((option) => (
                             <SmallButton key={option} onClick={() => setNewWorkoutName(option)}>{option}</SmallButton>
                           ))}
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <PrimaryButton onClick={addTrackerWorkout} disabled={!newWorkoutName.trim()} className="w-full">+ Create Workout</PrimaryButton>
-                          <SmallButton onClick={() => { setScreen("openTracker"); setTrackerTab("cycles"); }}>Create Cycle</SmallButton>
-                        </div>
+                        <PrimaryButton onClick={addTrackerWorkout} disabled={!newWorkoutName.trim()} className="w-full">+ Create Workout</PrimaryButton>
                       </div>
                     </div>
 
@@ -14912,9 +15114,24 @@ export default function App() {
                         <div className="text-xs text-zinc-500">{activeTrackerWorkouts.length}</div>
                       </div>
 
+                      <div className="mb-3 grid grid-cols-2 gap-2">
+                        <input value={trackerWorkoutSearch} onChange={(event) => setTrackerWorkoutSearch(event.target.value)} placeholder="Search workouts" className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500" />
+                        <select value={trackerWorkoutSortMode} onChange={(event) => setTrackerWorkoutSortMode(event.target.value as TrackerWorkoutSortMode)} className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500">
+                          <option value="manual">Manual Order</option>
+                          <option value="recent">Recently Used</option>
+                          <option value="mostUsed">Most Used</option>
+                          <option value="alphaAsc">A → Z</option>
+                          <option value="alphaDesc">Z → A</option>
+                          <option value="newest">Newest Added</option>
+                          <option value="oldest">Oldest Added</option>
+                          <option value="muscleHeadToe">Muscle: Head → Toe</option>
+                          <option value="muscleToeHead">Muscle: Toe → Head</option>
+                        </select>
+                      </div>
+
                       <div className="space-y-3">
-                        {activeTrackerWorkouts.length ? (
-                          activeTrackerWorkouts.map((workout) => renderTrackerWorkoutCard(workout))
+                        {visibleTrackerWorkouts.length ? (
+                          visibleTrackerWorkouts.map((workout) => renderTrackerWorkoutCard(workout))
                         ) : (
                           <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-sm text-zinc-500">No workouts yet. Create one above.</div>
                         )}
@@ -15230,10 +15447,15 @@ export default function App() {
                         onChange={(event) => setTrackerExerciseSortMode(event.target.value as TrackerExerciseSortMode)}
                         className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
                       >
+                        <option value="manual">Manual Order</option>
+                        <option value="recent">Recently Used</option>
+                        <option value="mostUsed">Most Used</option>
                         <option value="alphaAsc">A → Z</option>
                         <option value="alphaDesc">Z → A</option>
                         <option value="newest">Newest Added</option>
                         <option value="oldest">Oldest Added</option>
+                        <option value="muscleHeadToe">Muscle: Head → Toe</option>
+                        <option value="muscleToeHead">Muscle: Toe → Head</option>
                         <option value="muscleHeadToe">Muscle Group: Head → Toe</option>
                         <option value="muscleToeHead">Muscle Group: Toe → Head</option>
                       </select>
