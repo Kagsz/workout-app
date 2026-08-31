@@ -6054,6 +6054,10 @@ export default function App() {
   const programHierarchySaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const programHierarchyWriteQueueRef = useRef<Map<string, Promise<void>>>(new Map());
   const deletingProgramIdsRef = useRef<Set<string>>(new Set());
+  const latestProgramsRef = useRef<Program[]>(programs);
+  const pendingProgramHierarchyRetryRef = useRef<Map<string, { program: Program; actionLabel: string }>>(new Map());
+  const programHierarchyRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  latestProgramsRef.current = programs;
   const [trackerCycles, setTrackerCycles] = useState<TrackerWorkoutCycle[]>(loadTrackerCyclesFromDeclaredSource);
 
 
@@ -9121,9 +9125,73 @@ export default function App() {
     return next;
   };
 
+  const isTransientProgramNetworkError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || "");
+    return /failed to fetch|networkerror|network request failed|load failed/i.test(message);
+  };
+
+  const schedulePendingProgramHierarchyRetry = (programId: string, delayMs = 900) => {
+    const existingRetryTimer = programHierarchyRetryTimersRef.current.get(programId);
+    if (existingRetryTimer) clearTimeout(existingRetryTimer);
+
+    const timer = setTimeout(() => {
+      programHierarchyRetryTimersRef.current.delete(programId);
+      if (deletingProgramIdsRef.current.has(programId)) {
+        pendingProgramHierarchyRetryRef.current.delete(programId);
+        return;
+      }
+
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+
+      const pending = pendingProgramHierarchyRetryRef.current.get(programId);
+      if (!pending) return;
+
+      const latestProgram =
+        latestProgramsRef.current.find((program) => program.id === programId) || pending.program;
+      const position = latestProgramsRef.current.findIndex((program) => program.id === programId);
+
+      pendingProgramHierarchyRetryRef.current.set(programId, {
+        ...pending,
+        program: latestProgram,
+      });
+
+      void enqueueProgramHierarchyWrite(
+        programId,
+        () =>
+          deletingProgramIdsRef.current.has(programId)
+            ? Promise.resolve()
+            : persistProgramHierarchy(latestProgram, position < 0 ? undefined : position)
+      )
+        .then(() => {
+          const currentPending = pendingProgramHierarchyRetryRef.current.get(programId);
+          if (currentPending?.program === latestProgram) {
+            pendingProgramHierarchyRetryRef.current.delete(programId);
+          }
+        })
+        .catch((error) => {
+          if (deletingProgramIdsRef.current.has(programId)) return;
+          if (isTransientProgramNetworkError(error)) {
+            pendingProgramHierarchyRetryRef.current.set(programId, {
+              program:
+                latestProgramsRef.current.find((program) => program.id === programId) || latestProgram,
+              actionLabel: pending.actionLabel,
+            });
+            schedulePendingProgramHierarchyRetry(programId, 1200);
+            return;
+          }
+
+          pendingProgramHierarchyRetryRef.current.delete(programId);
+          showTrackerPersistenceError(pending.actionLabel, error);
+        });
+    }, delayMs);
+
+    programHierarchyRetryTimersRef.current.set(programId, timer);
+  };
+
   const scheduleProgramHierarchySave = (
     nextProgram: Program,
-    previousProgram: Program | null,
+    _previousProgram: Program | null,
     actionLabel = `Save program "${nextProgram.name || "Unnamed program"}"`
   ) => {
     if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
@@ -9135,26 +9203,82 @@ export default function App() {
       programHierarchySaveTimersRef.current.delete(nextProgram.id);
       if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
 
-      const position = programs.findIndex((program) => program.id === nextProgram.id);
+      const latestProgram =
+        latestProgramsRef.current.find((program) => program.id === nextProgram.id) || nextProgram;
+      const position = latestProgramsRef.current.findIndex((program) => program.id === nextProgram.id);
+
       void enqueueProgramHierarchyWrite(
         nextProgram.id,
         () =>
           deletingProgramIdsRef.current.has(nextProgram.id)
             ? Promise.resolve()
-            : persistProgramHierarchy(nextProgram, position < 0 ? undefined : position)
-      ).catch((error) => {
-        if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
-        if (previousProgram) {
-          setPrograms((current) =>
-            current.map((program) => (program.id === previousProgram.id ? previousProgram : program))
-          );
-        }
-        showTrackerPersistenceError(actionLabel, error);
-      });
+            : persistProgramHierarchy(latestProgram, position < 0 ? undefined : position)
+      )
+        .then(() => {
+          const pending = pendingProgramHierarchyRetryRef.current.get(nextProgram.id);
+          if (pending?.program === latestProgram) {
+            pendingProgramHierarchyRetryRef.current.delete(nextProgram.id);
+          }
+        })
+        .catch((error) => {
+          if (deletingProgramIdsRef.current.has(nextProgram.id)) return;
+
+          // A phone can suspend an in-flight fetch when the user switches to
+          // Gallery or another app. Keep the trainer's local edit intact and
+          // retry the newest program snapshot when the app is active again.
+          if (isTransientProgramNetworkError(error)) {
+            pendingProgramHierarchyRetryRef.current.set(nextProgram.id, {
+              program:
+                latestProgramsRef.current.find((program) => program.id === nextProgram.id) || latestProgram,
+              actionLabel,
+            });
+            schedulePendingProgramHierarchyRetry(nextProgram.id);
+            return;
+          }
+
+          // Preserve the trainer's entered data even for a real DB error.
+          // Surface the error instead of silently replacing the program with
+          // the previous snapshot.
+          pendingProgramHierarchyRetryRef.current.delete(nextProgram.id);
+          showTrackerPersistenceError(actionLabel, error);
+        });
     }, 450);
 
     programHierarchySaveTimersRef.current.set(nextProgram.id, timer);
   };
+
+  useEffect(() => {
+    const retryPendingProgramSaves = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+
+      for (const programId of pendingProgramHierarchyRetryRef.current.keys()) {
+        schedulePendingProgramHierarchyRetry(programId, 100);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") retryPendingProgramSaves();
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", retryPendingProgramSaves);
+      window.addEventListener("focus", retryPendingProgramSaves);
+    }
+
+    return () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", retryPendingProgramSaves);
+        window.removeEventListener("focus", retryPendingProgramSaves);
+      }
+    };
+  });
 
   const updatePrograms = (updater: (current: Program[]) => Program[]) => {
     const previousPrograms = programs;
@@ -9195,6 +9319,12 @@ export default function App() {
     }
 
     deletingProgramIdsRef.current.add(program.id);
+    pendingProgramHierarchyRetryRef.current.delete(program.id);
+    const pendingRetryTimer = programHierarchyRetryTimersRef.current.get(program.id);
+    if (pendingRetryTimer) {
+      clearTimeout(pendingRetryTimer);
+      programHierarchyRetryTimersRef.current.delete(program.id);
+    }
     setPrograms((current) => current.filter((item) => item.id !== program.id));
 
     void enqueueProgramHierarchyWrite(program.id, async () => {

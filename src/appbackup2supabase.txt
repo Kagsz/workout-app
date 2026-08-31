@@ -10494,11 +10494,15 @@ export default function App() {
     const workout = trackerWorkouts.find((item) => item.id === workoutId);
     if (!workout) return;
     const nextName = editingTrackerWorkoutName.trim();
-    if (!nextName || !editingTrackerWorkoutMuscleGroup) return;
+    if (!nextName) return;
 
     applyTrackerWorkoutChange(
       workoutId,
-      (current) => ({ ...current, name: nextName, muscleGroup: editingTrackerWorkoutMuscleGroup }),
+      (current) => ({
+        ...current,
+        name: nextName,
+        muscleGroup: editingTrackerWorkoutMuscleGroup || current.muscleGroup,
+      }),
       "metadata",
       `Edit workout "${workout.name}"`
     );
@@ -11353,7 +11357,7 @@ export default function App() {
               {isEditing ? (
                 <>
                   <SmallButton onClick={cancelTrackerWorkoutEdit}>Cancel</SmallButton>
-                  <PrimaryButton onClick={() => saveTrackerWorkoutEdit(normalized.id)} disabled={!editingTrackerWorkoutName.trim() || !editingTrackerWorkoutMuscleGroup}>Done</PrimaryButton>
+                  <PrimaryButton onClick={() => saveTrackerWorkoutEdit(normalized.id)} disabled={!editingTrackerWorkoutName.trim()}>Done</PrimaryButton>
                 </>
               ) : (
                 <>
